@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - D&D Campaign Companion</title>
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 2rem;
+            padding: 2rem 0;
+        }
+        
+        .dashboard-card {
+            background: var(--parchment);
+            border: 2px solid var(--border);
+            border-radius: 8px;
+            padding: 1.5rem;
+            box-shadow: 0 4px 6px var(--shadow);
+        }
+        
+        .dashboard-card h2 {
+            font-family: 'Fondamento', cursive;
+            color: var(--ink);
+            margin-bottom: 1rem;
+        }
+        
+        .dashboard-card p {
+            color: var(--ink);
+            margin-bottom: 1rem;
+        }
+        
+        .dashboard-card a {
+            color: var(--accent);
+            text-decoration: none;
+            font-weight: bold;
+        }
+        
+        .dashboard-card a:hover {
+            text-decoration: underline;
+        }
+
+        .dm-card {
+            border-color: #8b0000;
+            background: #fff5f5;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="form-title">Welcome to Your Campaign</h1>
+        
+        <div class="dashboard-grid">
+            <!-- Common cards for all users -->
+            <div class="dashboard-card">
+                <h2>Current Story</h2>
+                <p>Continue your adventure from where you left off.</p>
+                <a href="story.html">View Story →</a>
+            </div>
+            
+            <div class="dashboard-card">
+                <h2>Party Members</h2>
+                <p>Check on your companions and their status.</p>
+                <a href="characters.html">View Characters →</a>
+            </div>
+            
+            <div class="dashboard-card">
+                <h2>World Map</h2>
+                <p>Explore the realm and plan your next journey.</p>
+                <a href="map.html">View Map →</a>
+            </div>
+            
+            <div class="dashboard-card">
+                <h2>Inventory</h2>
+                <p>Manage your equipment and treasures.</p>
+                <a href="inventory.html">View Inventory →</a>
+            </div>
+
+            <!-- DM-only cards -->
+            <div class="dashboard-card dm-card dm-only">
+                <h2>Campaign Management</h2>
+                <p>Create and manage campaign sessions, NPCs, and storylines.</p>
+                <a href="campaign-management.html">Manage Campaign →</a>
+            </div>
+
+            <div class="dashboard-card dm-card dm-only">
+                <h2>Monster Manual</h2>
+                <p>Access and customize monsters for encounters.</p>
+                <a href="monsters.html">View Monsters →</a>
+            </div>
+
+            <div class="dashboard-card dm-card dm-only">
+                <h2>Encounter Builder</h2>
+                <p>Create balanced combat encounters for your party.</p>
+                <a href="encounters.html">Build Encounters →</a>
+            </div>
+
+            <div class="dashboard-card dm-card dm-only">
+                <h2>Loot Generator</h2>
+                <p>Generate treasure hoards and magical items.</p>
+                <a href="loot.html">Generate Loot →</a>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/auth.js"></script>
+    <script src="js/navigation.js"></script>
+    <script>
+        // Require authentication for this page
+        requireAuth();
+
+        // Update page title based on role
+        document.addEventListener('DOMContentLoaded', () => {
+            const session = getSession();
+            if (session) {
+                const title = document.querySelector('.form-title');
+                title.textContent = `Welcome, ${session.username}${session.role === 'dm' ? ' (Dungeon Master)' : ''}`;
+            }
+        });
+    </script>
+</body>
+</html> 

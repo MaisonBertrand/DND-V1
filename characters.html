@@ -1,35 +1,257 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Characters | Legends of Eldoria</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <link rel="stylesheet" href="styles.css">
-  <script defer src="characters.js"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Character - D&D Campaign Companion</title>
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        .character-sheet {
+            max-width: 800px;
+            margin: 2rem auto;
+            background: var(--parchment);
+            border: 2px solid var(--border);
+            border-radius: 8px;
+            padding: 2rem;
+        }
+
+        .character-header {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+
+        .character-name {
+            font-size: 2rem;
+            color: var(--ink);
+            margin-bottom: 0.5rem;
+        }
+
+        .character-subtitle {
+            font-size: 1.2rem;
+            color: var(--accent);
+        }
+
+        .character-section {
+            margin-bottom: 2rem;
+        }
+
+        .section-title {
+            font-size: 1.5rem;
+            color: var(--ink);
+            border-bottom: 2px solid var(--border);
+            margin-bottom: 1rem;
+            padding-bottom: 0.5rem;
+        }
+
+        .ability-scores {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .ability-score {
+            text-align: center;
+            padding: 1rem;
+            background: rgba(0, 0, 0, 0.05);
+            border-radius: 4px;
+        }
+
+        .score-value {
+            font-size: 2rem;
+            font-weight: bold;
+            color: var(--accent);
+        }
+
+        .score-modifier {
+            font-size: 1.2rem;
+            color: var(--ink);
+        }
+
+        .proficiency-list {
+            columns: 2;
+            column-gap: 2rem;
+        }
+
+        .proficiency-item {
+            margin-bottom: 0.5rem;
+        }
+
+        .carousel-container {
+            max-width: 1200px;
+            margin: 2rem auto;
+            position: relative;
+            padding: 0 2rem;
+        }
+
+        .carousel {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 2rem;
+            transition: transform 0.3s ease-in-out;
+        }
+
+        .class-card {
+            background: var(--parchment);
+            border: 2px solid var(--border);
+            border-radius: 8px;
+            padding: 1.5rem;
+            text-align: center;
+            transition: transform 0.2s, box-shadow 0.2s;
+            cursor: pointer;
+        }
+
+        .class-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 6px 12px var(--shadow);
+        }
+
+        .class-icon {
+            width: 80px;
+            height: 80px;
+            margin: 0 auto 1rem;
+            background: var(--accent);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .class-icon img {
+            width: 50px;
+            height: 50px;
+            object-fit: contain;
+        }
+
+        .class-name {
+            font-family: 'Fondamento', cursive;
+            font-size: 1.5rem;
+            margin-bottom: 0.5rem;
+            color: var(--ink);
+        }
+
+        .class-description {
+            font-size: 0.9rem;
+            color: var(--ink);
+            margin-bottom: 1rem;
+        }
+
+        .class-stats {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 0.5rem;
+            font-size: 0.8rem;
+            margin-bottom: 1rem;
+        }
+
+        .class-stat {
+            background: rgba(0, 0, 0, 0.05);
+            padding: 0.25rem;
+            border-radius: 4px;
+        }
+
+        .carousel-button {
+            position: absolute;
+            top: 50%;
+            transform: translateY(-50%);
+            background: var(--accent);
+            border: none;
+            color: white;
+            padding: 1rem;
+            cursor: pointer;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+            z-index: 1;
+        }
+
+        .carousel-button.prev {
+            left: 0;
+        }
+
+        .carousel-button.next {
+            right: 0;
+        }
+
+        .create-character-btn {
+            display: none;
+            background: var(--accent);
+            color: white;
+            border: none;
+            padding: 1rem 2rem;
+            border-radius: 4px;
+            font-size: 1.1rem;
+            cursor: pointer;
+            margin-top: 1rem;
+        }
+
+        .create-character-btn:hover {
+            background: var(--accent-dark);
+        }
+
+        .auth-required-message {
+            text-align: center;
+            margin-top: 1rem;
+            color: var(--ink);
+        }
+
+        .selected {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 2px var(--accent);
+        }
+
+        .features-list {
+            list-style: none;
+            padding: 0;
+        }
+
+        .feature-item {
+            margin-bottom: 1rem;
+            padding: 1rem;
+            background: rgba(0, 0, 0, 0.05);
+            border-radius: 4px;
+        }
+
+        .feature-name {
+            font-weight: bold;
+            color: var(--accent);
+            margin-bottom: 0.5rem;
+        }
+    </style>
 </head>
 <body>
-  <nav class="navbar">
-    <div class="nav-brand">Legends of Eldoria</div>
-    <ul class="nav-links">
-      <li><a href="index.html">Home</a></li>
-      <li><a href="story.html">Story</a></li>
-      <li><a href="map.html">Map</a></li>
-      <li><a href="characters.html" class="active">Characters</a></li>
-      <li><a href="inventory.html">Inventory</a></li>
-      <li><a href="rules.html">Rules & Lore</a></li>
-      <li><a href="schedule.html">Schedule</a></li>
-    </ul>
-  </nav>
-  <main>
-    <section class="parchment">
-      <h1>Party Characters</h1>
-      <div class="character-list" id="character-list">
-        <!-- Character cards inserted by characters.js -->
-      </div>
-    </section>
-  </main>
-  <footer>
-    <p>&copy; 2025 Legends of Eldoria Campaign Companion</p>
-  </footer>
+    <div class="container">
+        <div id="character-display" style="display: none;">
+            <!-- Character sheet will be populated by JavaScript -->
+        </div>
+
+        <div id="class-selection">
+            <h1 class="form-title">Choose Your Class</h1>
+            
+            <div class="carousel-container">
+                <button class="carousel-button prev">←</button>
+                <button class="carousel-button next">→</button>
+                
+                <div class="carousel" id="class-carousel">
+                    <!-- Classes will be populated by JavaScript -->
+                </div>
+            </div>
+
+            <div class="auth-required-message">
+                <p>Sign in to create your character!</p>
+                <a href="login.html" class="btn">Sign In</a>
+            </div>
+
+            <button class="create-character-btn" style="display: none;">Create Character</button>
+        </div>
+    </div>
+
+    <script src="js/auth.js"></script>
+    <script src="js/navigation.js"></script>
+    <script src="js/characters.js"></script>
 </body>
-</html>
+</html> 

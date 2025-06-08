@@ -1,38 +1,98 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Legends of Eldoria – Campaign Companion</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <link rel="stylesheet" href="styles.css">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>D&D Campaign Companion</title>
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        .hero {
+            text-align: center;
+            padding: 4rem 0;
+        }
+        
+        .hero h1 {
+            font-family: 'Fondamento', cursive;
+            font-size: 3rem;
+            color: var(--ink);
+            margin-bottom: 1.5rem;
+        }
+        
+        .hero p {
+            font-size: 1.2rem;
+            max-width: 600px;
+            margin: 0 auto 2rem;
+        }
+        
+        .cta-buttons {
+            display: flex;
+            gap: 1rem;
+            justify-content: center;
+        }
+        
+        .cta-buttons button {
+            width: auto;
+            min-width: 200px;
+        }
+        
+        .features {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 2rem;
+            padding: 4rem 0;
+        }
+        
+        .feature-card {
+            background: var(--parchment);
+            border: 2px solid var(--border);
+            border-radius: 8px;
+            padding: 1.5rem;
+            text-align: center;
+            box-shadow: 0 4px 6px var(--shadow);
+        }
+        
+        .feature-card h3 {
+            font-family: 'Fondamento', cursive;
+            color: var(--ink);
+            margin-bottom: 1rem;
+        }
+    </style>
 </head>
 <body>
-  <nav class="navbar">
-    <div class="nav-brand">Legends of Eldoria</div>
-    <ul class="nav-links">
-      <li><a href="index.html" class="active">Home</a></li>
-      <li><a href="story.html">Story</a></li>
-      <li><a href="map.html">Map</a></li>
-      <li><a href="characters.html">Characters</a></li>
-      <li><a href="inventory.html">Inventory</a></li>
-      <li><a href="rules.html">Rules & Lore</a></li>
-      <li><a href="schedule.html">Schedule</a></li>
-    </ul>
-  </nav>
-  <main>
-    <section class="welcome parchment">
-      <h1>Welcome to Legends of Eldoria</h1>
-      <p>
-        Step into a world of ancient magic, perilous dungeons, and heroic deeds. Eldoria is a land shaped by conflict and legend, where your party's destiny awaits!
-      </p>
-      <h2>Current Party Objective</h2>
-      <div class="current-objective">
-        <strong>Objective:</strong> Investigate the disappearances in the village of Bramblewood and uncover the secrets of the Whispering Forest.
-      </div>
-    </section>
-  </main>
-  <footer>
-    <p>&copy; 2025 Legends of Eldoria Campaign Companion</p>
-  </footer>
+    <div class="container">
+        <section class="hero">
+            <h1>D&D Campaign Companion</h1>
+            <p>Your digital tome for managing your Dungeons & Dragons campaign. Keep track of your story, characters, inventory, and more - all in one place.</p>
+            <div class="cta-buttons">
+                <button onclick="window.location.href='signup.html'" class="auth-link logged-out">Get Started</button>
+                <button onclick="window.location.href='dashboard.html'" class="auth-link logged-in">Continue Adventure</button>
+            </div>
+        </section>
+
+        <section class="features">
+            <div class="feature-card">
+                <h3>Story Tracking</h3>
+                <p>Record your campaign's epic tale as it unfolds, keeping track of key events, NPCs, and plot twists.</p>
+            </div>
+            
+            <div class="feature-card">
+                <h3>Character Management</h3>
+                <p>Manage your party members, their stats, abilities, and development throughout the campaign.</p>
+            </div>
+            
+            <div class="feature-card">
+                <h3>Interactive Maps</h3>
+                <p>Explore your campaign world with interactive maps, marking important locations and discoveries.</p>
+            </div>
+            
+            <div class="feature-card">
+                <h3>Inventory System</h3>
+                <p>Keep track of your party's equipment, treasures, and magical items with our intuitive inventory system.</p>
+            </div>
+        </section>
+    </div>
+
+    <script src="js/auth.js"></script>
+    <script src="js/navigation.js"></script>
 </body>
-</html>
+</html> 

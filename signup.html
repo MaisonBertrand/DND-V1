@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sign Up - D&D Campaign Companion</title>
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        .error-message {
+            color: #dc3545;
+            background-color: #f8d7da;
+            border: 1px solid #f5c6cb;
+            border-radius: 4px;
+            padding: 10px;
+            margin: 10px 0;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="form-container">
+            <h1 class="form-title">Create Your Account</h1>
+            <div id="error-display" class="error-message"></div>
+            <form id="signup-form">
+                <div class="form-group">
+                    <label for="email">Email</label>
+                    <input type="email" id="email" name="email" required>
+                </div>
+                <div class="form-group">
+                    <label for="username">Username</label>
+                    <input type="text" id="username" name="username" required>
+                </div>
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <input type="password" id="password" name="password" required minlength="6">
+                </div>
+                <div class="form-group">
+                    <label for="confirm-password">Confirm Password</label>
+                    <input type="password" id="confirm-password" name="confirm-password" required minlength="6">
+                </div>
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="is-dm" name="is-dm">
+                        I am a Dungeon Master
+                    </label>
+                </div>
+                <button type="submit">Sign Up</button>
+                <p class="text-center mt-2">
+                    Already have an account? <a href="login.html">Sign In</a>
+                </p>
+            </form>
+        </div>
+    </div>
+
+    <!-- Firebase App (the core Firebase SDK) -->
+    <script type="module">
+        import { auth, db } from './js/firebase-config.js';
+        import { createUserWithEmailAndPassword } from 'https://www.gstatic.com/firebasejs/9.x.x/firebase-auth.js';
+        import { doc, setDoc } from 'https://www.gstatic.com/firebasejs/9.x.x/firebase-firestore.js';
+
+        document.getElementById('signup-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const errorDisplay = document.getElementById('error-display');
+            const email = document.getElementById('email').value;
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            const confirmPassword = document.getElementById('confirm-password').value;
+            const isDM = document.getElementById('is-dm').checked;
+
+            if (password !== confirmPassword) {
+                errorDisplay.textContent = 'Passwords do not match';
+                errorDisplay.style.display = 'block';
+                return;
+            }
+
+            try {
+                // Create auth user
+                const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+                
+                // Create user document in Firestore
+                await setDoc(doc(db, 'users', userCredential.user.uid), {
+                    username,
+                    email,
+                    role: isDM ? 'dm' : 'player',
+                    createdAt: new Date().toISOString()
+                });
+
+                window.location.href = 'dashboard.html';
+            } catch (error) {
+                errorDisplay.textContent = error.message;
+                errorDisplay.style.display = 'block';
+                console.error('Signup error:', error);
+            }
+        });
+
+        // Check if user is already logged in
+        auth.onAuthStateChanged((user) => {
+            if (user) {
+                window.location.href = 'dashboard.html';
+            }
+        });
+    </script>
+</body>
+</html> 
