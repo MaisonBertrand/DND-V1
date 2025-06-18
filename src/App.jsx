@@ -4,6 +4,10 @@ import Home from './pages/Home';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
+import CharacterCreation from './pages/CharacterCreation';
+import PartyManagement from './pages/PartyManagement';
+import CampaignManagement from './pages/CampaignManagement';
+import Combat from './pages/Combat';
 
 function App() {
   return (
@@ -16,6 +20,10 @@ function App() {
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />
             <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/character-creation" element={<CharacterCreation />} />
+            <Route path="/party-management" element={<PartyManagement />} />
+            <Route path="/campaign/:partyId" element={<CampaignManagement />} />
+            <Route path="/combat/:partyId" element={<Combat />} />
           </Routes>
         </main>
       </div>
