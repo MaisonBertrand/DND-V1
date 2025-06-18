@@ -29,23 +29,6 @@ export default function Dashboard() {
         </div>
         
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {/* Character Management */}
-          <div className="fantasy-card bg-amber-50">
-            <h2 className="text-xl font-bold text-stone-800 mb-4">Character</h2>
-            <p className="text-stone-600 mb-4">Create and manage your D&D character</p>
-            <div className="space-y-2">
-              <button 
-                onClick={() => navigate('/character-creation')}
-                className="fantasy-button w-full"
-              >
-                Create Character
-              </button>
-              <button className="fantasy-button w-full bg-stone-600 hover:bg-stone-700">
-                View Character
-              </button>
-            </div>
-          </div>
-
           {/* Party Management */}
           <div className="fantasy-card bg-amber-50">
             <h2 className="text-xl font-bold text-stone-800 mb-4">Party</h2>
@@ -115,6 +98,20 @@ export default function Dashboard() {
               </button>
               <button className="fantasy-button w-full bg-stone-600 hover:bg-stone-700">
                 Item Database
+              </button>
+            </div>
+          </div>
+
+          {/* Character Management */}
+          <div className="fantasy-card bg-amber-50">
+            <h2 className="text-xl font-bold text-stone-800 mb-4">Character</h2>
+            <p className="text-stone-600 mb-4">View and manage your characters</p>
+            <div className="space-y-2">
+              <button className="fantasy-button w-full">
+                View Characters
+              </button>
+              <button className="fantasy-button w-full bg-stone-600 hover:bg-stone-700">
+                Character Sheets
               </button>
             </div>
           </div>

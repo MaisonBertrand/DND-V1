@@ -1,12 +1,14 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { onAuthChange } from '../firebase/auth';
-import { saveCharacter } from '../firebase/database';
+import { saveCharacter, getCharacterByUserAndParty } from '../firebase/database';
 
 export default function CharacterCreation() {
   const navigate = useNavigate();
+  const { partyId } = useParams();
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [existingCharacter, setExistingCharacter] = useState(null);
   const [character, setCharacter] = useState({
     // Basic Info
     name: '',
@@ -59,9 +61,21 @@ export default function CharacterCreation() {
         return;
       }
       setUser(user);
+      if (partyId) {
+        checkExistingCharacter(user.uid, partyId);
+      }
     });
     return () => unsubscribe();
-  }, [navigate]);
+  }, [navigate, partyId]);
+
+  const checkExistingCharacter = async (userId, partyId) => {
+    try {
+      const existing = await getCharacterByUserAndParty(userId, partyId);
+      setExistingCharacter(existing);
+    } catch (error) {
+      console.error('Error checking existing character:', error);
+    }
+  };
 
   const races = [
     'Human', 'Elf', 'Dwarf', 'Halfling', 'Dragonborn', 'Tiefling', 
@@ -93,16 +107,21 @@ export default function CharacterCreation() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     
-    if (!user) {
-      alert('You must be logged in to create a character');
+    if (!user || !partyId) {
+      alert('You must be logged in and in a party to create a character');
+      return;
+    }
+
+    if (existingCharacter) {
+      alert('You already have a character in this party');
       return;
     }
 
     setLoading(true);
     try {
-      await saveCharacter(user.uid, character);
+      await saveCharacter(user.uid, partyId, character);
       alert('Character created successfully!');
-      navigate('/dashboard');
+      navigate(`/campaign/${partyId}`);
     } catch (error) {
       console.error('Error creating character:', error);
       alert('Error creating character. Please try again.');
@@ -115,10 +134,42 @@ export default function CharacterCreation() {
     return null;
   }
 
+  if (existingCharacter) {
+    return (
+      <div className="fantasy-container py-8">
+        <div className="fantasy-card">
+          <h1 className="fantasy-title text-center">Character Already Created</h1>
+          <div className="text-center py-8">
+            <p className="text-stone-600 mb-4">
+              You already have a character in this party: <strong>{existingCharacter.name}</strong>
+            </p>
+            <div className="space-y-4">
+              <button
+                onClick={() => navigate(`/campaign/${partyId}`)}
+                className="fantasy-button"
+              >
+                Go to Campaign
+              </button>
+              <button
+                onClick={() => navigate('/party-management')}
+                className="fantasy-button bg-stone-600 hover:bg-stone-700"
+              >
+                Back to Parties
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="fantasy-container py-8">
       <div className="fantasy-card">
         <h1 className="fantasy-title text-center">Create Your Character</h1>
+        <p className="text-center text-stone-600 mb-6">
+          Create your character for this campaign. You can only have one character per party.
+        </p>
         
         <form onSubmit={handleSubmit} className="space-y-8">
           {/* Basic Information */}
@@ -377,13 +428,20 @@ export default function CharacterCreation() {
           </div>
 
           {/* Submit Button */}
-          <div className="flex justify-center">
+          <div className="flex justify-center space-x-4">
             <button 
               type="submit" 
               className="fantasy-button text-lg px-8 py-3"
               disabled={loading}
             >
               {loading ? 'Creating Character...' : 'Create Character'}
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate(`/campaign/${partyId}`)}
+              className="fantasy-button text-lg px-8 py-3 bg-stone-600 hover:bg-stone-700"
+            >
+              Cancel
             </button>
           </div>
         </form>

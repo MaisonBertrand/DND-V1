@@ -15,11 +15,12 @@ import {
 import { db } from './config';
 
 // Character Management
-export const saveCharacter = async (userId, characterData) => {
+export const saveCharacter = async (userId, partyId, characterData) => {
   try {
     const character = {
       ...characterData,
       userId,
+      partyId,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp()
     };
@@ -45,6 +46,45 @@ export const getUserCharacters = async (userId) => {
     }));
   } catch (error) {
     console.error('Error getting user characters:', error);
+    throw error;
+  }
+};
+
+export const getCharacterByUserAndParty = async (userId, partyId) => {
+  try {
+    const q = query(
+      collection(db, 'characters'),
+      where('userId', '==', userId),
+      where('partyId', '==', partyId)
+    );
+    const querySnapshot = await getDocs(q);
+    
+    if (querySnapshot.empty) {
+      return null;
+    }
+    
+    const doc = querySnapshot.docs[0];
+    return { id: doc.id, ...doc.data() };
+  } catch (error) {
+    console.error('Error getting character by user and party:', error);
+    throw error;
+  }
+};
+
+export const getPartyCharacters = async (partyId) => {
+  try {
+    const q = query(
+      collection(db, 'characters'),
+      where('partyId', '==', partyId),
+      orderBy('createdAt', 'desc')
+    );
+    const querySnapshot = await getDocs(q);
+    return querySnapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    }));
+  } catch (error) {
+    console.error('Error getting party characters:', error);
     throw error;
   }
 };

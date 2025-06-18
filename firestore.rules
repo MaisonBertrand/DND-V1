@@ -1,10 +1,16 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Users can only access their own characters
+    // Users can only access their own characters within parties they're members of
     match /characters/{characterId} {
-      allow read, write: if request.auth != null && request.auth.uid == resource.data.userId;
-      allow create: if request.auth != null && request.auth.uid == request.resource.data.userId;
+      allow read, write: if request.auth != null && 
+        request.auth.uid == resource.data.userId &&
+        exists(/databases/$(database)/documents/parties/$(resource.data.partyId)) &&
+        request.auth.uid in get(/databases/$(database)/documents/parties/$(resource.data.partyId)).data.members;
+      allow create: if request.auth != null && 
+        request.auth.uid == request.resource.data.userId &&
+        exists(/databases/$(database)/documents/parties/$(request.resource.data.partyId)) &&
+        request.auth.uid in get(/databases/$(database)/documents/parties/$(request.resource.data.partyId)).data.members;
     }
     
     // Users can only access parties they are members of

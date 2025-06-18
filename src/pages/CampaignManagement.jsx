@@ -1,8 +1,15 @@
-import { useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { onAuthChange } from '../firebase/auth';
+import { getCharacterByUserAndParty, getPartyCharacters } from '../firebase/database';
 
 export default function CampaignManagement() {
   const { partyId } = useParams();
+  const navigate = useNavigate();
+  const [user, setUser] = useState(null);
+  const [userCharacter, setUserCharacter] = useState(null);
+  const [partyCharacters, setPartyCharacters] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('story');
   const [story, setStory] = useState({
     title: '',
@@ -13,6 +20,36 @@ export default function CampaignManagement() {
     image: '/placeholder-map.png',
     description: ''
   });
+
+  useEffect(() => {
+    const unsubscribe = onAuthChange((user) => {
+      if (!user) {
+        navigate('/login');
+        return;
+      }
+      setUser(user);
+      if (partyId) {
+        loadPartyData(user.uid, partyId);
+      }
+    });
+    return () => unsubscribe();
+  }, [navigate, partyId]);
+
+  const loadPartyData = async (userId, partyId) => {
+    try {
+      setLoading(true);
+      const [character, characters] = await Promise.all([
+        getCharacterByUserAndParty(userId, partyId),
+        getPartyCharacters(partyId)
+      ]);
+      setUserCharacter(character);
+      setPartyCharacters(characters);
+    } catch (error) {
+      console.error('Error loading party data:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const tabs = [
     { id: 'story', label: 'Story Planning' },
@@ -56,10 +93,57 @@ export default function CampaignManagement() {
     ]);
   };
 
+  if (!user || loading) {
+    return (
+      <div className="fantasy-container py-8">
+        <div className="fantasy-card">
+          <div className="text-center py-8">
+            <p className="text-stone-600">Loading...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Show character creation if user doesn't have a character
+  if (!userCharacter) {
+    return (
+      <div className="fantasy-container py-8">
+        <div className="fantasy-card">
+          <h1 className="fantasy-title text-center">Create Your Character</h1>
+          <div className="text-center py-8">
+            <p className="text-stone-600 mb-6">
+              You need to create a character before you can access the campaign.
+            </p>
+            <div className="space-y-4">
+              <button
+                onClick={() => navigate(`/character-creation/${partyId}`)}
+                className="fantasy-button text-lg px-8 py-3"
+              >
+                Create Character
+              </button>
+              <button
+                onClick={() => navigate('/party-management')}
+                className="fantasy-button text-lg px-8 py-3 bg-stone-600 hover:bg-stone-700"
+              >
+                Back to Parties
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="fantasy-container py-8">
       <div className="fantasy-card">
-        <h1 className="fantasy-title mb-6">Campaign Management</h1>
+        <div className="flex justify-between items-center mb-6">
+          <h1 className="fantasy-title mb-0">Campaign Management</h1>
+          <div className="text-sm text-stone-600">
+            Playing as: <span className="font-medium">{userCharacter.name}</span>
+          </div>
+        </div>
 
         {/* Tab Navigation */}
         <div className="flex space-x-1 mb-6 bg-stone-100 p-1 rounded-lg">
@@ -227,9 +311,32 @@ export default function CampaignManagement() {
         {activeTab === 'characters' && (
           <div>
             <h3 className="text-xl font-bold text-stone-800 mb-4">Party Characters</h3>
-            <div className="text-center py-8 text-stone-600">
-              <p>Character information will be displayed here once players join the party.</p>
-            </div>
+            {partyCharacters.length === 0 ? (
+              <div className="text-center py-8 text-stone-600">
+                <p>No characters have been created yet.</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {partyCharacters.map(character => (
+                  <div key={character.id} className="fantasy-card bg-amber-50">
+                    <div className="flex items-start space-x-4">
+                      <div className="w-16 h-16 bg-stone-300 rounded-lg flex items-center justify-center">
+                        <span className="text-xs text-stone-600">IMG</span>
+                      </div>
+                      <div className="flex-1">
+                        <h4 className="font-bold text-stone-800">{character.name}</h4>
+                        <p className="text-sm text-stone-600">
+                          Level {character.level} {character.race} {character.class}
+                        </p>
+                        <p className="text-sm text-stone-600 mt-1">
+                          {character.background} • {character.alignment}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 

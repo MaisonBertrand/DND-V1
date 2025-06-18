@@ -20,7 +20,7 @@ function App() {
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />
             <Route path="/dashboard" element={<Dashboard />} />
-            <Route path="/character-creation" element={<CharacterCreation />} />
+            <Route path="/character-creation/:partyId" element={<CharacterCreation />} />
             <Route path="/party-management" element={<PartyManagement />} />
             <Route path="/campaign/:partyId" element={<CampaignManagement />} />
             <Route path="/combat/:partyId" element={<Combat />} />
