@@ -17,6 +17,8 @@ service cloud.firestore {
     match /parties/{partyId} {
       allow read, write: if request.auth != null && request.auth.uid in resource.data.members;
       allow create: if request.auth != null && request.auth.uid == request.resource.data.dmId;
+      // Allow listing parties where user is a member (needed for getUserParties query)
+      allow list: if request.auth != null;
     }
     
     // Users can only access campaigns for parties they are members of
