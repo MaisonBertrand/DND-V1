@@ -111,6 +111,20 @@ export default function CharacterCreation() {
       return;
     }
 
+    if (!partyId) {
+      alert('Party ID is missing. Please try again or contact support.');
+      return;
+    }
+
+    // Validate required fields
+    const requiredFields = ['name', 'race', 'class'];
+    const missingFields = requiredFields.filter(field => !character[field]);
+    
+    if (missingFields.length > 0) {
+      alert(`Please fill in all required fields: ${missingFields.join(', ')}`);
+      return;
+    }
+
     setLoading(true);
     try {
       const characterData = {
@@ -120,10 +134,11 @@ export default function CharacterCreation() {
         createdAt: new Date()
       };
 
-      await saveCharacter(characterData);
+      await saveCharacter(user.uid, partyId, characterData);
       alert('Character created successfully!');
-      navigate(`/campaign/${partyId}`);
+      navigate(`/campaign-story/${partyId}`);
     } catch (error) {
+      console.error('Character creation error:', error);
       alert('Error creating character: ' + error.message);
     } finally {
       setLoading(false);
@@ -408,6 +423,119 @@ export default function CharacterCreation() {
               rows="6"
               placeholder="Tell the story of your character's life before the adventure..."
             />
+          </div>
+
+          {/* Level and Experience */}
+          <div>
+            <h2 className="text-2xl font-bold text-stone-800 mb-4">Level & Experience</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-stone-700 mb-2">
+                  Level
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  max="20"
+                  value={character.level}
+                  onChange={(e) => handleInputChange('level', parseInt(e.target.value))}
+                  className="fantasy-input"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-stone-700 mb-2">
+                  Experience Points
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  value={character.experience || 0}
+                  onChange={(e) => handleInputChange('experience', parseInt(e.target.value))}
+                  className="fantasy-input"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Spell Management */}
+          {['Wizard', 'Sorcerer', 'Warlock', 'Cleric', 'Druid', 'Bard', 'Paladin', 'Ranger'].includes(character.class) && (
+            <div>
+              <h2 className="text-2xl font-bold text-stone-800 mb-4">Spells</h2>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-stone-700 mb-2">
+                    Spellcasting Ability
+                  </label>
+                  <select
+                    value={character.spellcastingAbility || ''}
+                    onChange={(e) => handleInputChange('spellcastingAbility', e.target.value)}
+                    className="fantasy-input"
+                  >
+                    <option value="">Select Ability</option>
+                    <option value="intelligence">Intelligence</option>
+                    <option value="wisdom">Wisdom</option>
+                    <option value="charisma">Charisma</option>
+                  </select>
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-stone-700 mb-2">
+                    Known Spells
+                  </label>
+                  <textarea
+                    value={character.spells?.join('\n') || ''}
+                    onChange={(e) => handleInputChange('spells', e.target.value.split('\n').filter(spell => spell.trim()))}
+                    className="fantasy-input"
+                    rows="6"
+                    placeholder="Enter spells, one per line..."
+                  />
+                  <p className="text-sm text-stone-500 mt-1">
+                    Enter each spell on a new line. You can add more spells as you level up.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-stone-700 mb-2">
+                    Spell Slots Available
+                  </label>
+                  <div className="grid grid-cols-5 gap-2">
+                    {[1, 2, 3, 4, 5].map(level => (
+                      <div key={level}>
+                        <label className="block text-xs text-stone-600 mb-1">Level {level}</label>
+                        <input
+                          type="number"
+                          min="0"
+                          max="9"
+                          value={character.spellSlots?.[level] || 0}
+                          onChange={(e) => {
+                            const newSpellSlots = { ...character.spellSlots };
+                            newSpellSlots[level] = parseInt(e.target.value) || 0;
+                            handleInputChange('spellSlots', newSpellSlots);
+                          }}
+                          className="fantasy-input text-center"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Equipment */}
+          <div>
+            <h2 className="text-2xl font-bold text-stone-800 mb-4">Equipment</h2>
+            <textarea
+              value={character.equipment?.join('\n') || ''}
+              onChange={(e) => handleInputChange('equipment', e.target.value.split('\n').filter(item => item.trim()))}
+              className="fantasy-input"
+              rows="4"
+              placeholder="Enter equipment items, one per line..."
+            />
+            <p className="text-sm text-stone-500 mt-1">
+              Enter each item on a new line. You can add more equipment as you acquire it.
+            </p>
           </div>
 
           {/* Character Portrait */}

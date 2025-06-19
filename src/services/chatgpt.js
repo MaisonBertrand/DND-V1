@@ -244,6 +244,88 @@ Make this encounter balanced, engaging, and story-relevant.`;
       throw new Error(`Failed to generate combat encounter: ${error.message}`);
     }
   }
+
+  async generateStoryContinuation(partyCharacters, storyHistory, playerResponse, responseType = 'individual') {
+    try {
+      const characterDetails = partyCharacters.map(char => 
+        `${char.name} - Level ${char.level} ${char.race} ${char.class}`
+      ).join(', ');
+
+      // Build conversation history for context
+      const conversationHistory = storyHistory.map(msg => ({
+        role: msg.role,
+        content: msg.content
+      }));
+
+      const prompt = `As a Dungeon Master, continue the story based on the player's response.
+
+Party: ${characterDetails}
+Player Response: "${playerResponse}" (Type: ${responseType})
+Response Type Context:
+- individual: One character's personal action
+- team: Group action or decision
+- investigate: Looking for clues or information
+- combat: Combat-related action
+- social: Social interaction or diplomacy
+
+Previous Story Context:
+${conversationHistory.map(msg => `${msg.role === 'assistant' ? 'DM' : 'Player'}: ${msg.content}`).join('\n')}
+
+Please provide a compelling continuation that:
+1. Acknowledges the player's action
+2. Advances the story naturally
+3. Creates new opportunities or challenges
+4. Maintains the campaign's tone and pacing
+5. Considers the response type and party composition
+6. Ends with a clear situation for the players to respond to
+
+Keep your response engaging but concise (2-3 paragraphs maximum).`;
+
+      const response = await callBackendAPI([
+        { role: "system", content: this.systemPrompt },
+        ...conversationHistory,
+        { role: "user", content: prompt }
+      ], 'gpt-4', 800, 0.8);
+
+      return response.choices[0].message.content;
+    } catch (error) {
+      console.error('Error generating story continuation:', error);
+      throw new Error(`Failed to generate story continuation: ${error.message}`);
+    }
+  }
+
+  async generatePlotOptions(partyCharacters) {
+    try {
+      const characterDetails = partyCharacters.map(char => 
+        `${char.name} - Level ${char.level} ${char.race} ${char.class}. ${char.personality || ''}. ${char.backstory || ''}`
+      ).join('\n');
+
+      const prompt = `Generate 3 distinct campaign plot options for this party. For each plot, provide a compelling title and a brief summary (2-3 sentences). Format as:
+
+Plot 1: [Title]
+[Summary]
+
+Plot 2: [Title]  
+[Summary]
+
+Plot 3: [Title]
+[Summary]
+
+Party: ${characterDetails}
+
+Make each plot distinct and appealing to different play styles. Consider the party composition when crafting these options.`;
+
+      const response = await callBackendAPI([
+        { role: "system", content: this.systemPrompt },
+        { role: "user", content: prompt }
+      ], 'gpt-4', 600, 0.8);
+
+      return response.choices[0].message.content;
+    } catch (error) {
+      console.error('Error generating plot options:', error);
+      throw new Error(`Failed to generate plot options: ${error.message}`);
+    }
+  }
 }
 
 export const dungeonMasterService = new DungeonMasterService(); 

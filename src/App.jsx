@@ -8,6 +8,7 @@ import CharacterCreation from './pages/CharacterCreation';
 import PartyManagement from './pages/PartyManagement';
 import CampaignManagement from './pages/CampaignManagement';
 import Combat from './pages/Combat';
+import CampaignStory from './components/CampaignStory';
 
 function App() {
   return (
@@ -23,6 +24,7 @@ function App() {
             <Route path="/character-creation/:partyId" element={<CharacterCreation />} />
             <Route path="/party-management" element={<PartyManagement />} />
             <Route path="/campaign/:partyId" element={<CampaignManagement />} />
+            <Route path="/campaign-story/:partyId" element={<CampaignStory />} />
             <Route path="/combat/:partyId" element={<Combat />} />
           </Routes>
         </main>

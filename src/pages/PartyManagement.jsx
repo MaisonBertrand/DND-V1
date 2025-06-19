@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { onAuthChange } from '../firebase/auth';
-import { createParty, getUserParties, joinParty, getPartyByInviteCode } from '../firebase/database';
+import { createParty, getUserParties, joinParty, getPartyByInviteCode, disbandParty } from '../firebase/database';
 
 export default function PartyManagement() {
   const navigate = useNavigate();
@@ -103,6 +103,23 @@ export default function PartyManagement() {
   const copyInviteCode = (code) => {
     navigator.clipboard.writeText(code);
     alert('Invite code copied to clipboard!');
+  };
+
+  const handleDisbandParty = async (partyId, partyName) => {
+    if (!confirm(`Are you sure you want to disband "${partyName}"? This action cannot be undone and will remove all party members and characters.`)) {
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await disbandParty(partyId, user.uid);
+      await loadUserParties(user.uid);
+      alert('Party disbanded successfully');
+    } catch (error) {
+      alert('Error disbanding party: ' + error.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   if (!user) {
@@ -248,7 +265,7 @@ export default function PartyManagement() {
 
                   <div className="flex space-x-2">
                     <button
-                      onClick={() => navigate(`/campaign/${party.id}`)}
+                      onClick={() => navigate(`/campaign-story/${party.id}`)}
                       className="fantasy-button"
                     >
                       Campaign
@@ -259,6 +276,15 @@ export default function PartyManagement() {
                     >
                       Combat
                     </button>
+                    {party.dmId === user.uid && (
+                      <button
+                        onClick={() => handleDisbandParty(party.id, party.name)}
+                        className="fantasy-button bg-red-600 hover:bg-red-700"
+                        disabled={loading}
+                      >
+                        Disband
+                      </button>
+                    )}
                   </div>
                 </div>
               ))}

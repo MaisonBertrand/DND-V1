@@ -166,6 +166,49 @@ export const joinParty = async (partyId, userId) => {
   }
 };
 
+export const disbandParty = async (partyId, dmId) => {
+  try {
+    const partyRef = doc(db, 'parties', partyId);
+    const partyDoc = await getDoc(partyRef);
+    
+    if (!partyDoc.exists()) {
+      throw new Error('Party not found');
+    }
+    
+    const partyData = partyDoc.data();
+    if (partyData.dmId !== dmId) {
+      throw new Error('Only the party leader can disband the party');
+    }
+    
+    // Delete the party
+    await deleteDoc(partyRef);
+    
+    // Delete all characters in this party
+    const charactersQuery = query(
+      collection(db, 'characters'),
+      where('partyId', '==', partyId)
+    );
+    const characterDocs = await getDocs(charactersQuery);
+    
+    const deletePromises = characterDocs.docs.map(doc => deleteDoc(doc.ref));
+    await Promise.all(deletePromises);
+    
+    // Delete campaign story if it exists
+    const storyQuery = query(
+      collection(db, 'campaignStories'),
+      where('partyId', '==', partyId)
+    );
+    const storyDocs = await getDocs(storyQuery);
+    
+    const storyDeletePromises = storyDocs.docs.map(doc => deleteDoc(doc.ref));
+    await Promise.all(storyDeletePromises);
+    
+  } catch (error) {
+    console.error('Error disbanding party:', error);
+    throw error;
+  }
+};
+
 export const getPartyByInviteCode = async (inviteCode) => {
   try {
     const q = query(
@@ -330,4 +373,141 @@ export const subscribeToCombat = (partyId, callback) => {
       callback(null);
     }
   });
+};
+
+// Campaign Story Management
+export const createCampaignStory = async (partyId) => {
+  try {
+    const story = {
+      partyId,
+      status: 'ready_up', // ready_up, voting, storytelling, paused
+      currentPlot: null,
+      storyMessages: [],
+      votingSession: null,
+      readyPlayers: [],
+      lastUpdated: serverTimestamp(),
+      createdAt: serverTimestamp()
+    };
+    const docRef = await addDoc(collection(db, 'campaignStories'), story);
+    return { id: docRef.id, ...story };
+  } catch (error) {
+    console.error('Error creating campaign story:', error);
+    throw error;
+  }
+};
+
+export const getCampaignStory = async (partyId) => {
+  try {
+    const q = query(
+      collection(db, 'campaignStories'),
+      where('partyId', '==', partyId)
+    );
+    const querySnapshot = await getDocs(q);
+    
+    if (querySnapshot.empty) {
+      return null;
+    }
+    
+    const doc = querySnapshot.docs[0];
+    return { id: doc.id, ...doc.data() };
+  } catch (error) {
+    console.error('Error getting campaign story:', error);
+    throw error;
+  }
+};
+
+export const updateCampaignStory = async (storyId, updates) => {
+  try {
+    const storyRef = doc(db, 'campaignStories', storyId);
+    await updateDoc(storyRef, {
+      ...updates,
+      lastUpdated: serverTimestamp()
+    });
+  } catch (error) {
+    console.error('Error updating campaign story:', error);
+    throw error;
+  }
+};
+
+export const addStoryMessage = async (storyId, message) => {
+  try {
+    const storyRef = doc(db, 'campaignStories', storyId);
+    const storyDoc = await getDoc(storyRef);
+    const storyData = storyDoc.data();
+    
+    const newMessage = {
+      id: `msg_${Date.now()}`,
+      ...message,
+      timestamp: serverTimestamp()
+    };
+    
+    await updateDoc(storyRef, {
+      storyMessages: [...storyData.storyMessages, newMessage],
+      lastUpdated: serverTimestamp()
+    });
+    
+    return newMessage;
+  } catch (error) {
+    console.error('Error adding story message:', error);
+    throw error;
+  }
+};
+
+export const castVote = async (storyId, userId, vote) => {
+  try {
+    const storyRef = doc(db, 'campaignStories', storyId);
+    const storyDoc = await getDoc(storyRef);
+    const storyData = storyDoc.data();
+    
+    const currentVotes = storyData.votingSession?.votes || {};
+    const newVotes = { ...currentVotes, [userId]: vote };
+    
+    await updateDoc(storyRef, {
+      votingSession: {
+        ...storyData.votingSession,
+        votes: newVotes
+      },
+      lastUpdated: serverTimestamp()
+    });
+    
+    return newVotes;
+  } catch (error) {
+    console.error('Error casting vote:', error);
+    throw error;
+  }
+};
+
+export const setPlayerReady = async (storyId, userId) => {
+  try {
+    const storyRef = doc(db, 'campaignStories', storyId);
+    const storyDoc = await getDoc(storyRef);
+    const storyData = storyDoc.data();
+    
+    const readyPlayers = storyData.readyPlayers || [];
+    if (!readyPlayers.includes(userId)) {
+      await updateDoc(storyRef, {
+        readyPlayers: [...readyPlayers, userId],
+        lastUpdated: serverTimestamp()
+      });
+    }
+  } catch (error) {
+    console.error('Error setting player ready:', error);
+    throw error;
+  }
+};
+
+export const subscribeToCampaignStory = (storyId, callback) => {
+  try {
+    const storyRef = doc(db, 'campaignStories', storyId);
+    return onSnapshot(storyRef, (doc) => {
+      if (doc.exists()) {
+        callback({ id: doc.id, ...doc.data() });
+      } else {
+        callback(null);
+      }
+    });
+  } catch (error) {
+    console.error('Error subscribing to campaign story:', error);
+    throw error;
+  }
 }; 
