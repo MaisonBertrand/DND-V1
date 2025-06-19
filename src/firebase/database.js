@@ -438,7 +438,7 @@ export const addStoryMessage = async (storyId, message) => {
     const newMessage = {
       id: `msg_${Date.now()}`,
       ...message,
-      timestamp: serverTimestamp()
+      timestamp: new Date()
     };
     
     await updateDoc(storyRef, {

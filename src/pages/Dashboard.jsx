@@ -1,14 +1,12 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { onAuthChange } from '../firebase/auth';
-import { getUserParties, getPartyByInviteCode, joinParty } from '../firebase/database';
+import { getUserParties } from '../firebase/database';
 
 export default function Dashboard() {
   const [user, setUser] = useState(null);
   const [parties, setParties] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [showJoinForm, setShowJoinForm] = useState(false);
-  const [joinCode, setJoinCode] = useState('');
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -34,37 +32,6 @@ export default function Dashboard() {
     }
   };
 
-  const handleJoinParty = async () => {
-    if (!joinCode.trim()) {
-      alert('Please enter an invite code');
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const party = await getPartyByInviteCode(joinCode.toUpperCase());
-      if (!party) {
-        alert('Invalid invite code. Please check and try again.');
-        return;
-      }
-
-      await joinParty(party.id, user.uid);
-      alert('Successfully joined party!');
-      setJoinCode('');
-      setShowJoinForm(false);
-      // Refresh parties list
-      await loadUserParties(user.uid);
-    } catch (error) {
-      alert(error.message || 'Error joining party. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleViewCampaign = (partyId) => {
-    navigate(`/campaign-story/${partyId}`);
-  };
-
   if (!user) {
     return null;
   }
@@ -88,59 +55,19 @@ export default function Dashboard() {
           <h1 className="fantasy-title mb-0">Welcome, {user.email}</h1>
         </div>
         
-        {/* Action Buttons */}
-        <div className="flex space-x-4 mb-8">
-          <button 
-            onClick={() => navigate('/party-management')}
-            className="fantasy-button"
-          >
-            Create Party
-          </button>
-          <button 
-            onClick={() => setShowJoinForm(!showJoinForm)}
-            className="fantasy-button bg-amber-700 hover:bg-amber-800"
-          >
-            Join Party
-          </button>
-        </div>
-
-        {/* Join Party Form */}
-        {showJoinForm && (
-          <div className="fantasy-card bg-amber-50 mb-8">
-            <h2 className="text-xl font-bold text-stone-800 mb-4">Join a Party</h2>
-            <div className="flex space-x-4">
-              <input
-                type="text"
-                value={joinCode}
-                onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
-                className="fantasy-input flex-1"
-                placeholder="Enter party invite code..."
-                maxLength={8}
-              />
-              <button
-                onClick={handleJoinParty}
-                disabled={loading || !joinCode.trim()}
-                className="fantasy-button"
-              >
-                {loading ? 'Joining...' : 'Join'}
-              </button>
-              <button
-                onClick={() => setShowJoinForm(false)}
-                className="fantasy-button bg-stone-600 hover:bg-stone-700"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        )}
-
         {/* Your Parties */}
         <div>
           <h2 className="text-2xl font-bold text-stone-800 mb-6">Your Parties</h2>
           {parties.length === 0 ? (
             <div className="text-center py-8 text-stone-600">
               <p>You haven't joined any parties yet.</p>
-              <p className="text-sm mt-2">Create a party or join one to start your adventure!</p>
+              <p className="text-sm mt-2">Go to the Parties tab to create or join a party!</p>
+              <button
+                onClick={() => navigate('/party-management')}
+                className="fantasy-button mt-4"
+              >
+                Go to Parties
+              </button>
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -158,7 +85,7 @@ export default function Dashboard() {
                   
                   <div className="flex space-x-2">
                     <button
-                      onClick={() => handleViewCampaign(party.id)}
+                      onClick={() => navigate(`/campaign-story/${party.id}`)}
                       className="fantasy-button flex-1"
                     >
                       View Campaign

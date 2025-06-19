@@ -39,9 +39,6 @@ export default function Navbar() {
                 <Link to="/dashboard" className="fantasy-button">
                   Dashboard
                 </Link>
-                <Link to="/character-creation" className="fantasy-button">
-                  Character
-                </Link>
                 <Link to="/party-management" className="fantasy-button">
                   Parties
                 </Link>
