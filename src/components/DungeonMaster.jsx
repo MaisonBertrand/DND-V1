@@ -138,15 +138,6 @@ export default function DungeonMaster({ partyCharacters, onStoryGenerated, onCha
         </div>
       </div>
 
-      {/* API Key Warning */}
-      {!import.meta.env.VITE_OPENAI_API_KEY && (
-        <div className="bg-amber-100 border border-amber-400 text-amber-700 px-4 py-3 rounded-lg mb-6">
-          <p className="text-sm">
-            <strong>Setup Required:</strong> Add your OpenAI API key to the environment variables as <code>VITE_OPENAI_API_KEY</code>
-          </p>
-        </div>
-      )}
-
       {/* Tab Navigation */}
       <div className="flex space-x-1 mb-6 bg-stone-100 p-1 rounded-lg">
         {tabs.map(tab => (

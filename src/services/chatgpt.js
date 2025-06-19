@@ -1,16 +1,33 @@
-import OpenAI from 'openai';
+// Backend API endpoint - update this URL after deploying to Render
+const BACKEND_URL = 'https://dnd-v1-backend.onrender.com';
 
-// Don't initialize OpenAI client immediately - do it lazily when needed
-let openai = null;
-
-const getOpenAIClient = () => {
-  if (!openai) {
-    openai = new OpenAI({
-      apiKey: import.meta.env.VITE_OPENAI_API_KEY || 'dummy-key',
-      dangerouslyAllowBrowser: true // Note: In production, you should use a backend proxy
+// Helper function to call the backend proxy
+const callBackendAPI = async (messages, model = 'gpt-4', max_tokens = 1000, temperature = 0.8) => {
+  try {
+    const response = await fetch(`${BACKEND_URL}/api/openai`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        messages,
+        model,
+        max_tokens,
+        temperature,
+      }),
     });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || 'Backend API request failed');
+    }
+
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    console.error('Backend API Error:', error);
+    throw new Error(`Failed to communicate with backend: ${error.message}`);
   }
-  return openai;
 };
 
 export class DungeonMasterService {
@@ -29,10 +46,6 @@ Always respond in character as a Dungeon Master, providing rich, descriptive con
 
   async generateStoryPlots(partyCharacters, campaignSetting = '') {
     try {
-      if (!import.meta.env.VITE_OPENAI_API_KEY || import.meta.env.VITE_OPENAI_API_KEY === 'your_openai_api_key_here') {
-        throw new Error('OpenAI API key not configured. Please add VITE_OPENAI_API_KEY to your .env file.');
-      }
-
       const characterDetails = partyCharacters.map(char => 
         `${char.name} - Level ${char.level} ${char.race} ${char.class} (${char.alignment})`
       ).join(', ');
@@ -51,32 +64,19 @@ For each plot option, provide:
 
 Make each plot distinct and appealing to different play styles. Consider the party composition when crafting these options.`;
 
-      const client = getOpenAIClient();
-      const response = await client.chat.completions.create({
-        model: "gpt-4",
-        messages: [
-          { role: "system", content: this.systemPrompt },
-          { role: "user", content: prompt }
-        ],
-        max_tokens: 1000,
-        temperature: 0.8
-      });
+      const response = await callBackendAPI([
+        { role: "system", content: this.systemPrompt },
+        { role: "user", content: prompt }
+      ], 'gpt-4', 1000, 0.8);
 
       return response.choices[0].message.content;
     } catch (error) {
-      if (error.message.includes('API key')) {
-        throw new Error('OpenAI API key not configured. Please add VITE_OPENAI_API_KEY to your .env file.');
-      }
-      throw new Error('Failed to generate story plots. Please check your API key and try again.');
+      throw new Error(`Failed to generate story plots: ${error.message}`);
     }
   }
 
   async generateCharacterDetails(character) {
     try {
-      if (!import.meta.env.VITE_OPENAI_API_KEY || import.meta.env.VITE_OPENAI_API_KEY === 'your_openai_api_key_here') {
-        throw new Error('OpenAI API key not configured. Please add VITE_OPENAI_API_KEY to your .env file.');
-      }
-
       const prompt = `As a Dungeon Master, I need you to expand on this character's details and create a rich, detailed description.
 
 Character: ${character.name} - Level ${character.level} ${character.race} ${character.class}
@@ -98,34 +98,20 @@ Please provide:
 
 Make the character feel alive and three-dimensional, with details that could drive story development.`;
 
-      const client = getOpenAIClient();
-      const response = await client.chat.completions.create({
-        model: "gpt-4",
-        messages: [
-          { role: "system", content: this.systemPrompt },
-          { role: "user", content: prompt }
-        ],
-        max_tokens: 800,
-        temperature: 0.7
-      });
+      const response = await callBackendAPI([
+        { role: "system", content: this.systemPrompt },
+        { role: "user", content: prompt }
+      ], 'gpt-4', 800, 0.7);
 
       return response.choices[0].message.content;
     } catch (error) {
       console.error('Error generating character details:', error);
-      if (error.message.includes('API key')) {
-        throw new Error('OpenAI API key not configured. Please add VITE_OPENAI_API_KEY to your .env file.');
-      }
-      throw new Error('Failed to generate character details. Please check your API key and try again.');
+      throw new Error(`Failed to generate character details: ${error.message}`);
     }
   }
 
   async generateStorySummary(plotOption, partyCharacters) {
     try {
-      // Check if API key is properly configured
-      if (!import.meta.env.VITE_OPENAI_API_KEY || import.meta.env.VITE_OPENAI_API_KEY === 'your_openai_api_key_here') {
-        throw new Error('OpenAI API key not configured. Please add VITE_OPENAI_API_KEY to your .env file.');
-      }
-
       const characterDetails = partyCharacters.map(char => 
         `${char.name} (${char.race} ${char.class})`
       ).join(', ');
@@ -147,34 +133,20 @@ Please provide:
 
 Make this feel like a professional campaign module with rich storytelling potential.`;
 
-      const client = getOpenAIClient();
-      const response = await client.chat.completions.create({
-        model: "gpt-4",
-        messages: [
-          { role: "system", content: this.systemPrompt },
-          { role: "user", content: prompt }
-        ],
-        max_tokens: 1200,
-        temperature: 0.7
-      });
+      const response = await callBackendAPI([
+        { role: "system", content: this.systemPrompt },
+        { role: "user", content: prompt }
+      ], 'gpt-4', 1200, 0.7);
 
       return response.choices[0].message.content;
     } catch (error) {
       console.error('Error generating story summary:', error);
-      if (error.message.includes('API key')) {
-        throw new Error('OpenAI API key not configured. Please add VITE_OPENAI_API_KEY to your .env file.');
-      }
-      throw new Error('Failed to generate story summary. Please check your API key and try again.');
+      throw new Error(`Failed to generate story summary: ${error.message}`);
     }
   }
 
   async generateMultipleStoryPlots(partyCharacters, campaignSetting = '') {
     try {
-      // Check if API key is properly configured
-      if (!import.meta.env.VITE_OPENAI_API_KEY || import.meta.env.VITE_OPENAI_API_KEY === 'your_openai_api_key_here') {
-        throw new Error('OpenAI API key not configured. Please add VITE_OPENAI_API_KEY to your .env file.');
-      }
-
       const characterDetails = partyCharacters.map(char => 
         `${char.name} - Level ${char.level} ${char.race} ${char.class} (${char.alignment})`
       ).join(', ');
@@ -197,34 +169,20 @@ For each of the 5 plot options, provide:
 
 Make each plot distinct and appealing to different play styles. Consider the party composition when crafting these options. Number each plot clearly (Plot 1, Plot 2, etc.).`;
 
-      const client = getOpenAIClient();
-      const response = await client.chat.completions.create({
-        model: "gpt-4",
-        messages: [
-          { role: "system", content: this.systemPrompt },
-          { role: "user", content: prompt }
-        ],
-        max_tokens: 2000,
-        temperature: 0.8
-      });
+      const response = await callBackendAPI([
+        { role: "system", content: this.systemPrompt },
+        { role: "user", content: prompt }
+      ], 'gpt-4', 2000, 0.8);
 
       return response.choices[0].message.content;
     } catch (error) {
       console.error('Error generating multiple story plots:', error);
-      if (error.message.includes('API key')) {
-        throw new Error('OpenAI API key not configured. Please add VITE_OPENAI_API_KEY to your .env file.');
-      }
-      throw new Error('Failed to generate multiple story plots. Please check your API key and try again.');
+      throw new Error(`Failed to generate multiple story plots: ${error.message}`);
     }
   }
 
   async generateNPC(role, context = '') {
     try {
-      // Check if API key is properly configured
-      if (!import.meta.env.VITE_OPENAI_API_KEY || import.meta.env.VITE_OPENAI_API_KEY === 'your_openai_api_key_here') {
-        throw new Error('OpenAI API key not configured. Please add VITE_OPENAI_API_KEY to your .env file.');
-      }
-
       const prompt = `As a Dungeon Master, I need you to create a detailed NPC for my campaign.
 
 Role: ${role}
@@ -242,34 +200,20 @@ Please provide:
 
 Make this NPC memorable and useful for advancing the story.`;
 
-      const client = getOpenAIClient();
-      const response = await client.chat.completions.create({
-        model: "gpt-4",
-        messages: [
-          { role: "system", content: this.systemPrompt },
-          { role: "user", content: prompt }
-        ],
-        max_tokens: 600,
-        temperature: 0.8
-      });
+      const response = await callBackendAPI([
+        { role: "system", content: this.systemPrompt },
+        { role: "user", content: prompt }
+      ], 'gpt-4', 600, 0.8);
 
       return response.choices[0].message.content;
     } catch (error) {
       console.error('Error generating NPC:', error);
-      if (error.message.includes('API key')) {
-        throw new Error('OpenAI API key not configured. Please add VITE_OPENAI_API_KEY to your .env file.');
-      }
-      throw new Error('Failed to generate NPC. Please check your API key and try again.');
+      throw new Error(`Failed to generate NPC: ${error.message}`);
     }
   }
 
   async generateCombatEncounter(partyLevel, partySize, difficulty = 'medium', theme = '') {
     try {
-      // Check if API key is properly configured
-      if (!import.meta.env.VITE_OPENAI_API_KEY || import.meta.env.VITE_OPENAI_API_KEY === 'your_openai_api_key_here') {
-        throw new Error('OpenAI API key not configured. Please add VITE_OPENAI_API_KEY to your .env file.');
-      }
-
       const prompt = `As a Dungeon Master, I need you to design a combat encounter for my party.
 
 Party Level: ${partyLevel}
@@ -289,24 +233,15 @@ Please provide:
 
 Make this encounter balanced, engaging, and story-relevant.`;
 
-      const client = getOpenAIClient();
-      const response = await client.chat.completions.create({
-        model: "gpt-4",
-        messages: [
-          { role: "system", content: this.systemPrompt },
-          { role: "user", content: prompt }
-        ],
-        max_tokens: 800,
-        temperature: 0.7
-      });
+      const response = await callBackendAPI([
+        { role: "system", content: this.systemPrompt },
+        { role: "user", content: prompt }
+      ], 'gpt-4', 800, 0.7);
 
       return response.choices[0].message.content;
     } catch (error) {
       console.error('Error generating combat encounter:', error);
-      if (error.message.includes('API key')) {
-        throw new Error('OpenAI API key not configured. Please add VITE_OPENAI_API_KEY to your .env file.');
-      }
-      throw new Error('Failed to generate combat encounter. Please check your API key and try again.');
+      throw new Error(`Failed to generate combat encounter: ${error.message}`);
     }
   }
 }
