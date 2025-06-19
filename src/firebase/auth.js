@@ -10,8 +10,11 @@ import { auth } from './config';
 export const registerUser = async (email, password) => {
   try {
     const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+    
     await sendEmailVerification(userCredential.user);
+    
     await signOut(auth);
+    
     return { 
       user: null, 
       error: null,
@@ -25,6 +28,7 @@ export const registerUser = async (email, password) => {
 export const loginUser = async (email, password) => {
   try {
     const userCredential = await signInWithEmailAndPassword(auth, email, password);
+    
     if (!userCredential.user.emailVerified) {
       await signOut(auth);
       return { 

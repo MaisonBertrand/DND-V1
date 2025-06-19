@@ -75,8 +75,7 @@ export const getPartyCharacters = async (partyId) => {
   try {
     const q = query(
       collection(db, 'characters'),
-      where('partyId', '==', partyId),
-      orderBy('createdAt', 'desc')
+      where('partyId', '==', partyId)
     );
     const querySnapshot = await getDocs(q);
     return querySnapshot.docs.map(doc => ({
@@ -122,31 +121,23 @@ export const createParty = async (dmId, partyData) => {
 
 export const getUserParties = async (userId) => {
   try {
-    console.log('getUserParties called with userId:', userId);
-    
-    // First, try a simple query without orderBy to see if the issue is with the index
     const q = query(
       collection(db, 'parties'),
       where('members', 'array-contains', userId)
     );
     
-    console.log('Executing Firestore query...');
     const querySnapshot = await getDocs(q);
-    console.log('Query result - empty:', querySnapshot.empty, 'size:', querySnapshot.size);
     
     const parties = querySnapshot.docs.map(doc => {
       const data = doc.data();
-      console.log('Party data:', { id: doc.id, ...data });
       return {
         id: doc.id,
         ...data
       };
     });
     
-    console.log('Returning parties:', parties);
     return parties;
   } catch (error) {
-    console.error('Error getting user parties:', error);
     throw error;
   }
 };

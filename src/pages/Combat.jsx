@@ -78,7 +78,6 @@ export default function Combat() {
 
   const updateHp = (combatantId, newHp) => {
     // TODO: Update HP in Firebase
-    console.log(`Updating HP for ${combatantId} to ${newHp}`);
   };
 
   return (

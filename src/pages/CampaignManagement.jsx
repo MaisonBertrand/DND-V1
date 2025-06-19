@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { onAuthChange } from '../firebase/auth';
 import { getCharacterByUserAndParty, getPartyCharacters } from '../firebase/database';
+import DungeonMaster from '../components/DungeonMaster';
 
 export default function CampaignManagement() {
   const { partyId } = useParams();
@@ -45,7 +46,7 @@ export default function CampaignManagement() {
       setUserCharacter(character);
       setPartyCharacters(characters);
     } catch (error) {
-      console.error('Error loading party data:', error);
+      // Handle error silently or show user-friendly message
     } finally {
       setLoading(false);
     }
@@ -53,6 +54,7 @@ export default function CampaignManagement() {
 
   const tabs = [
     { id: 'story', label: 'Story Planning' },
+    { id: 'ai-dm', label: '🤖 AI Dungeon Master' },
     { id: 'map', label: 'Campaign Map' },
     { id: 'characters', label: 'Party Characters' },
     { id: 'enemies', label: 'Enemies & NPCs' }
@@ -275,6 +277,19 @@ export default function CampaignManagement() {
               </div>
             </div>
           </div>
+        )}
+
+        {/* AI Dungeon Master Tab */}
+        {activeTab === 'ai-dm' && (
+          <DungeonMaster
+            partyCharacters={partyCharacters}
+            onStoryGenerated={(content) => {
+              // You could save this to your database or use it to populate the story
+            }}
+            onCharacterDetailsGenerated={(characterId, content) => {
+              // You could save this to your database or display it
+            }}
+          />
         )}
 
         {/* Campaign Map Tab */}

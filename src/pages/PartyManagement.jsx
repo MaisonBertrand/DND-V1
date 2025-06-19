@@ -32,12 +32,9 @@ export default function PartyManagement() {
 
   const loadUserParties = async (userId) => {
     try {
-      console.log('Loading parties for user:', userId);
       const userParties = await getUserParties(userId);
-      console.log('Loaded parties:', userParties);
       setParties(userParties);
     } catch (error) {
-      console.error('Error loading parties:', error);
       alert('Error loading parties: ' + error.message);
     }
   };
@@ -57,9 +54,7 @@ export default function PartyManagement() {
         inviteCode: Math.random().toString(36).substr(2, 8).toUpperCase()
       };
       
-      console.log('Creating party with data:', partyData);
       const createdParty = await createParty(user.uid, partyData);
-      console.log('Party created:', createdParty);
       
       setShowCreateForm(false);
       setNewParty({ name: '', description: '', maxPlayers: 6, isPublic: false, inviteCode: '' });
@@ -69,7 +64,6 @@ export default function PartyManagement() {
       
       alert('Party created successfully!');
     } catch (error) {
-      console.error('Error creating party:', error);
       alert('Error creating party: ' + error.message);
     } finally {
       setLoading(false);
@@ -100,7 +94,6 @@ export default function PartyManagement() {
       await loadUserParties(user.uid);
       alert('Successfully joined party!');
     } catch (error) {
-      console.error('Error joining party:', error);
       alert(error.message || 'Error joining party. Please try again.');
     } finally {
       setLoading(false);

@@ -73,7 +73,7 @@ export default function CharacterCreation() {
       const existing = await getCharacterByUserAndParty(userId, partyId);
       setExistingCharacter(existing);
     } catch (error) {
-      console.error('Error checking existing character:', error);
+      // Handle error silently or show user-friendly message
     }
   };
 
@@ -106,25 +106,25 @@ export default function CharacterCreation() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
-    if (!user || !partyId) {
-      alert('You must be logged in and in a party to create a character');
-      return;
-    }
-
-    if (existingCharacter) {
-      alert('You already have a character in this party');
+    if (!user) {
+      alert('You must be logged in to create a character');
       return;
     }
 
     setLoading(true);
     try {
-      await saveCharacter(user.uid, partyId, character);
+      const characterData = {
+        ...character,
+        userId: user.uid,
+        partyId: partyId,
+        createdAt: new Date()
+      };
+
+      await saveCharacter(characterData);
       alert('Character created successfully!');
       navigate(`/campaign/${partyId}`);
     } catch (error) {
-      console.error('Error creating character:', error);
-      alert('Error creating character. Please try again.');
+      alert('Error creating character: ' + error.message);
     } finally {
       setLoading(false);
     }
