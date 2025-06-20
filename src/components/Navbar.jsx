@@ -1,16 +1,28 @@
 import { Link } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import { onAuthChange, logoutUser } from '../firebase/auth';
+import { getUserProfile } from '../firebase/database';
 import { useNavigate } from 'react-router-dom';
 
 export default function Navbar() {
   const [user, setUser] = useState(null);
+  const [userProfile, setUserProfile] = useState(null);
   const [showProfileDropdown, setShowProfileDropdown] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
-    const unsubscribe = onAuthChange((user) => {
+    const unsubscribe = onAuthChange(async (user) => {
       setUser(user);
+      if (user) {
+        try {
+          const profile = await getUserProfile(user.uid);
+          setUserProfile(profile);
+        } catch (error) {
+          console.error('Error loading user profile:', error);
+        }
+      } else {
+        setUserProfile(null);
+      }
     });
     return () => unsubscribe();
   }, []);
@@ -21,6 +33,8 @@ export default function Navbar() {
       navigate('/');
     }
   };
+
+  const displayName = userProfile?.username || user?.email;
 
   return (
     <nav className="bg-stone-800 text-white shadow-lg">
@@ -49,14 +63,15 @@ export default function Navbar() {
                     onClick={() => setShowProfileDropdown(!showProfileDropdown)}
                     className="fantasy-button bg-stone-700 hover:bg-stone-600"
                   >
-                    Profile
+                    {displayName}
                   </button>
                   
                   {showProfileDropdown && (
                     <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-stone-200 z-50">
                       <div className="py-2">
                         <div className="px-4 py-2 text-sm text-stone-700 border-b border-stone-200">
-                          {user.email}
+                          <div className="font-medium">{displayName}</div>
+                          <div className="text-xs text-stone-500">{user.email}</div>
                         </div>
                         <button
                           onClick={handleLogout}

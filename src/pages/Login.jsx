@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { onAuthChange, loginUser } from '../firebase/auth';
 
 export default function Login() {
@@ -7,16 +7,25 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
   const navigate = useNavigate();
+  const location = useLocation();
 
   useEffect(() => {
+    // Check for success message from registration
+    if (location.state?.message) {
+      setMessage(location.state.message);
+      // Clear the state to prevent showing the message again on refresh
+      navigate(location.pathname, { replace: true });
+    }
+
     const unsubscribe = onAuthChange((user) => {
       if (user) {
         navigate('/dashboard');
       }
     });
     return () => unsubscribe();
-  }, [navigate]);
+  }, [navigate, location]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -46,6 +55,12 @@ export default function Login() {
     <div className="fantasy-container py-8">
       <div className="fantasy-card max-w-md mx-auto">
         <h1 className="fantasy-title text-center">Login</h1>
+        
+        {message && (
+          <div className="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded-lg mb-4">
+            {message}
+          </div>
+        )}
         
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>

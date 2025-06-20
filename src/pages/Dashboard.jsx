@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { onAuthChange } from '../firebase/auth';
-import { getUserParties } from '../firebase/database';
+import { getUserParties, getUserProfile } from '../firebase/database';
 
 export default function Dashboard() {
   const [user, setUser] = useState(null);
+  const [userProfile, setUserProfile] = useState(null);
   const [parties, setParties] = useState([]);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
@@ -16,17 +17,21 @@ export default function Dashboard() {
         return;
       }
       setUser(user);
-      loadUserParties(user.uid);
+      loadUserData(user.uid);
     });
     return () => unsubscribe();
   }, [navigate]);
 
-  const loadUserParties = async (userId) => {
+  const loadUserData = async (userId) => {
     try {
-      const userParties = await getUserParties(userId);
+      const [userParties, profile] = await Promise.all([
+        getUserParties(userId),
+        getUserProfile(userId)
+      ]);
       setParties(userParties);
+      setUserProfile(profile);
     } catch (error) {
-      console.error('Error loading parties:', error);
+      console.error('Error loading user data:', error);
     } finally {
       setLoading(false);
     }
@@ -48,11 +53,13 @@ export default function Dashboard() {
     );
   }
 
+  const displayName = userProfile?.username || user.email;
+
   return (
     <div className="fantasy-container py-8">
       <div className="fantasy-card">
         <div className="flex justify-between items-center mb-6">
-          <h1 className="fantasy-title mb-0">Welcome, {user.email}</h1>
+          <h1 className="fantasy-title mb-0">Welcome, {displayName}</h1>
         </div>
         
         {/* Your Parties */}

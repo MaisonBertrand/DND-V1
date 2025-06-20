@@ -1,18 +1,18 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { onAuthChange } from '../firebase/auth';
-import { getPartyCharacters, getCampaignStory, updateCampaignStory } from '../firebase/database';
+import { 
+  getCombatSession, 
+  updateCombatSession, 
+  subscribeToCombatSession,
+  updateCampaignStory 
+} from '../firebase/database';
 
 export default function Combat() {
   const { partyId } = useParams();
   const navigate = useNavigate();
   const [user, setUser] = useState(null);
-  const [combatState, setCombatState] = useState('preparation'); // preparation, active, ended
-  const [initiative, setInitiative] = useState([]);
-  const [currentTurn, setCurrentTurn] = useState(0);
-  const [partyMembers, setPartyMembers] = useState([]);
-  const [enemies, setEnemies] = useState([]);
-  const [storyContext, setStoryContext] = useState('');
+  const [combatSession, setCombatSession] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -32,34 +32,26 @@ export default function Combat() {
     }
   }, [user, partyId]);
 
+  useEffect(() => {
+    if (partyId) {
+      const unsubscribe = subscribeToCombatSession(partyId, (session) => {
+        setCombatSession(session);
+        setLoading(false);
+      });
+      return () => unsubscribe();
+    }
+  }, [partyId]);
+
   const loadCombatData = async () => {
     try {
       setLoading(true);
-      
-      // Load party characters
-      const characters = await getPartyCharacters(partyId);
-      setPartyMembers(characters.map(char => ({
-        id: char.id,
-        name: char.name,
-        class: char.class,
-        level: char.level,
-        hp: char.hp || 10 + (char.constitution - 10) * 2,
-        maxHp: char.hp || 10 + (char.constitution - 10) * 2,
-        ac: char.ac || 10,
-        initiative: Math.floor(Math.random() * 20) + 1 + Math.floor((char.dexterity - 10) / 2),
-        portrait: char.portrait || '/placeholder-character.png',
-        userId: char.userId
-      })));
-
-      // Load story context if combat was initiated from story
-      const story = await getCampaignStory(partyId);
-      if (story?.currentCombat?.initiated) {
-        setStoryContext(story.currentCombat.storyContext);
-        generateEnemiesFromContext(story.currentCombat.storyContext, characters.length);
-      } else {
-        generateRandomEnemies(characters.length);
+      const session = await getCombatSession(partyId);
+      if (!session) {
+        // No active combat session, redirect back to story
+        navigate(`/campaign-story/${partyId}`);
+        return;
       }
-      
+      setCombatSession(session);
     } catch (error) {
       console.error('Error loading combat data:', error);
     } finally {
@@ -106,81 +98,83 @@ export default function Combat() {
       });
     }
 
-    setEnemies(generatedEnemies);
+    return generatedEnemies;
   };
 
-  const generateRandomEnemies = (partySize) => {
-    const enemyTypes = [
-      { name: 'Goblin', hp: 12, ac: 14 },
-      { name: 'Orc', hp: 30, ac: 16 },
-      { name: 'Bandit', hp: 16, ac: 12 },
-      { name: 'Skeleton', hp: 13, ac: 13 },
-      { name: 'Wolf', hp: 11, ac: 13 }
-    ];
-
-    const enemyCount = Math.min(partySize + 1, 6);
-    const generatedEnemies = [];
-
-    for (let i = 0; i < enemyCount; i++) {
-      const enemyType = enemyTypes[Math.floor(Math.random() * enemyTypes.length)];
-      generatedEnemies.push({
-        id: `enemy_${i}`,
-        name: `${enemyType.name} ${i + 1}`,
-        type: enemyType.name,
-        hp: enemyType.hp + Math.floor(Math.random() * 10),
-        maxHp: enemyType.hp + Math.floor(Math.random() * 10),
-        ac: enemyType.ac + Math.floor(Math.random() * 3),
-        initiative: Math.floor(Math.random() * 20) + 1,
-        portrait: '/placeholder-enemy.png'
-      });
+  const startCombat = async () => {
+    if (!combatSession) return;
+    
+    // Generate enemies if not already present
+    let enemies = combatSession.enemies;
+    if (enemies.length === 0) {
+      enemies = generateEnemiesFromContext(combatSession.storyContext, combatSession.partyMembers.length);
     }
-
-    setEnemies(generatedEnemies);
-  };
-
-  const startCombat = () => {
-    const allCombatants = [...partyMembers, ...enemies];
+    
+    const allCombatants = [...combatSession.partyMembers, ...enemies];
     const sortedInitiative = allCombatants.sort((a, b) => b.initiative - a.initiative);
-    setInitiative(sortedInitiative);
-    setCombatState('active');
-    setCurrentTurn(0);
+    
+    await updateCombatSession(combatSession.id, {
+      enemies: enemies,
+      initiative: sortedInitiative,
+      currentTurn: 0,
+      combatState: 'active'
+    });
   };
 
-  const nextTurn = () => {
-    setCurrentTurn((prev) => (prev + 1) % initiative.length);
+  const nextTurn = async () => {
+    if (!combatSession) return;
+    const newTurn = (combatSession.currentTurn + 1) % combatSession.initiative.length;
+    await updateCombatSession(combatSession.id, {
+      currentTurn: newTurn
+    });
   };
 
-  const previousTurn = () => {
-    setCurrentTurn((prev) => (prev - 1 + initiative.length) % initiative.length);
+  const previousTurn = async () => {
+    if (!combatSession) return;
+    const newTurn = (combatSession.currentTurn - 1 + combatSession.initiative.length) % combatSession.initiative.length;
+    await updateCombatSession(combatSession.id, {
+      currentTurn: newTurn
+    });
   };
 
   const endCombat = async () => {
-    setCombatState('ended');
+    if (!combatSession) return;
     
-    // If combat was initiated from story, return to story
-    if (storyContext) {
-      try {
-        await updateCampaignStory(partyId, {
-          status: 'storytelling',
-          currentCombat: null
-        });
-        navigate(`/campaign-story/${partyId}`);
-      } catch (error) {
-        console.error('Error returning to story:', error);
-      }
-    }
+    // Mark combat session as ended
+    await updateCombatSession(combatSession.id, {
+      status: 'ended',
+      combatState: 'ended'
+    });
+    
+    // Return story to active state
+    await updateCampaignStory(partyId, {
+      status: 'storytelling',
+      currentCombat: null
+    });
+    
+    // Navigate back to story
+    navigate(`/campaign-story/${partyId}`);
   };
 
-  const updateHp = (combatantId, newHp) => {
-    // Update HP in local state
+  const updateHp = async (combatantId, newHp) => {
+    if (!combatSession) return;
+    
+    const clampedHp = Math.max(0, newHp);
+    
     if (combatantId.startsWith('enemy_')) {
-      setEnemies(prev => prev.map(enemy => 
-        enemy.id === combatantId ? { ...enemy, hp: Math.max(0, newHp) } : enemy
-      ));
+      const updatedEnemies = combatSession.enemies.map(enemy => 
+        enemy.id === combatantId ? { ...enemy, hp: clampedHp } : enemy
+      );
+      await updateCombatSession(combatSession.id, {
+        enemies: updatedEnemies
+      });
     } else {
-      setPartyMembers(prev => prev.map(member => 
-        member.id === combatantId ? { ...member, hp: Math.max(0, newHp) } : member
-      ));
+      const updatedPartyMembers = combatSession.partyMembers.map(member => 
+        member.id === combatantId ? { ...member, hp: clampedHp } : member
+      );
+      await updateCombatSession(combatSession.id, {
+        partyMembers: updatedPartyMembers
+      });
     }
   };
 
@@ -200,128 +194,200 @@ export default function Combat() {
     );
   }
 
+  if (!combatSession) {
+    return (
+      <div className="fantasy-container py-8">
+        <div className="fantasy-card">
+          <div className="text-center py-8">
+            <div className="text-stone-600">No active combat session found.</div>
+            <button 
+              onClick={() => navigate(`/campaign-story/${partyId}`)}
+              className="fantasy-button mt-4"
+            >
+              Return to Story
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="fantasy-container py-8">
-      <div className="fantasy-card">
+    <div className="min-h-screen bg-gradient-to-b from-blue-400 via-blue-500 to-blue-600 p-4">
+      <div className="max-w-7xl mx-auto">
+        {/* Header */}
         <div className="flex justify-between items-center mb-6">
-          <h1 className="fantasy-title mb-0">Combat Tracker</h1>
+          <h1 className="text-3xl font-bold text-white drop-shadow-lg">⚔️ Battle Arena</h1>
           <div className="space-x-2">
-            {combatState === 'preparation' && (
-              <button onClick={startCombat} className="fantasy-button">
-                Start Combat
+            {combatSession.combatState === 'preparation' && (
+              <button onClick={startCombat} className="bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-2 px-4 rounded-lg shadow-lg">
+                🚀 Start Battle
               </button>
             )}
-            {combatState === 'active' && (
+            {combatSession.combatState === 'active' && (
               <>
-                <button onClick={previousTurn} className="fantasy-button bg-stone-600 hover:bg-stone-700">
-                  Previous Turn
+                <button onClick={previousTurn} className="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded-lg shadow-lg">
+                  ⬅️ Previous
                 </button>
-                <button onClick={nextTurn} className="fantasy-button">
-                  Next Turn
+                <button onClick={nextTurn} className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg shadow-lg">
+                  Next ➡️
                 </button>
-                <button onClick={endCombat} className="fantasy-button bg-red-600 hover:bg-red-700">
-                  End Combat
+                <button onClick={endCombat} className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg shadow-lg">
+                  🏁 End Battle
                 </button>
               </>
             )}
-            {storyContext && (
+            {combatSession.storyContext && (
               <button 
                 onClick={() => navigate(`/campaign-story/${partyId}`)}
-                className="fantasy-button bg-blue-600 hover:bg-blue-700"
+                className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg shadow-lg"
               >
-                Return to Story
+                📖 Return to Story
               </button>
             )}
           </div>
         </div>
 
         {/* Story Context */}
-        {storyContext && (
-          <div className="fantasy-card bg-blue-50 mb-6">
-            <h2 className="text-xl font-bold text-stone-800 mb-2">Story Context</h2>
-            <p className="text-stone-700">{storyContext}</p>
+        {combatSession.storyContext && (
+          <div className="bg-white/90 backdrop-blur-sm rounded-lg p-4 mb-6 shadow-lg">
+            <h2 className="text-xl font-bold text-gray-800 mb-2">Battle Context</h2>
+            <p className="text-gray-700 italic">{combatSession.storyContext}</p>
           </div>
         )}
 
-        {/* Initiative Tracker */}
-        {combatState === 'active' && (
-          <div className="fantasy-card bg-amber-50 mb-6">
-            <h2 className="text-xl font-bold text-stone-800 mb-4">Initiative Order</h2>
-            <div className="space-y-2">
-              {initiative.map((combatant, index) => (
-                <div
-                  key={combatant.id}
-                  className={`flex items-center justify-between p-3 rounded-lg ${
-                    index === currentTurn
-                      ? 'bg-amber-200 border-2 border-amber-600'
-                      : 'bg-white'
-                  }`}
-                >
-                  <div className="flex items-center space-x-3">
-                    <span className="font-bold text-stone-800">#{index + 1}</span>
-                    <div className="w-8 h-8 bg-stone-300 rounded-full flex items-center justify-center">
-                      <span className="text-xs text-stone-600">IMG</span>
+        {/* Pokemon-Style Battle Arena */}
+        <div className="bg-gradient-to-b from-green-300 via-green-400 to-green-500 rounded-2xl p-6 shadow-2xl border-4 border-green-600">
+          {/* Battle Field */}
+          <div className="relative h-96 mb-6">
+            {/* Background Elements */}
+            <div className="absolute inset-0 bg-gradient-to-b from-green-200 to-green-300 rounded-xl"></div>
+            
+            {/* Party Side (Left) */}
+            <div className="absolute left-4 bottom-4 w-1/2">
+              <div className="grid grid-cols-2 gap-4">
+                {combatSession.partyMembers.map((member, index) => (
+                  <div key={member.id} className="bg-white/90 backdrop-blur-sm rounded-lg p-3 shadow-lg border-2 border-blue-300">
+                    <div className="flex items-center space-x-2">
+                      <div className="w-12 h-12 bg-blue-200 rounded-full flex items-center justify-center border-2 border-blue-400">
+                        <span className="text-blue-800 font-bold text-sm">
+                          {member.name.charAt(0)}
+                        </span>
+                      </div>
+                      <div className="flex-1">
+                        <div className="font-bold text-gray-800 text-sm">{member.name}</div>
+                        <div className="text-xs text-gray-600">{member.class}</div>
+                        <div className="mt-1">
+                          <div className="bg-red-200 rounded-full h-2">
+                            <div 
+                              className="bg-red-500 h-2 rounded-full transition-all duration-300"
+                              style={{ width: `${(member.hp / member.maxHp) * 100}%` }}
+                            ></div>
+                          </div>
+                          <div className="text-xs text-gray-600 mt-1">
+                            HP: {member.hp}/{member.maxHp}
+                          </div>
+                        </div>
+                      </div>
                     </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Enemy Side (Right) */}
+            <div className="absolute right-4 top-4 w-1/2">
+              <div className="grid grid-cols-2 gap-4">
+                {combatSession.enemies.map((enemy, index) => (
+                  <div key={enemy.id} className="bg-white/90 backdrop-blur-sm rounded-lg p-3 shadow-lg border-2 border-red-300">
+                    <div className="flex items-center space-x-2">
+                      <div className="w-12 h-12 bg-red-200 rounded-full flex items-center justify-center border-2 border-red-400">
+                        <span className="text-red-800 font-bold text-sm">
+                          {enemy.name.charAt(0)}
+                        </span>
+                      </div>
+                      <div className="flex-1">
+                        <div className="font-bold text-gray-800 text-sm">{enemy.name}</div>
+                        <div className="text-xs text-gray-600">{enemy.type}</div>
+                        <div className="mt-1">
+                          <div className="bg-red-200 rounded-full h-2">
+                            <div 
+                              className="bg-red-500 h-2 rounded-full transition-all duration-300"
+                              style={{ width: `${(enemy.hp / enemy.maxHp) * 100}%` }}
+                            ></div>
+                          </div>
+                          <div className="text-xs text-gray-600 mt-1">
+                            HP: {enemy.hp}/{enemy.maxHp}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Battle Center */}
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className="text-4xl text-white drop-shadow-lg font-bold">
+                ⚔️ VS ⚔️
+              </div>
+            </div>
+          </div>
+
+          {/* Initiative Tracker */}
+          {combatSession.combatState === 'active' && (
+            <div className="bg-white/90 backdrop-blur-sm rounded-lg p-4 shadow-lg">
+              <h3 className="text-lg font-bold text-gray-800 mb-3">🎯 Turn Order</h3>
+              <div className="flex flex-wrap gap-2">
+                {combatSession.initiative.map((combatant, index) => (
+                  <div
+                    key={combatant.id}
+                    className={`px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
+                      index === combatSession.currentTurn
+                        ? 'bg-yellow-400 text-yellow-900 shadow-lg scale-105'
+                        : 'bg-gray-200 text-gray-700'
+                    }`}
+                  >
+                    <div className="flex items-center space-x-2">
+                      <span className="font-bold">#{index + 1}</span>
+                      <span>{combatant.name}</span>
+                      <span className="text-xs opacity-75">({combatant.class || combatant.type})</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Detailed Stats Panel */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
+          {/* Party Stats */}
+          <div className="bg-white/90 backdrop-blur-sm rounded-lg p-4 shadow-lg">
+            <h3 className="text-xl font-bold text-gray-800 mb-4">👥 Your Party</h3>
+            <div className="space-y-3">
+              {combatSession.partyMembers.map(member => (
+                <div key={member.id} className="bg-blue-50 rounded-lg p-3 border border-blue-200">
+                  <div className="flex items-center justify-between">
                     <div>
-                      <div className="font-medium text-stone-800">{combatant.name}</div>
-                      <div className="text-sm text-stone-600">
-                        {combatant.class || combatant.type} • Initiative: {combatant.initiative}
+                      <div className="font-bold text-gray-800">{member.name}</div>
+                      <div className="text-sm text-gray-600">Level {member.level} {member.class}</div>
+                    </div>
+                    <div className="text-right">
+                      <div className="flex items-center space-x-2">
+                        <span className="text-sm text-gray-700">HP:</span>
+                        <input
+                          type="number"
+                          value={member.hp}
+                          onChange={(e) => updateHp(member.id, parseInt(e.target.value))}
+                          className="w-16 bg-white border border-gray-300 rounded px-2 py-1 text-sm"
+                          min="0"
+                          max={member.maxHp}
+                        />
+                        <span className="text-sm text-gray-600">/ {member.maxHp}</span>
                       </div>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <div className="font-medium text-stone-800">
-                      HP: {combatant.hp}/{combatant.maxHp}
-                    </div>
-                    <div className="text-sm text-stone-600">AC: {combatant.ac}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Combat Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Party Members */}
-          <div>
-            <h2 className="text-2xl font-bold text-stone-800 mb-4">Party Members</h2>
-            <div className="space-y-4">
-              {partyMembers.map(member => (
-                <div key={member.id} className="fantasy-card bg-green-50">
-                  <div className="flex items-start space-x-4">
-                    <div className="w-16 h-16 bg-stone-300 rounded-lg flex items-center justify-center">
-                      <span className="text-xs text-stone-600">IMG</span>
-                    </div>
-                    <div className="flex-1">
-                      <h3 className="font-bold text-stone-800">{member.name}</h3>
-                      <p className="text-sm text-stone-600">
-                        Level {member.level} {member.class}
-                      </p>
-                      <div className="mt-2 space-y-1">
-                        <div className="flex items-center justify-between">
-                          <span className="text-sm text-stone-700">HP:</span>
-                          <div className="flex items-center space-x-2">
-                            <input
-                              type="number"
-                              value={member.hp}
-                              onChange={(e) => updateHp(member.id, parseInt(e.target.value))}
-                              className="w-16 fantasy-input text-sm"
-                              min="0"
-                              max={member.maxHp}
-                            />
-                            <span className="text-sm text-stone-600">/ {member.maxHp}</span>
-                          </div>
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <span className="text-sm text-stone-700">AC:</span>
-                          <span className="text-sm font-medium">{member.ac}</span>
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <span className="text-sm text-stone-700">Initiative:</span>
-                          <span className="text-sm font-medium">{member.initiative}</span>
-                        </div>
-                      </div>
+                      <div className="text-sm text-gray-600">AC: {member.ac}</div>
                     </div>
                   </div>
                 </div>
@@ -329,43 +395,31 @@ export default function Combat() {
             </div>
           </div>
 
-          {/* Enemies */}
-          <div>
-            <h2 className="text-2xl font-bold text-stone-800 mb-4">Enemies</h2>
-            <div className="space-y-4">
-              {enemies.map(enemy => (
-                <div key={enemy.id} className="fantasy-card bg-red-50">
-                  <div className="flex items-start space-x-4">
-                    <div className="w-16 h-16 bg-stone-300 rounded-lg flex items-center justify-center">
-                      <span className="text-xs text-stone-600">IMG</span>
+          {/* Enemy Stats */}
+          <div className="bg-white/90 backdrop-blur-sm rounded-lg p-4 shadow-lg">
+            <h3 className="text-xl font-bold text-gray-800 mb-4">👹 Enemies</h3>
+            <div className="space-y-3">
+              {combatSession.enemies.map(enemy => (
+                <div key={enemy.id} className="bg-red-50 rounded-lg p-3 border border-red-200">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="font-bold text-gray-800">{enemy.name}</div>
+                      <div className="text-sm text-gray-600">{enemy.type}</div>
                     </div>
-                    <div className="flex-1">
-                      <h3 className="font-bold text-stone-800">{enemy.name}</h3>
-                      <p className="text-sm text-stone-600">{enemy.type}</p>
-                      <div className="mt-2 space-y-1">
-                        <div className="flex items-center justify-between">
-                          <span className="text-sm text-stone-700">HP:</span>
-                          <div className="flex items-center space-x-2">
-                            <input
-                              type="number"
-                              value={enemy.hp}
-                              onChange={(e) => updateHp(enemy.id, parseInt(e.target.value))}
-                              className="w-16 fantasy-input text-sm"
-                              min="0"
-                              max={enemy.maxHp}
-                            />
-                            <span className="text-sm text-stone-600">/ {enemy.maxHp}</span>
-                          </div>
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <span className="text-sm text-stone-700">AC:</span>
-                          <span className="text-sm font-medium">{enemy.ac}</span>
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <span className="text-sm text-stone-700">Initiative:</span>
-                          <span className="text-sm font-medium">{enemy.initiative}</span>
-                        </div>
+                    <div className="text-right">
+                      <div className="flex items-center space-x-2">
+                        <span className="text-sm text-gray-700">HP:</span>
+                        <input
+                          type="number"
+                          value={enemy.hp}
+                          onChange={(e) => updateHp(enemy.id, parseInt(e.target.value))}
+                          className="w-16 bg-white border border-gray-300 rounded px-2 py-1 text-sm"
+                          min="0"
+                          max={enemy.maxHp}
+                        />
+                        <span className="text-sm text-gray-600">/ {enemy.maxHp}</span>
                       </div>
+                      <div className="text-sm text-gray-600">AC: {enemy.ac}</div>
                     </div>
                   </div>
                 </div>
@@ -374,17 +428,22 @@ export default function Combat() {
           </div>
         </div>
 
-        {/* Combat Controls */}
-        {combatState === 'preparation' && (
-          <div className="mt-6 text-center py-8 text-stone-600">
-            <p>Prepare your party and enemies, then click "Start Combat" to begin.</p>
+        {/* Combat Status */}
+        {combatSession.combatState === 'preparation' && (
+          <div className="mt-6 text-center py-8">
+            <div className="bg-white/90 backdrop-blur-sm rounded-lg p-6 shadow-lg">
+              <h3 className="text-xl font-bold text-gray-800 mb-2">🎮 Battle Preparation</h3>
+              <p className="text-gray-600">Your party is ready! Click "Start Battle" to begin the epic confrontation.</p>
+            </div>
           </div>
         )}
 
-        {combatState === 'ended' && (
+        {combatSession.combatState === 'ended' && (
           <div className="mt-6 text-center py-8">
-            <h3 className="text-xl font-bold text-stone-800 mb-2">Combat Ended</h3>
-            <p className="text-stone-600">The battle has concluded.</p>
+            <div className="bg-white/90 backdrop-blur-sm rounded-lg p-6 shadow-lg">
+              <h3 className="text-xl font-bold text-gray-800 mb-2">🏆 Battle Concluded</h3>
+              <p className="text-gray-600">The epic battle has ended. Return to your adventure!</p>
+            </div>
           </div>
         )}
       </div>

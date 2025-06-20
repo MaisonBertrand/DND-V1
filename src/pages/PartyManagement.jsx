@@ -35,7 +35,7 @@ export default function PartyManagement() {
       const userParties = await getUserParties(userId);
       setParties(userParties);
     } catch (error) {
-      alert('Error loading parties: ' + error.message);
+      console.error('Error loading parties:', error.message);
     }
   };
 
@@ -43,7 +43,7 @@ export default function PartyManagement() {
     e.preventDefault();
     
     if (!user) {
-      alert('You must be logged in to create a party');
+      console.error('You must be logged in to create a party');
       return;
     }
 
@@ -62,9 +62,9 @@ export default function PartyManagement() {
       // Reload parties after creation
       await loadUserParties(user.uid);
       
-      alert('Party created successfully!');
+      console.log('Party created successfully!');
     } catch (error) {
-      alert('Error creating party: ' + error.message);
+      console.error('Error creating party:', error.message);
     } finally {
       setLoading(false);
     }
@@ -72,12 +72,12 @@ export default function PartyManagement() {
 
   const handleJoinParty = async () => {
     if (!joinCode.trim()) {
-      alert('Please enter an invite code');
+      console.error('Please enter an invite code');
       return;
     }
 
     if (!user) {
-      alert('You must be logged in to join a party');
+      console.error('You must be logged in to join a party');
       return;
     }
 
@@ -85,16 +85,16 @@ export default function PartyManagement() {
     try {
       const party = await getPartyByInviteCode(joinCode.toUpperCase());
       if (!party) {
-        alert('Invalid invite code');
+        console.error('Invalid invite code');
         return;
       }
 
       await joinParty(party.id, user.uid);
       setJoinCode('');
       await loadUserParties(user.uid);
-      alert('Successfully joined party!');
+      console.log('Successfully joined party!');
     } catch (error) {
-      alert(error.message || 'Error joining party. Please try again.');
+      console.error(error.message || 'Error joining party. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -102,7 +102,7 @@ export default function PartyManagement() {
 
   const copyInviteCode = (code) => {
     navigator.clipboard.writeText(code);
-    alert('Invite code copied to clipboard!');
+    console.log('Invite code copied to clipboard!');
   };
 
   const handleDisbandParty = async (partyId, partyName) => {
@@ -114,9 +114,9 @@ export default function PartyManagement() {
     try {
       await disbandParty(partyId, user.uid);
       await loadUserParties(user.uid);
-      alert('Party disbanded successfully');
+      console.log('Party disbanded successfully');
     } catch (error) {
-      alert('Error disbanding party: ' + error.message);
+      console.error('Error disbanding party:', error.message);
     } finally {
       setLoading(false);
     }
@@ -269,12 +269,6 @@ export default function PartyManagement() {
                       className="fantasy-button"
                     >
                       Campaign
-                    </button>
-                    <button
-                      onClick={() => navigate(`/combat/${party.id}`)}
-                      className="fantasy-button bg-stone-600 hover:bg-stone-700"
-                    >
-                      Combat
                     </button>
                     {party.dmId === user.uid && (
                       <button

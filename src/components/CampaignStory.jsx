@@ -1,16 +1,20 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { onAuthChange } from '../firebase/auth';
 import { 
   getCampaignStory, 
   createCampaignStory, 
   setPlayerReady, 
-  castVote, 
   addStoryMessage,
   subscribeToCampaignStory,
   getPartyCharacters,
   updateCampaignStory,
-  getUserParties
+  getUserParties,
+  getUserProfile,
+  getPartyById,
+  setCurrentSpeaker,
+  setCurrentController,
+  createCombatSession
 } from '../firebase/database';
 import { dungeonMasterService } from '../services/chatgpt';
 
@@ -19,13 +23,16 @@ export default function CampaignStory() {
   const navigate = useNavigate();
   const [user, setUser] = useState(null);
   const [story, setStory] = useState(null);
+  const [party, setParty] = useState(null);
   const [partyCharacters, setPartyCharacters] = useState([]);
   const [partyMembers, setPartyMembers] = useState([]);
+  const [memberProfiles, setMemberProfiles] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [playerResponse, setPlayerResponse] = useState('');
-  const [responseType, setResponseType] = useState('individual');
   const [isReady, setIsReady] = useState(false);
+  const [isGeneratingPlots, setIsGeneratingPlots] = useState(false);
+  const isGeneratingPlotsRef = useRef(false);
 
   useEffect(() => {
     const unsubscribe = onAuthChange((user) => {
@@ -44,22 +51,38 @@ export default function CampaignStory() {
     }
   }, [user, partyId]);
 
+  // Auto-ready up when user has a character but isn't ready
+  useEffect(() => {
+    if (user && partyCharacters.length > 0 && story) {
+      const userCharacter = partyCharacters.find(char => char.userId === user.uid);
+      const isUserReady = story.readyPlayers?.includes(user.uid);
+      
+      // Only auto-ready if user has a character but isn't ready, AND story is in ready_up status
+      if (userCharacter && !isUserReady && story.status === 'ready_up') {
+        handleReadyUp();
+      }
+    }
+  }, [partyCharacters, story, user]);
+
   const loadStoryAndCharacters = async () => {
     try {
       setLoading(true);
       console.log('Loading story and characters for partyId:', partyId);
       
-      const [storyData, characters] = await Promise.all([
+      const [storyData, characters, partyData] = await Promise.all([
         getCampaignStory(partyId),
-        getPartyCharacters(partyId)
+        getPartyCharacters(partyId),
+        getPartyById(partyId)
       ]);
       
       console.log('Loaded characters:', characters);
       console.log('Loaded story:', storyData);
+      console.log('Loaded party:', partyData);
       
       setPartyCharacters(characters);
+      setParty(partyData);
       
-      // If no characters exist, try to get party members
+      // If no characters exist, try to get party members and their profiles
       if (characters.length === 0 && user) {
         try {
           const userParties = await getUserParties(user.uid);
@@ -67,6 +90,19 @@ export default function CampaignStory() {
           if (currentParty) {
             setPartyMembers(currentParty.members || []);
             console.log('Loaded party members:', currentParty.members);
+            
+            // Fetch profiles for all members
+            const profiles = {};
+            for (const memberId of currentParty.members) {
+              try {
+                const profile = await getUserProfile(memberId);
+                profiles[memberId] = profile;
+              } catch (error) {
+                console.error('Error loading profile for member:', memberId, error);
+                profiles[memberId] = null;
+              }
+            }
+            setMemberProfiles(profiles);
           }
         } catch (error) {
           console.error('Error loading party members:', error);
@@ -74,6 +110,30 @@ export default function CampaignStory() {
       }
       
       if (storyData) {
+        // Clean up any old voting data to prevent tie messages
+        if (storyData.votingSession && storyData.status === 'voting') {
+          await updateCampaignStory(storyData.id, {
+            votingSession: null
+          });
+          storyData.votingSession = null;
+        }
+        
+        // Remove any tie-related messages from old voting system
+        if (storyData.storyMessages) {
+          const filteredMessages = storyData.storyMessages.filter(msg => 
+            !msg.content?.includes('tie') && 
+            !msg.content?.includes('vote again') &&
+            msg.type !== 'tie_break'
+          );
+          
+          if (filteredMessages.length !== storyData.storyMessages.length) {
+            await updateCampaignStory(storyData.id, {
+              storyMessages: filteredMessages
+            });
+            storyData.storyMessages = filteredMessages;
+          }
+        }
+        
         setStory(storyData);
         setIsReady(storyData.readyPlayers?.includes(user?.uid) || false);
       } else {
@@ -95,6 +155,11 @@ export default function CampaignStory() {
         if (updatedStory) {
           setStory(updatedStory);
           setIsReady(updatedStory.readyPlayers?.includes(user.uid) || false);
+          
+          // If story status changed to voting, stop generating plots
+          if (updatedStory.status === 'voting') {
+            setIsGeneratingPlots(false);
+          }
         }
       });
       return () => unsubscribe();
@@ -103,6 +168,17 @@ export default function CampaignStory() {
 
   const handleReadyUp = async () => {
     if (!user) return;
+    
+    // Check if user has a character in this party
+    const userCharacter = partyCharacters.find(char => char.userId === user.uid);
+    
+    if (!userCharacter) {
+      // No character exists, redirect to character creation
+      navigate(`/character-creation/${partyId}`);
+      return;
+    }
+    
+    // User has a character, proceed with ready up
     try {
       await setPlayerReady(story.id, user.uid);
       setIsReady(true);
@@ -112,8 +188,35 @@ export default function CampaignStory() {
   };
 
   const handleStartStory = async () => {
+    // Prevent duplicate requests
+    if (isGeneratingPlotsRef.current || story?.status === 'voting' || story?.status === 'storytelling') {
+      console.log('Plot generation already in progress or completed');
+      return;
+    }
+    
+    // Check if plots already exist
+    const existingPlots = story?.storyMessages?.find(msg => msg.type === 'plot_selection');
+    if (existingPlots) {
+      console.log('Plots already exist, skipping generation');
+      return;
+    }
+    
+    // Additional check to prevent multiple clicks
+    if (loading) {
+      console.log('Already loading, skipping request');
+      return;
+    }
+    
     try {
+      isGeneratingPlotsRef.current = true;
+      setIsGeneratingPlots(true);
       setLoading(true);
+      
+      // Double-check that we're still in ready_up status
+      if (story?.status !== 'ready_up') {
+        console.log('Story is no longer in ready_up status');
+        return;
+      }
       
       // Generate character context for AI
       const characterContext = partyCharacters.map(char => 
@@ -122,7 +225,7 @@ export default function CampaignStory() {
       
       // Generate plot options
       const plotPrompt = `Generate 3 distinct campaign plot options for this party. For each plot, provide a compelling title and a brief summary (2-3 sentences). Format as:
-      
+
 Plot 1: [Title]
 [Summary]
 
@@ -143,137 +246,133 @@ Party: ${characterContext}`;
         type: 'plot_selection'
       });
       
-      // Update story status
+      // Update story status to voting (DM will select plot)
       await updateCampaignStory(story.id, {
         status: 'voting',
-        votingSession: {
-          type: 'plot_selection',
-          options: ['plot1', 'plot2', 'plot3'],
-          votes: {},
-          round: 1
-        }
+        votingSession: null // Ensure no old voting data
       });
       
     } catch (error) {
       setError('Failed to start story generation');
       console.error(error);
     } finally {
+      isGeneratingPlotsRef.current = false;
+      setIsGeneratingPlots(false);
       setLoading(false);
     }
   };
 
-  const handleVote = async (vote) => {
-    if (!user) return;
-    try {
-      await castVote(story.id, user.uid, vote);
-    } catch (error) {
-      setError('Failed to cast vote');
+  const handlePlotSelection = async (plotNumber) => {
+    if (!user || !party) return;
+    
+    // Only the campaign creator (dmId) can select the plot
+    if (party.dmId !== user.uid) {
+      setError('Only the campaign creator can select the plot');
+      return;
     }
-  };
-
-  // Check voting results and handle ties
-  useEffect(() => {
-    if (story?.status === 'voting' && story.votingSession) {
-      const votes = story.votingSession.votes || {};
-      const voteCounts = {};
-      
-      // Count votes
-      Object.values(votes).forEach(vote => {
-        voteCounts[vote] = (voteCounts[vote] || 0) + 1;
-      });
-      
-      const totalVotes = Object.keys(votes).length;
-      const totalPlayers = partyCharacters.length;
-      
-      // Check if all players have voted
-      if (totalVotes === totalPlayers) {
-        const maxVotes = Math.max(...Object.values(voteCounts));
-        const winners = Object.keys(voteCounts).filter(vote => voteCounts[vote] === maxVotes);
-        
-        if (winners.length === 1) {
-          // Clear winner - start storytelling
-          handleVoteResult(winners[0]);
-        } else {
-          // Tie - start re-vote
-          handleTie(winners);
-        }
-      }
+    
+    // Check if plot has already been selected
+    if (story?.status === 'storytelling') {
+      console.log('Plot already selected, story in progress');
+      return;
     }
-  }, [story?.votingSession, partyCharacters.length]);
-
-  const handleVoteResult = async (winningPlot) => {
+    
     try {
+      setLoading(true);
+      
       // Get the plot details from the story messages
       const plotMessage = story.storyMessages.find(msg => msg.type === 'plot_selection');
       
       // Update story status to storytelling
       await updateCampaignStory(story.id, {
         status: 'storytelling',
-        currentPlot: winningPlot,
+        currentPlot: plotNumber,
         votingSession: null
       });
       
       // Add a message indicating the plot was chosen
       await addStoryMessage(story.id, {
         role: 'assistant',
-        content: `The party has chosen to pursue this adventure! Let the story begin...`,
+        content: `The Dungeon Master has chosen Plot ${plotNumber}! Let the story begin...`,
         type: 'plot_selected'
       });
       
-    } catch (error) {
-      setError('Failed to process vote result');
-      console.error(error);
-    }
-  };
-
-  const handleTie = async (tiedPlots) => {
-    try {
-      // Start a re-vote with only the tied options
-      await updateCampaignStory(story.id, {
-        votingSession: {
-          type: 'plot_selection',
-          options: tiedPlots,
-          votes: {},
-          round: (story.votingSession?.round || 1) + 1,
-          isTieBreak: true
-        }
-      });
+      // Generate initial story introduction
+      const storyIntroduction = await dungeonMasterService.generateStoryIntroduction(
+        partyCharacters,
+        plotMessage?.content || '',
+        plotNumber
+      );
       
-      // Add a message about the tie
+      // Add the story introduction
       await addStoryMessage(story.id, {
         role: 'assistant',
-        content: `It's a tie! Please vote again between the tied options.`,
-        type: 'tie_break'
+        content: storyIntroduction,
+        type: 'story_introduction'
       });
       
+      // Set the DM as the initial controller
+      await setCurrentController(story.id, party.dmId);
+      
+      // Don't automatically set the first speaker - let DM choose
+      
     } catch (error) {
-      setError('Failed to handle tie');
+      setError('Failed to select plot');
       console.error(error);
+    } finally {
+      setLoading(false);
     }
   };
 
-  const handleSendResponse = async () => {
-    if (!playerResponse.trim() || !user) return;
+  const handleSendResponse = async (responseType = null) => {
+    if (!playerResponse.trim() || !story?.currentSpeaker) return;
     
     try {
-      const userCharacter = partyCharacters.find(char => char.userId === user.uid);
-      
       await addStoryMessage(story.id, {
         role: 'user',
         content: playerResponse,
-        playerId: user.uid,
-        playerName: userCharacter?.name || 'Unknown',
-        responseType: responseType
+        playerId: story.currentSpeaker.userId,
+        playerName: story.currentSpeaker.name
       });
       
       setPlayerResponse('');
+      // Clear current speaker after sending, but keep control
+      await setCurrentSpeaker(story.id, null);
+      
+      // Add context based on response type for DM controls
+      let enhancedPrompt = playerResponse;
+      let aiResponseType = 'individual';
+      
+      if (responseType && party?.dmId === user?.uid) {
+        switch (responseType) {
+          case 'combat':
+            enhancedPrompt = `${playerResponse}\n\n[DM NOTE: This response should naturally lead to or initiate combat. Include enemies, threats, or dangerous situations that require immediate action.]`;
+            aiResponseType = 'combat_initiation';
+            break;
+          case 'climax':
+            enhancedPrompt = `${playerResponse}\n\n[DM NOTE: Build dramatic tension and suspense. Create a sense of urgency, danger, or high stakes that raises the emotional intensity.]`;
+            aiResponseType = 'tension_building';
+            break;
+          case 'resolution':
+            enhancedPrompt = `${playerResponse}\n\n[DM NOTE: Provide resolution to current conflicts or challenges. Offer closure, rewards, or peaceful outcomes that satisfy the current story arc.]`;
+            aiResponseType = 'conflict_resolution';
+            break;
+          case 'twist':
+            enhancedPrompt = `${playerResponse}\n\n[DM NOTE: Introduce an unexpected plot twist or revelation. Add new information, betrayals, hidden motives, or surprising developments that change the story direction.]`;
+            aiResponseType = 'plot_twist';
+            break;
+          default:
+            enhancedPrompt = playerResponse;
+            aiResponseType = 'individual';
+        }
+      }
       
       // Generate AI response
       const aiResponse = await dungeonMasterService.generateStoryContinuation(
         partyCharacters, 
         story.storyMessages, 
-        playerResponse, 
-        responseType
+        enhancedPrompt, 
+        aiResponseType
       );
       
       // Check if AI response indicates combat
@@ -290,6 +389,26 @@ Party: ${characterContext}`;
       
       // If combat is initiated, transition to combat screen
       if (isCombatResponse) {
+        // Create combat session in database
+        const combatData = {
+          storyContext: aiResponse,
+          partyMembers: partyCharacters.map(char => ({
+            id: char.id,
+            name: char.name,
+            class: char.class,
+            level: char.level,
+            hp: char.hp || 10 + (char.constitution - 10) * 2,
+            maxHp: char.hp || 10 + (char.constitution - 10) * 2,
+            ac: char.ac || 10,
+            initiative: Math.floor(Math.random() * 20) + 1 + Math.floor((char.dexterity - 10) / 2),
+            userId: char.userId
+          })),
+          enemies: [], // Will be generated in combat screen
+          initiative: [] // Will be set when combat starts
+        };
+        
+        await createCombatSession(partyId, combatData);
+        
         // Pause the story
         await updateCampaignStory(story.id, {
           status: 'paused',
@@ -312,12 +431,43 @@ Party: ${characterContext}`;
 
   const getReadyCount = () => story?.readyPlayers?.length || 0;
   const getTotalPlayers = () => {
+    // Always use party data if available (most reliable)
+    if (party && party.members && Array.isArray(party.members)) {
+      return party.members.length;
+    }
+    // Fallback to character count if no party data
     if (partyCharacters.length > 0) {
       return partyCharacters.length;
     }
-    return partyMembers.length;
+    // Fallback to party members if loaded
+    if (partyMembers.length > 0) {
+      return partyMembers.length;
+    }
+    // Final fallback
+    return 1;
   };
   const allPlayersReady = getReadyCount() === getTotalPlayers();
+
+  // Parse plot names from AI response
+  const getPlotNames = () => {
+    const plotMessage = story?.storyMessages?.find(msg => msg.type === 'plot_selection');
+    if (!plotMessage?.content) return ['Plot 1', 'Plot 2', 'Plot 3'];
+    
+    const content = plotMessage.content;
+    const plotNames = [];
+    
+    // Extract plot names using regex
+    const plotMatches = content.match(/Plot \d+:\s*([^\n]+)/g);
+    if (plotMatches) {
+      plotMatches.forEach(match => {
+        const name = match.replace(/Plot \d+:\s*/, '').trim();
+        plotNames.push(name);
+      });
+    }
+    
+    // Fallback to generic names if parsing fails
+    return plotNames.length === 3 ? plotNames : ['Plot 1', 'Plot 2', 'Plot 3'];
+  };
 
   if (!user) {
     return (
@@ -405,26 +555,31 @@ Party: ${characterContext}`;
                 ))
               ) : (
                 // Show party members if no characters exist
-                partyMembers.map((memberId, index) => (
-                  <div key={memberId} className="fantasy-card bg-amber-50">
-                    <div className="text-center">
-                      <div className="w-16 h-16 bg-stone-300 rounded-full mx-auto mb-2 flex items-center justify-center">
-                        <span className="text-xs text-stone-600">IMG</span>
-                      </div>
-                      <h3 className="font-bold text-stone-800">Player {index + 1}</h3>
-                      <p className="text-sm text-stone-600">
-                        No character created yet
-                      </p>
-                      <div className="mt-2">
-                        {story.readyPlayers?.includes(memberId) ? (
-                          <span className="text-green-600 font-semibold">✓ Ready</span>
-                        ) : (
-                          <span className="text-stone-500">Waiting...</span>
-                        )}
+                partyMembers.map((memberId, index) => {
+                  const profile = memberProfiles[memberId];
+                  const displayName = profile?.username || `Player ${index + 1}`;
+                  
+                  return (
+                    <div key={memberId} className="fantasy-card bg-amber-50">
+                      <div className="text-center">
+                        <div className="w-16 h-16 bg-stone-300 rounded-full mx-auto mb-2 flex items-center justify-center">
+                          <span className="text-xs text-stone-600">IMG</span>
+                        </div>
+                        <h3 className="font-bold text-stone-800">{displayName}</h3>
+                        <p className="text-sm text-stone-600">
+                          No character created yet
+                        </p>
+                        <div className="mt-2">
+                          {story.readyPlayers?.includes(memberId) ? (
+                            <span className="text-green-600 font-semibold">✓ Ready</span>
+                          ) : (
+                            <span className="text-stone-500">Waiting...</span>
+                          )}
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
 
@@ -434,7 +589,10 @@ Party: ${characterContext}`;
                   onClick={handleReadyUp}
                   className="fantasy-button"
                 >
-                  Ready Up
+                  {partyCharacters.find(char => char.userId === user?.uid) 
+                    ? 'Ready Up' 
+                    : 'Create Character & Ready Up'
+                  }
                 </button>
               ) : (
                 <div className="text-green-600 font-semibold">You are ready!</div>
@@ -443,10 +601,10 @@ Party: ${characterContext}`;
               {allPlayersReady && (
                 <button
                   onClick={handleStartStory}
-                  disabled={loading}
+                  disabled={loading || isGeneratingPlots || story?.status === 'voting'}
                   className="fantasy-button bg-amber-700 hover:bg-amber-800 ml-4"
                 >
-                  {loading ? 'Generating Story...' : 'Start Story Generation'}
+                  {loading || isGeneratingPlots ? 'Generating Story...' : 'Start Story Generation'}
                 </button>
               )}
             </div>
@@ -469,32 +627,40 @@ Party: ${characterContext}`;
                 ))}
             </div>
 
-            {/* Voting interface */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {(story.votingSession?.options || ['plot1', 'plot2', 'plot3']).map((plot, index) => {
-                const voteCount = Object.values(story.votingSession?.votes || {}).filter(v => v === plot).length;
-                const hasVoted = user && story.votingSession?.votes?.[user.uid] === plot;
-                const plotNumber = story.votingSession?.isTieBreak ? plot : `Plot ${index + 1}`;
+            {/* Plot Selection Interface for DM */}
+            {party && party.dmId === user?.uid ? (
+              <div className="space-y-4">
+                <div className="bg-amber-100 border border-amber-200 rounded-lg p-4">
+                  <h3 className="font-bold text-amber-800 mb-2">🎲 Dungeon Master's Choice</h3>
+                  <p className="text-amber-700">
+                    As the campaign creator, you get to choose which plot the party will pursue. 
+                    Select one of the three plot options below to begin the adventure.
+                  </p>
+                </div>
                 
-                return (
-                  <div key={plot} className="fantasy-card bg-amber-50">
-                    <h3 className="font-bold text-stone-800 mb-2">{plotNumber}</h3>
-                    <div className="text-sm text-stone-600 mb-3">
-                      Votes: {voteCount}/{getTotalPlayers()}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {getPlotNames().map((plotName, index) => (
+                    <div key={index} className="fantasy-card bg-amber-50">
+                      <h3 className="font-bold text-stone-800 mb-2">{plotName}</h3>
+                      <button
+                        onClick={() => handlePlotSelection(index + 1)}
+                        disabled={loading}
+                        className="fantasy-button w-full"
+                      >
+                        {loading ? 'Selecting...' : 'Choose Plot'}
+                      </button>
                     </div>
-                    <button
-                      onClick={() => handleVote(plot)}
-                      disabled={hasVoted}
-                      className={`fantasy-button w-full ${
-                        hasVoted ? 'bg-green-600 cursor-not-allowed' : ''
-                      }`}
-                    >
-                      {hasVoted ? 'Voted ✓' : 'Vote'}
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="bg-blue-100 border border-blue-200 rounded-lg p-4">
+                <h3 className="font-bold text-blue-800 mb-2">⏳ Waiting for Dungeon Master</h3>
+                <p className="text-blue-700">
+                  The campaign creator is choosing which plot to pursue. Please wait while they make their decision.
+                </p>
+              </div>
+            )}
           </div>
         )}
 
@@ -503,19 +669,27 @@ Party: ${characterContext}`;
           <div className="space-y-6">
             <h2 className="text-xl font-bold text-stone-800">Your Adventure</h2>
             
+            {/* Turn-taking guidance */}
+            <div className="bg-blue-100 border border-blue-200 rounded-lg p-4">
+              <h3 className="font-bold text-blue-800 mb-2">🎭 Storytelling Guidelines</h3>
+              <p className="text-blue-700 text-sm">
+                <strong>Turn-taking:</strong> Respond to the story or let someone else speak. Only one person can respond at a time.
+              </p>
+            </div>
+            
             {/* Story Messages */}
             <div className="bg-stone-50 border border-stone-200 rounded-lg p-4 max-h-96 overflow-y-auto">
               {story.storyMessages.map(message => (
                 <div key={message.id} className="mb-4">
                   {message.role === 'assistant' ? (
                     <div className="bg-blue-100 border border-blue-200 rounded-lg p-3">
-                      <div className="font-semibold text-blue-800 mb-1">🤖 Dungeon Master</div>
-                      <div className="text-blue-900">{message.content}</div>
+                      <div className="font-semibold text-blue-800 mb-1">Game Master</div>
+                      <div className="text-blue-900 whitespace-pre-wrap">{message.content}</div>
                     </div>
                   ) : (
                     <div className="bg-green-100 border border-green-200 rounded-lg p-3">
                       <div className="font-semibold text-green-800 mb-1">
-                        {message.playerName} ({message.responseType})
+                        {message.playerName}
                       </div>
                       <div className="text-green-900">{message.content}</div>
                     </div>
@@ -524,42 +698,172 @@ Party: ${characterContext}`;
               ))}
             </div>
 
-            {/* Response Input */}
-            <div className="space-y-4">
-              <div className="flex space-x-2">
-                {['individual', 'team', 'investigate', 'combat', 'social'].map(type => (
-                  <button
-                    key={type}
-                    onClick={() => setResponseType(type)}
-                    className={`px-3 py-1 rounded text-sm font-medium ${
-                      responseType === type
-                        ? 'bg-amber-600 text-white'
-                        : 'bg-stone-200 text-stone-700 hover:bg-stone-300'
-                    }`}
-                  >
-                    {type.charAt(0).toUpperCase() + type.slice(1)}
-                  </button>
-                ))}
+            {/* Response Interface */}
+            {story?.currentSpeaker ? (
+              <div className="space-y-4">
+                {/* Current Speaker Response - Only show to the user whose character is selected */}
+                {story.currentSpeaker.userId === user?.uid ? (
+                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                    <h3 className="font-bold text-amber-800 mb-3">How will you respond?</h3>
+                    <div className="flex items-center space-x-3 mb-4">
+                      <div className="w-10 h-10 bg-amber-200 rounded-full flex items-center justify-center">
+                        <span className="text-amber-800 font-bold">
+                          {story.currentSpeaker.name.charAt(0)}
+                        </span>
+                      </div>
+                      <div>
+                        <div className="font-medium text-amber-800">{story.currentSpeaker.name}</div>
+                        <div className="text-sm text-amber-700">
+                          {story.currentSpeaker.race} {story.currentSpeaker.class}
+                        </div>
+                      </div>
+                    </div>
+                    
+                    <div className="flex space-x-2">
+                      <input
+                        type="text"
+                        value={playerResponse}
+                        onChange={(e) => setPlayerResponse(e.target.value)}
+                        placeholder={`What does ${story.currentSpeaker.name} do?`}
+                        className="fantasy-input flex-1"
+                        onKeyPress={(e) => e.key === 'Enter' && handleSendResponse()}
+                      />
+                      <button
+                        onClick={handleSendResponse}
+                        disabled={!playerResponse.trim()}
+                        className="fantasy-button"
+                      >
+                        Send
+                      </button>
+                    </div>
+                    
+                    {/* DM-only control options - hidden from other party members */}
+                    {party?.dmId === user?.uid && (
+                      <div className="mt-4 pt-4 border-t border-amber-300">
+                        <h4 className="font-bold text-amber-800 mb-3 text-sm">🎲 DM Controls (Hidden from party)</h4>
+                        <div className="grid grid-cols-2 gap-2">
+                          <button
+                            onClick={() => handleSendResponse('combat')}
+                            disabled={!playerResponse.trim()}
+                            className="fantasy-button bg-red-600 hover:bg-red-700 text-sm py-2"
+                          >
+                            ⚔️ Advance to Combat
+                          </button>
+                          <button
+                            onClick={() => handleSendResponse('climax')}
+                            disabled={!playerResponse.trim()}
+                            className="fantasy-button bg-purple-600 hover:bg-purple-700 text-sm py-2"
+                          >
+                            🌟 Build Tension
+                          </button>
+                          <button
+                            onClick={() => handleSendResponse('resolution')}
+                            disabled={!playerResponse.trim()}
+                            className="fantasy-button bg-green-600 hover:bg-green-700 text-sm py-2"
+                          >
+                            ✨ Resolve Conflict
+                          </button>
+                          <button
+                            onClick={() => handleSendResponse('twist')}
+                            disabled={!playerResponse.trim()}
+                            className="fantasy-button bg-orange-600 hover:bg-orange-700 text-sm py-2"
+                          >
+                            🔄 Add Plot Twist
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                    <h3 className="font-bold text-blue-800 mb-3">Waiting for {story.currentSpeaker.name} to respond</h3>
+                    <div className="flex items-center space-x-3">
+                      <div className="w-10 h-10 bg-blue-200 rounded-full flex items-center justify-center">
+                        <span className="text-blue-800 font-bold">
+                          {story.currentSpeaker.name.charAt(0)}
+                        </span>
+                      </div>
+                      <div>
+                        <div className="font-medium text-blue-800">{story.currentSpeaker.name}</div>
+                        <div className="text-sm text-blue-700">
+                          {story.currentSpeaker.race} {story.currentSpeaker.class}
+                        </div>
+                      </div>
+                    </div>
+                    <p className="text-blue-700 mt-2">
+                      {story.currentSpeaker.name} is currently speaking. Please wait for their response.
+                    </p>
+                  </div>
+                )}
+
+                {/* Let someone else speak - Show to current speaker */}
+                {story?.currentSpeaker?.userId === user?.uid && (
+                  <div className="bg-stone-50 border border-stone-200 rounded-lg p-4">
+                    <h4 className="font-bold text-stone-800 mb-3">Let someone else speak</h4>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                      {partyCharacters.map(character => (
+                        <button
+                          key={character.id}
+                          onClick={async () => {
+                            await setCurrentSpeaker(story.id, character);
+                            await setCurrentController(story.id, character.userId);
+                          }}
+                          disabled={character.id === story?.currentSpeaker?.id}
+                          className={`p-3 rounded-lg border-2 transition-colors ${
+                            character.id === story?.currentSpeaker?.id
+                              ? 'border-stone-300 bg-stone-100 text-stone-500 cursor-not-allowed'
+                              : 'border-stone-200 bg-white hover:border-stone-300 text-stone-700'
+                          }`}
+                        >
+                          <div className="font-medium">{character.name}</div>
+                          <div className="text-sm opacity-75">
+                            {character.race} {character.class}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
-              
-              <div className="flex space-x-2">
-                <input
-                  type="text"
-                  value={playerResponse}
-                  onChange={(e) => setPlayerResponse(e.target.value)}
-                  placeholder="Type your response..."
-                  className="fantasy-input flex-1"
-                  onKeyPress={(e) => e.key === 'Enter' && handleSendResponse()}
-                />
-                <button
-                  onClick={handleSendResponse}
-                  disabled={!playerResponse.trim()}
-                  className="fantasy-button"
-                >
-                  Send
-                </button>
-              </div>
-            </div>
+            ) : (
+              // Show character selection when no one is speaking
+              party?.dmId === user?.uid ? (
+                <div className="bg-stone-50 border border-stone-200 rounded-lg p-4">
+                  <h3 className="font-bold text-stone-800 mb-3">
+                    {story.storyMessages.length > 0 ? 'Choose who speaks next' : 'Choose who speaks first'}
+                  </h3>
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                    {partyCharacters.map(character => (
+                      <button
+                        key={character.id}
+                        onClick={async () => {
+                          await setCurrentSpeaker(story.id, character);
+                          await setCurrentController(story.id, character.userId);
+                        }}
+                        className="p-3 rounded-lg border-2 border-stone-200 bg-white hover:border-stone-300 text-stone-700 transition-colors"
+                      >
+                        <div className="font-medium">{character.name}</div>
+                        <div className="text-sm opacity-75">
+                          {character.race} {character.class}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                  <h3 className="font-bold text-blue-800 mb-3">
+                    {story.storyMessages.length > 0 ? 'Waiting for next speaker' : 'Waiting for the story to begin'}
+                  </h3>
+                  <p className="text-blue-700">
+                    {story.storyMessages.length > 0 
+                      ? 'The Dungeon Master is choosing who will speak next. Please wait.'
+                      : 'The Dungeon Master is choosing who will speak first. Please wait.'
+                    }
+                  </p>
+                </div>
+              )
+            )}
           </div>
         )}
       </div>

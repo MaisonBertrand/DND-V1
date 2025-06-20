@@ -14,6 +14,75 @@ import {
 } from 'firebase/firestore';
 import { db } from './config';
 
+// User Profile Management
+export const createUserProfile = async (userId, userData) => {
+  try {
+    const profile = {
+      ...userData,
+      userId,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    };
+    const docRef = await addDoc(collection(db, 'userProfiles'), profile);
+    return { id: docRef.id, ...profile };
+  } catch (error) {
+    console.error('Error creating user profile:', error);
+    throw error;
+  }
+};
+
+export const getUserProfile = async (userId) => {
+  try {
+    const q = query(
+      collection(db, 'userProfiles'),
+      where('userId', '==', userId)
+    );
+    const querySnapshot = await getDocs(q);
+    
+    if (querySnapshot.empty) {
+      return null;
+    }
+    
+    const doc = querySnapshot.docs[0];
+    return { id: doc.id, ...doc.data() };
+  } catch (error) {
+    console.error('Error getting user profile:', error);
+    throw error;
+  }
+};
+
+export const updateUserProfile = async (userId, updates) => {
+  try {
+    const profile = await getUserProfile(userId);
+    if (!profile) {
+      throw new Error('User profile not found');
+    }
+    
+    const profileRef = doc(db, 'userProfiles', profile.id);
+    await updateDoc(profileRef, {
+      ...updates,
+      updatedAt: serverTimestamp()
+    });
+  } catch (error) {
+    console.error('Error updating user profile:', error);
+    throw error;
+  }
+};
+
+export const checkUsernameAvailability = async (username) => {
+  try {
+    const q = query(
+      collection(db, 'userProfiles'),
+      where('username', '==', username)
+    );
+    const querySnapshot = await getDocs(q);
+    return querySnapshot.empty; // true if username is available
+  } catch (error) {
+    console.error('Error checking username availability:', error);
+    throw error;
+  }
+};
+
 // Character Management
 export const saveCharacter = async (userId, partyId, characterData) => {
   try {
@@ -225,6 +294,22 @@ export const getPartyByInviteCode = async (inviteCode) => {
     return { id: doc.id, ...doc.data() };
   } catch (error) {
     console.error('Error getting party by invite code:', error);
+    throw error;
+  }
+};
+
+export const getPartyById = async (partyId) => {
+  try {
+    const partyRef = doc(db, 'parties', partyId);
+    const partyDoc = await getDoc(partyRef);
+    
+    if (!partyDoc.exists()) {
+      return null;
+    }
+    
+    return { id: partyDoc.id, ...partyDoc.data() };
+  } catch (error) {
+    console.error('Error getting party by ID:', error);
     throw error;
   }
 };
@@ -453,30 +538,6 @@ export const addStoryMessage = async (storyId, message) => {
   }
 };
 
-export const castVote = async (storyId, userId, vote) => {
-  try {
-    const storyRef = doc(db, 'campaignStories', storyId);
-    const storyDoc = await getDoc(storyRef);
-    const storyData = storyDoc.data();
-    
-    const currentVotes = storyData.votingSession?.votes || {};
-    const newVotes = { ...currentVotes, [userId]: vote };
-    
-    await updateDoc(storyRef, {
-      votingSession: {
-        ...storyData.votingSession,
-        votes: newVotes
-      },
-      lastUpdated: serverTimestamp()
-    });
-    
-    return newVotes;
-  } catch (error) {
-    console.error('Error casting vote:', error);
-    throw error;
-  }
-};
-
 export const setPlayerReady = async (storyId, userId) => {
   try {
     const storyRef = doc(db, 'campaignStories', storyId);
@@ -508,6 +569,109 @@ export const subscribeToCampaignStory = (storyId, callback) => {
     });
   } catch (error) {
     console.error('Error subscribing to campaign story:', error);
+    throw error;
+  }
+};
+
+export const setCurrentSpeaker = async (storyId, speakerData) => {
+  try {
+    const storyRef = doc(db, 'campaignStories', storyId);
+    await updateDoc(storyRef, {
+      currentSpeaker: speakerData,
+      lastUpdated: serverTimestamp()
+    });
+  } catch (error) {
+    console.error('Error setting current speaker:', error);
+    throw error;
+  }
+};
+
+export const setCurrentController = async (storyId, controllerId) => {
+  try {
+    const storyRef = doc(db, 'campaignStories', storyId);
+    await updateDoc(storyRef, {
+      currentController: controllerId,
+      lastUpdated: serverTimestamp()
+    });
+  } catch (error) {
+    console.error('Error setting current controller:', error);
+    throw error;
+  }
+};
+
+export const createCombatSession = async (partyId, combatData) => {
+  try {
+    const combat = {
+      partyId,
+      status: 'active',
+      storyContext: combatData.storyContext,
+      partyMembers: combatData.partyMembers,
+      enemies: combatData.enemies,
+      initiative: combatData.initiative,
+      currentTurn: 0,
+      combatState: 'preparation',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    };
+    const docRef = await addDoc(collection(db, 'combatSessions'), combat);
+    return { id: docRef.id, ...combat };
+  } catch (error) {
+    console.error('Error creating combat session:', error);
+    throw error;
+  }
+};
+
+export const getCombatSession = async (partyId) => {
+  try {
+    const q = query(
+      collection(db, 'combatSessions'),
+      where('partyId', '==', partyId),
+      where('status', '==', 'active')
+    );
+    const querySnapshot = await getDocs(q);
+    
+    if (querySnapshot.empty) {
+      return null;
+    }
+    
+    const doc = querySnapshot.docs[0];
+    return { id: doc.id, ...doc.data() };
+  } catch (error) {
+    console.error('Error getting combat session:', error);
+    throw error;
+  }
+};
+
+export const updateCombatSession = async (combatId, updates) => {
+  try {
+    const combatRef = doc(db, 'combatSessions', combatId);
+    await updateDoc(combatRef, {
+      ...updates,
+      updatedAt: serverTimestamp()
+    });
+  } catch (error) {
+    console.error('Error updating combat session:', error);
+    throw error;
+  }
+};
+
+export const subscribeToCombatSession = (partyId, callback) => {
+  try {
+    const q = query(
+      collection(db, 'combatSessions'),
+      where('partyId', '==', partyId),
+      where('status', '==', 'active')
+    );
+    return onSnapshot(q, (querySnapshot) => {
+      if (!querySnapshot.empty) {
+        const doc = querySnapshot.docs[0];
+        callback({ id: doc.id, ...doc.data() });
+      } else {
+        callback(null);
+      }
+    });
+  } catch (error) {
+    console.error('Error subscribing to combat session:', error);
     throw error;
   }
 }; 

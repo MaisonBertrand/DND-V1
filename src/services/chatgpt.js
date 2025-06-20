@@ -272,14 +272,15 @@ Previous Story Context:
 ${conversationHistory.map(msg => `${msg.role === 'assistant' ? 'DM' : 'Player'}: ${msg.content}`).join('\n')}
 
 Please provide a compelling continuation that:
-1. Acknowledges the player's action
-2. Advances the story naturally
-3. Creates new opportunities or challenges
-4. Maintains the campaign's tone and pacing
-5. Considers the response type and party composition
-6. Ends with a clear situation for the players to respond to
+1. Acknowledges the player's action and its consequences
+2. Advances the story naturally and creates new opportunities
+3. Maintains the campaign's tone and pacing
+4. Considers the response type and party composition
+5. Ends with a clear situation that invites the next player to respond
+6. Encourages character interaction and roleplay
+7. Provides multiple possible directions for the party to explore
 
-Keep your response engaging but concise (2-3 paragraphs maximum).`;
+Keep your response engaging but concise (2-3 paragraphs maximum). Remember that only one player responds at a time, so end with a situation that gives the next player something meaningful to react to.`;
 
       const response = await callBackendAPI([
         { role: "system", content: this.systemPrompt },
@@ -324,6 +325,41 @@ Make each plot distinct and appealing to different play styles. Consider the par
     } catch (error) {
       console.error('Error generating plot options:', error);
       throw new Error(`Failed to generate plot options: ${error.message}`);
+    }
+  }
+
+  async generateStoryIntroduction(partyCharacters, plotContent, selectedPlot) {
+    try {
+      const characterDetails = partyCharacters.map(char => 
+        `${char.name} - Level ${char.level} ${char.race} ${char.class}. ${char.personality || ''}. ${char.backstory || ''}`
+      ).join('\n');
+
+      const prompt = `As a Dungeon Master, create an engaging story introduction for the beginning of this campaign.
+
+Party: ${characterDetails}
+Selected Plot: Plot ${selectedPlot}
+Plot Details: ${plotContent}
+
+Create an introduction that includes:
+1. A vivid description of the starting town/settlement where the party begins
+2. How each character arrives or is already present in this location
+3. The initial situation or hook that draws the party together
+4. A sense of atmosphere and setting that matches the chosen plot
+5. An opening scene that gives the party their first decision or action to take
+
+Make this feel like the opening of an epic adventure. Set the tone, establish the setting, and give the party a clear starting point. End with a situation that requires the party to make a choice or take action.
+
+Keep the introduction engaging but concise (3-4 paragraphs maximum).`;
+
+      const response = await callBackendAPI([
+        { role: "system", content: this.systemPrompt },
+        { role: "user", content: prompt }
+      ], 'gpt-4', 800, 0.8);
+
+      return response.choices[0].message.content;
+    } catch (error) {
+      console.error('Error generating story introduction:', error);
+      throw new Error(`Failed to generate story introduction: ${error.message}`);
     }
   }
 }
