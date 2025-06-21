@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { onAuthChange } from '../firebase/auth';
-import { getCharacterByUserAndParty, getPartyCharacters } from '../firebase/database';
+import { getCharacterByUserAndParty, getPartyCharacters, getPartyById } from '../firebase/database';
 import DungeonMaster from '../components/DungeonMaster';
 
 export default function CampaignManagement() {
@@ -10,6 +10,7 @@ export default function CampaignManagement() {
   const [user, setUser] = useState(null);
   const [userCharacter, setUserCharacter] = useState(null);
   const [partyCharacters, setPartyCharacters] = useState([]);
+  const [party, setParty] = useState(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('story');
   const [story, setStory] = useState({
@@ -39,12 +40,14 @@ export default function CampaignManagement() {
   const loadPartyData = async (userId, partyId) => {
     try {
       setLoading(true);
-      const [character, characters] = await Promise.all([
+      const [character, characters, partyData] = await Promise.all([
         getCharacterByUserAndParty(userId, partyId),
-        getPartyCharacters(partyId)
+        getPartyCharacters(partyId),
+        getPartyById(partyId)
       ]);
       setUserCharacter(character);
       setPartyCharacters(characters);
+      setParty(partyData);
     } catch (error) {
       // Handle error silently or show user-friendly message
     } finally {
@@ -283,6 +286,7 @@ export default function CampaignManagement() {
         {activeTab === 'ai-dm' && (
           <DungeonMaster
             partyCharacters={partyCharacters}
+            partyInfo={party}
             onStoryGenerated={(content) => {
               // You could save this to your database or use it to populate the story
             }}

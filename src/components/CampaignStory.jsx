@@ -14,9 +14,19 @@ import {
   getPartyById,
   setCurrentSpeaker,
   setCurrentController,
-  createCombatSession
+  createCombatSession,
+  subscribeToCombatSession
 } from '../firebase/database';
 import { dungeonMasterService } from '../services/chatgpt';
+import { 
+  generateHiddenObjectives, 
+  checkObjectiveDiscovery, 
+  updateObjectiveState, 
+  getDiscoveredObjectives,
+  areMainObjectivesComplete,
+  generateObjectiveHints,
+  OBJECTIVE_STATES
+} from '../services/objectives';
 
 export default function CampaignStory() {
   const { partyId } = useParams();
@@ -32,7 +42,14 @@ export default function CampaignStory() {
   const [playerResponse, setPlayerResponse] = useState('');
   const [isReady, setIsReady] = useState(false);
   const [isGeneratingPlots, setIsGeneratingPlots] = useState(false);
+  const [isCombatStarting, setIsCombatStarting] = useState(false);
   const isGeneratingPlotsRef = useRef(false);
+  
+  // Objective system state
+  const [objectives, setObjectives] = useState([]);
+  const [currentPhase, setCurrentPhase] = useState('Investigation');
+  const [objectiveHints, setObjectiveHints] = useState([]);
+  const [showObjectiveHints, setShowObjectiveHints] = useState(false);
 
   useEffect(() => {
     const unsubscribe = onAuthChange((user) => {
@@ -50,6 +67,34 @@ export default function CampaignStory() {
       loadStoryAndCharacters();
     }
   }, [user, partyId]);
+
+  // Subscribe to combat sessions to automatically redirect when combat begins
+  useEffect(() => {
+    if (partyId) {
+      try {
+        const unsubscribe = subscribeToCombatSession(partyId, (combatSession) => {
+          if (combatSession && combatSession.status === 'active') {
+            // Check if we're already on the combat page
+            const currentPath = window.location.pathname;
+            if (!currentPath.includes('/combat/')) {
+              // Combat has been initiated, redirect all players to combat screen
+              navigate(`/combat/${partyId}`);
+            }
+          }
+        });
+        return () => unsubscribe();
+      } catch (error) {
+        console.error('Error subscribing to combat session:', error);
+      }
+    }
+  }, [partyId, navigate]);
+
+  // Reset combat starting state when component unmounts
+  useEffect(() => {
+    return () => {
+      setIsCombatStarting(false);
+    };
+  }, []);
 
   // Auto-ready up when user has a character but isn't ready
   useEffect(() => {
@@ -136,6 +181,22 @@ export default function CampaignStory() {
         
         setStory(storyData);
         setIsReady(storyData.readyPlayers?.includes(user?.uid) || false);
+        
+        // Initialize objectives if story is in storytelling mode
+        if (storyData.status === 'storytelling' && partyData) {
+          const hiddenObjectives = generateHiddenObjectives(partyData.description || '');
+          setObjectives(hiddenObjectives);
+          
+          // Set initial phase based on story progress
+          const messageCount = storyData.storyMessages?.length || 0;
+          if (messageCount < 5) {
+            setCurrentPhase('Investigation');
+          } else if (messageCount < 15) {
+            setCurrentPhase('Conflict');
+          } else {
+            setCurrentPhase('Resolution');
+          }
+        }
       } else {
         // Create new story if none exists
         const newStory = await createCampaignStory(partyId);
@@ -160,11 +221,37 @@ export default function CampaignStory() {
           if (updatedStory.status === 'voting') {
             setIsGeneratingPlots(false);
           }
+          
+          // Update objectives and phase if story is in storytelling mode
+          if (updatedStory.status === 'storytelling' && party) {
+            // Initialize objectives if not already set
+            if (objectives.length === 0) {
+              const hiddenObjectives = generateHiddenObjectives(party.description || '');
+              setObjectives(hiddenObjectives);
+            }
+            
+            // Update phase based on story progress
+            const messageCount = updatedStory.storyMessages?.length || 0;
+            if (messageCount < 5 && currentPhase !== 'Investigation') {
+              setCurrentPhase('Investigation');
+            } else if (messageCount >= 5 && messageCount < 15 && currentPhase !== 'Conflict') {
+              setCurrentPhase('Conflict');
+            } else if (messageCount >= 15 && currentPhase !== 'Resolution') {
+              setCurrentPhase('Resolution');
+            }
+            
+            // Generate objective hints based on current story context
+            const latestMessage = updatedStory.storyMessages?.[updatedStory.storyMessages.length - 1];
+            if (latestMessage && latestMessage.role === 'assistant') {
+              const hints = generateObjectiveHints(objectives, latestMessage.content);
+              setObjectiveHints(hints);
+            }
+          }
         }
       });
       return () => unsubscribe();
     }
-  }, [story?.id, user?.uid]);
+  }, [story?.id, user?.uid, party, objectives, currentPhase]);
 
   const handleReadyUp = async () => {
     if (!user) return;
@@ -194,10 +281,17 @@ export default function CampaignStory() {
       return;
     }
     
-    // Check if plots already exist
-    const existingPlots = story?.storyMessages?.find(msg => msg.type === 'plot_selection');
-    if (existingPlots) {
+    // Check if plots already exist - check for any plot selection messages
+    const existingPlots = story?.storyMessages?.filter(msg => msg.type === 'plot_selection');
+    if (existingPlots && existingPlots.length > 0) {
       console.log('Plots already exist, skipping generation');
+      // If we're in ready_up but have plots, move to voting
+      if (story?.status === 'ready_up') {
+        await updateCampaignStory(story.id, {
+          status: 'voting',
+          votingSession: null
+        });
+      }
       return;
     }
     
@@ -237,7 +331,7 @@ Plot 3: [Title]
 
 Party: ${characterContext}`;
 
-      const plotResponse = await dungeonMasterService.generatePlotOptions(partyCharacters);
+      const plotResponse = await dungeonMasterService.generatePlotOptions(partyCharacters, party);
       
       // Add AI message with plots
       await addStoryMessage(story.id, {
@@ -301,7 +395,8 @@ Party: ${characterContext}`;
       const storyIntroduction = await dungeonMasterService.generateStoryIntroduction(
         partyCharacters,
         plotMessage?.content || '',
-        plotNumber
+        plotNumber,
+        party
       );
       
       // Add the story introduction
@@ -339,6 +434,16 @@ Party: ${characterContext}`;
       // Clear current speaker after sending, but keep control
       await setCurrentSpeaker(story.id, null);
       
+      // Check for objective discovery based on player action
+      const discoveredObjectives = checkObjectiveDiscovery(playerResponse, objectives);
+      if (discoveredObjectives.length > 0) {
+        const updatedObjectives = objectives.map(obj => {
+          const discovered = discoveredObjectives.find(d => d.id === obj.id);
+          return discovered || obj;
+        });
+        setObjectives(updatedObjectives);
+      }
+      
       // Add context based on response type for DM controls
       let enhancedPrompt = playerResponse;
       let aiResponseType = 'individual';
@@ -367,19 +472,44 @@ Party: ${characterContext}`;
         }
       }
       
-      // Generate AI response
-      const aiResponse = await dungeonMasterService.generateStoryContinuation(
+      // Get discovered objectives for AI context
+      const discoveredObjectivesForAI = getDiscoveredObjectives(objectives);
+      
+      // Generate AI response using structured story system
+      const aiResponse = await dungeonMasterService.generateStructuredStoryResponse(
         partyCharacters, 
         story.storyMessages, 
         enhancedPrompt, 
-        aiResponseType
+        currentPhase,
+        discoveredObjectivesForAI,
+        party
       );
       
-      // Check if AI response indicates combat
-      const combatKeywords = ['combat', 'battle', 'fight', 'attack', 'enemy', 'enemies', 'monster', 'monsters', 'initiative'];
-      const isCombatResponse = combatKeywords.some(keyword => 
+      // Enhanced combat detection - requires both combat context AND enemy presence
+      const combatKeywords = ['combat', 'battle', 'fight', 'attack', 'initiative', 'roll for initiative'];
+      const enemyKeywords = [
+        'enemy', 'enemies', 'monster', 'monsters', 'bandit', 'bandits', 
+        'goblin', 'goblins', 'orc', 'orcs', 'dragon', 'dragons', 
+        'troll', 'trolls', 'zombie', 'zombies', 'skeleton', 'skeletons', 
+        'assassin', 'assassins', 'guard', 'guards', 'soldier', 'soldiers',
+        'thief', 'thieves', 'brigand', 'brigands', 'raider', 'raiders',
+        'cultist', 'cultists', 'demon', 'demons', 'devil', 'devils',
+        'ghost', 'ghosts', 'specter', 'specters', 'wraith', 'wraiths',
+        'hobgoblin', 'hobgoblins', 'bugbear', 'bugbears', 'kobold', 'kobolds',
+        'ogre', 'ogres', 'giant', 'giants', 'beholder', 'beholders',
+        'lich', 'liches', 'vampire', 'vampires', 'werewolf', 'werewolves',
+        'hag', 'hags', 'witch', 'witches', 'necromancer', 'necromancers'
+      ];
+      
+      const hasCombatContext = combatKeywords.some(keyword => 
         aiResponse.toLowerCase().includes(keyword)
       );
+      const hasEnemies = enemyKeywords.some(keyword => 
+        aiResponse.toLowerCase().includes(keyword)
+      );
+      
+      // Only initiate combat if BOTH combat context AND enemies are present
+      const isCombatResponse = hasCombatContext && hasEnemies;
       
       await addStoryMessage(story.id, {
         role: 'assistant',
@@ -387,8 +517,18 @@ Party: ${characterContext}`;
         type: isCombatResponse ? 'combat_initiation' : 'story_continuation'
       });
       
+      // Check for phase transition
+      await checkPhaseTransition();
+      
       // If combat is initiated, transition to combat screen
       if (isCombatResponse) {
+        // Check if combat is already starting or if there's an active combat session
+        if (isCombatStarting) {
+          return; // Prevent multiple combat sessions
+        }
+        
+        setIsCombatStarting(true);
+        
         // Create combat session in database
         const combatData = {
           storyContext: aiResponse,
@@ -419,14 +559,121 @@ Party: ${characterContext}`;
           }
         });
         
-        // Navigate to combat screen
-        navigate(`/combat/${partyId}`);
+        // Navigation will be handled by the subscription for all players
       }
       
     } catch (error) {
       setError('Failed to send response');
       console.error(error);
     }
+  };
+
+  // Check and handle phase transitions
+  const checkPhaseTransition = async () => {
+    if (!story || !party) return;
+    
+    const messageCount = story.storyMessages?.length || 0;
+    const discoveredObjectives = getDiscoveredObjectives(objectives);
+    
+    let shouldTransition = false;
+    let newPhase = currentPhase;
+    
+    // Phase transition logic
+    if (currentPhase === 'Investigation' && messageCount >= 5 && discoveredObjectives.length >= 1) {
+      newPhase = 'Conflict';
+      shouldTransition = true;
+    } else if (currentPhase === 'Conflict' && messageCount >= 15 && discoveredObjectives.length >= 2) {
+      newPhase = 'Resolution';
+      shouldTransition = true;
+    }
+    
+    if (shouldTransition && newPhase !== currentPhase) {
+      setCurrentPhase(newPhase);
+      
+      // Generate phase transition message
+      const transitionResponse = await dungeonMasterService.generatePhaseTransition(
+        partyCharacters,
+        currentPhase,
+        `Story has progressed through ${messageCount} messages with ${discoveredObjectives.length} objectives discovered`,
+        party
+      );
+      
+      await addStoryMessage(story.id, {
+        role: 'assistant',
+        content: transitionResponse,
+        type: 'phase_transition'
+      });
+    }
+  };
+
+  // Highlight keywords in story messages
+  const highlightKeywords = (text) => {
+    if (!text) return text;
+    
+    // Enemy keywords to highlight
+    const enemyKeywords = [
+      'enemy', 'enemies', 'monster', 'monsters', 'bandit', 'bandits', 
+      'goblin', 'goblins', 'orc', 'orcs', 'dragon', 'dragons', 
+      'troll', 'trolls', 'zombie', 'zombies', 'skeleton', 'skeletons', 
+      'assassin', 'assassins', 'guard', 'guards', 'soldier', 'soldiers',
+      'thief', 'thieves', 'brigand', 'brigands', 'raider', 'raiders',
+      'cultist', 'cultists', 'demon', 'demons', 'devil', 'devils',
+      'ghost', 'ghosts', 'specter', 'specters', 'wraith', 'wraiths',
+      'hobgoblin', 'hobgoblins', 'bugbear', 'bugbears', 'kobold', 'kobolds',
+      'ogre', 'ogres', 'giant', 'giants', 'beholder', 'beholders',
+      'lich', 'liches', 'vampire', 'vampires', 'werewolf', 'werewolves',
+      'hag', 'hags', 'witch', 'witches', 'necromancer', 'necromancers'
+    ];
+    
+    // Investigation keywords to highlight
+    const investigationKeywords = [
+      'search', 'investigate', 'examine', 'look around', 'check', 'explore',
+      'clue', 'clues', 'evidence', 'footprint', 'footprints', 'track', 'tracks',
+      'marking', 'markings', 'sign', 'signs', 'trace', 'traces', 'remains',
+      'ruin', 'ruins', 'artifact', 'artifacts', 'scroll', 'scrolls',
+      'book', 'books', 'map', 'maps', 'diary', 'journal', 'note', 'notes',
+      'door', 'doors', 'passage', 'passages', 'tunnel', 'tunnels',
+      'chamber', 'chambers', 'room', 'rooms', 'area', 'areas',
+      'mystery', 'mysterious', 'hidden', 'secret', 'secrets', 'concealed',
+      'strange', 'unusual', 'curious', 'suspicious', 'odd', 'peculiar',
+      'trap', 'traps', 'pressure plate', 'pressure plates', 'lever', 'levers',
+      'button', 'buttons', 'switch', 'switches', 'key', 'keys', 'lock', 'locks'
+    ];
+    
+    // Location keywords to highlight
+    const locationKeywords = [
+      'tavern', 'inn', 'shop', 'market', 'temple', 'castle', 'fortress',
+      'tower', 'dungeon', 'cave', 'forest', 'mountain', 'river', 'bridge',
+      'gate', 'wall', 'street', 'alley', 'square', 'plaza', 'district',
+      'village', 'town', 'city', 'settlement', 'outpost', 'camp',
+      'crypt', 'tomb', 'grave', 'cemetery', 'shrine', 'altar',
+      'library', 'archive', 'guild', 'hall', 'mansion', 'palace',
+      'basement', 'cellar', 'attic', 'rooftop', 'balcony', 'courtyard',
+      'garden', 'park', 'field', 'meadow', 'swamp', 'desert', 'island'
+    ];
+    
+    // Action/Combat keywords to highlight
+    const actionKeywords = [
+      'attack', 'fight', 'battle', 'combat', 'defend', 'strike',
+      'sword', 'swords', 'axe', 'axes', 'bow', 'bows', 'arrow', 'arrows',
+      'spell', 'spells', 'magic', 'magical', 'cast', 'casting',
+      'initiative', 'turn', 'round', 'action', 'movement',
+      'charge', 'retreat', 'advance', 'position', 'formation',
+      'shield', 'armor', 'helmet', 'dagger', 'daggers', 'mace', 'maces',
+      'fireball', 'lightning', 'heal', 'healing', 'cure', 'bless', 'curse'
+    ];
+    
+    let highlightedText = text;
+    
+    // Combine all keywords and highlight them in bold
+    const allKeywords = [...enemyKeywords, ...investigationKeywords, ...locationKeywords, ...actionKeywords];
+    
+    allKeywords.forEach(keyword => {
+      const regex = new RegExp(`\\b${keyword}\\b`, 'gi');
+      highlightedText = highlightedText.replace(regex, `<strong>${keyword}</strong>`);
+    });
+    
+    return highlightedText;
   };
 
   const getReadyCount = () => story?.readyPlayers?.length || 0;
@@ -448,25 +695,75 @@ Party: ${characterContext}`;
   };
   const allPlayersReady = getReadyCount() === getTotalPlayers();
 
-  // Parse plot names from AI response
-  const getPlotNames = () => {
-    const plotMessage = story?.storyMessages?.find(msg => msg.type === 'plot_selection');
-    if (!plotMessage?.content) return ['Plot 1', 'Plot 2', 'Plot 3'];
-    
-    const content = plotMessage.content;
-    const plotNames = [];
-    
-    // Extract plot names using regex
-    const plotMatches = content.match(/Plot \d+:\s*([^\n]+)/g);
-    if (plotMatches) {
-      plotMatches.forEach(match => {
-        const name = match.replace(/Plot \d+:\s*/, '').trim();
-        plotNames.push(name);
+  // Parse plot names and details from AI response
+  const getPlotData = () => {
+    const plotMessages = story.storyMessages.filter(msg => msg.type === 'plot_selection');
+    if (plotMessages.length > 0) {
+      // Use only the most recent plot selection message
+      const content = plotMessages[plotMessages.length - 1].content;
+      const lines = content.split('\n');
+      const plots = [];
+      let currentPlot = null;
+      const seenTitles = new Set();
+      
+      lines.forEach(line => {
+        const trimmedLine = line.trim();
+        if (trimmedLine.startsWith('Plot 1:') || trimmedLine.startsWith('Plot 2:') || trimmedLine.startsWith('Plot 3:')) {
+          // Save previous plot if exists
+          if (currentPlot && !seenTitles.has(currentPlot.title)) {
+            plots.push(currentPlot);
+            seenTitles.add(currentPlot.title);
+          }
+          // Start new plot
+          const plotNumber = trimmedLine.match(/Plot (\d+):/)?.[1];
+          const title = trimmedLine.replace(/Plot \d+:\s*/, '').trim();
+          
+          // Only create new plot if we haven't seen this title before
+          if (!seenTitles.has(title)) {
+            currentPlot = {
+              number: parseInt(plotNumber),
+              title: title,
+              summary: ''
+            };
+          } else {
+            currentPlot = null; // Skip duplicate
+          }
+        } else if (currentPlot && trimmedLine && !trimmedLine.startsWith('Party:') && !trimmedLine.startsWith('CRITICAL') && !trimmedLine.startsWith('Make each')) {
+          // Add to summary
+          currentPlot.summary += (currentPlot.summary ? ' ' : '') + trimmedLine;
+        }
       });
+      
+      // Add the last plot if it's not a duplicate
+      if (currentPlot && !seenTitles.has(currentPlot.title)) {
+        plots.push(currentPlot);
+      }
+      
+      // Ensure we only return the first 3 unique plots
+      return plots.slice(0, 3);
     }
+    return [
+      { number: 1, title: 'Plot 1', summary: 'No plot data available' },
+      { number: 2, title: 'Plot 2', summary: 'No plot data available' },
+      { number: 3, title: 'Plot 3', summary: 'No plot data available' }
+    ];
+  };
+
+  const getPlotNames = () => {
+    return getPlotData().map(plot => plot.title);
+  };
+
+  // Sort characters so current user's character appears first
+  const getSortedCharacters = () => {
+    if (!partyCharacters.length || !user) return partyCharacters;
     
-    // Fallback to generic names if parsing fails
-    return plotNames.length === 3 ? plotNames : ['Plot 1', 'Plot 2', 'Plot 3'];
+    return [...partyCharacters].sort((a, b) => {
+      // Current user's character goes first
+      if (a.userId === user.uid) return -1;
+      if (b.userId === user.uid) return 1;
+      // Otherwise maintain original order
+      return 0;
+    });
   };
 
   if (!user) {
@@ -509,6 +806,25 @@ Party: ${characterContext}`;
           </div>
         )}
 
+        {/* Combat Starting Notification */}
+        {isCombatStarting && (
+          <div className="bg-orange-100 border border-orange-400 text-orange-700 px-4 py-3 rounded-lg mb-6">
+            <div className="flex items-center justify-center space-x-2">
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-orange-600"></div>
+              <span className="font-semibold">⚔️ Combat is being initiated! Redirecting to battle arena...</span>
+            </div>
+          </div>
+        )}
+
+        {/* Story Paused for Combat */}
+        {story?.status === 'paused' && story?.currentCombat && (
+          <div className="bg-blue-100 border border-blue-400 text-blue-700 px-4 py-3 rounded-lg mb-6">
+            <div className="flex items-center justify-center space-x-2">
+              <span className="font-semibold">⚔️ Story is paused for combat. Please wait for the battle to conclude.</span>
+            </div>
+          </div>
+        )}
+
         {/* Ready Up Phase */}
         {story?.status === 'ready_up' && (
           <div className="space-y-6">
@@ -517,6 +833,25 @@ Party: ${characterContext}`;
               <p className="text-stone-600 mb-4">
                 All players must ready up before the story begins
               </p>
+              
+              {/* Progress indicator */}
+              <div className="mb-6">
+                <div className="flex justify-center items-center space-x-4 mb-2">
+                  <div className="text-lg font-semibold text-amber-700">
+                    {getReadyCount()}/{getTotalPlayers()} Players Ready
+                  </div>
+                  <div className="text-sm text-stone-500">
+                    ({Math.round((getReadyCount() / getTotalPlayers()) * 100)}%)
+                  </div>
+                </div>
+                <div className="w-full bg-stone-200 rounded-full h-2 max-w-md mx-auto">
+                  <div 
+                    className="bg-amber-600 h-2 rounded-full transition-all duration-300"
+                    style={{ width: `${(getReadyCount() / getTotalPlayers()) * 100}%` }}
+                  ></div>
+                </div>
+              </div>
+              
               {partyCharacters.length === 0 && (
                 <div className="bg-blue-100 border border-blue-200 rounded-lg p-4 mb-4">
                   <p className="text-blue-800">
@@ -525,42 +860,59 @@ Party: ${characterContext}`;
                   </p>
                 </div>
               )}
-              <div className="text-lg font-semibold text-amber-700">
-                {getReadyCount()}/{getTotalPlayers()} Players Ready
-              </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {partyCharacters.length > 0 ? (
                 // Show characters if they exist
-                partyCharacters.map(character => (
-                  <div key={character.id} className="fantasy-card bg-amber-50">
-                    <div className="text-center">
-                      <div className="w-16 h-16 bg-stone-300 rounded-full mx-auto mb-2 flex items-center justify-center">
-                        <span className="text-xs text-stone-600">IMG</span>
-                      </div>
-                      <h3 className="font-bold text-stone-800">{character.name}</h3>
-                      <p className="text-sm text-stone-600">
-                        Level {character.level} {character.race} {character.class}
-                      </p>
-                      <div className="mt-2">
-                        {story.readyPlayers?.includes(character.userId) ? (
-                          <span className="text-green-600 font-semibold">✓ Ready</span>
-                        ) : (
-                          <span className="text-stone-500">Waiting...</span>
+                getSortedCharacters().map(character => {
+                  const isReady = story.readyPlayers?.includes(character.userId);
+                  const isCurrentUser = character.userId === user?.uid;
+                  
+                  return (
+                    <div key={character.id} className={`fantasy-card transition-all duration-200 ${
+                      isReady ? 'bg-green-50 border-green-200' : 'bg-amber-50'
+                    }`}>
+                      <div className="text-center">
+                        <div className="w-16 h-16 bg-stone-300 rounded-full mx-auto mb-2 flex items-center justify-center">
+                          <span className="text-xs text-stone-600">IMG</span>
+                        </div>
+                        <h3 className="font-bold text-stone-800">{character.name}</h3>
+                        <p className="text-sm text-stone-600">
+                          Level {character.level} {character.race} {character.class}
+                        </p>
+                        {isCurrentUser && (
+                          <span className="text-blue-600 text-xs font-medium">(You)</span>
                         )}
+                        <div className="mt-2">
+                          {isReady ? (
+                            <div className="flex items-center justify-center space-x-1 text-green-600 font-semibold">
+                              <span>✓</span>
+                              <span>Ready</span>
+                            </div>
+                          ) : (
+                            <div className="flex items-center justify-center space-x-1 text-stone-500">
+                              <div className="w-3 h-3 border-2 border-stone-300 border-t-stone-600 rounded-full animate-spin"></div>
+                              <span>Waiting...</span>
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))
+                  );
+                })
               ) : (
                 // Show party members if no characters exist
                 partyMembers.map((memberId, index) => {
                   const profile = memberProfiles[memberId];
                   const displayName = profile?.username || `Player ${index + 1}`;
+                  const isReady = story.readyPlayers?.includes(memberId);
+                  const isCurrentUser = memberId === user?.uid;
                   
                   return (
-                    <div key={memberId} className="fantasy-card bg-amber-50">
+                    <div key={memberId} className={`fantasy-card transition-all duration-200 ${
+                      isReady ? 'bg-green-50 border-green-200' : 'bg-amber-50'
+                    }`}>
                       <div className="text-center">
                         <div className="w-16 h-16 bg-stone-300 rounded-full mx-auto mb-2 flex items-center justify-center">
                           <span className="text-xs text-stone-600">IMG</span>
@@ -569,11 +921,20 @@ Party: ${characterContext}`;
                         <p className="text-sm text-stone-600">
                           No character created yet
                         </p>
+                        {isCurrentUser && (
+                          <span className="text-blue-600 text-xs font-medium">(You)</span>
+                        )}
                         <div className="mt-2">
-                          {story.readyPlayers?.includes(memberId) ? (
-                            <span className="text-green-600 font-semibold">✓ Ready</span>
+                          {isReady ? (
+                            <div className="flex items-center justify-center space-x-1 text-green-600 font-semibold">
+                              <span>✓</span>
+                              <span>Ready</span>
+                            </div>
                           ) : (
-                            <span className="text-stone-500">Waiting...</span>
+                            <div className="flex items-center justify-center space-x-1 text-stone-500">
+                              <div className="w-3 h-3 border-2 border-stone-300 border-t-stone-600 rounded-full animate-spin"></div>
+                              <span>Waiting...</span>
+                            </div>
                           )}
                         </div>
                       </div>
@@ -616,38 +977,22 @@ Party: ${characterContext}`;
           <div className="space-y-6">
             <h2 className="text-xl font-bold text-stone-800">Choose Your Adventure</h2>
             
-            {/* Display plot options */}
-            <div className="space-y-4">
-              {story.storyMessages
-                .filter(msg => msg.type === 'plot_selection')
-                .map(msg => (
-                  <div key={msg.id} className="bg-stone-50 border border-stone-200 rounded-lg p-4">
-                    <pre className="whitespace-pre-wrap text-stone-800">{msg.content}</pre>
-                  </div>
-                ))}
-            </div>
-
             {/* Plot Selection Interface for DM */}
             {party && party.dmId === user?.uid ? (
               <div className="space-y-4">
-                <div className="bg-amber-100 border border-amber-200 rounded-lg p-4">
-                  <h3 className="font-bold text-amber-800 mb-2">🎲 Dungeon Master's Choice</h3>
-                  <p className="text-amber-700">
-                    As the campaign creator, you get to choose which plot the party will pursue. 
-                    Select one of the three plot options below to begin the adventure.
-                  </p>
-                </div>
-                
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  {getPlotNames().map((plotName, index) => (
-                    <div key={index} className="fantasy-card bg-amber-50">
-                      <h3 className="font-bold text-stone-800 mb-2">{plotName}</h3>
+                  {getPlotData().map((plot) => (
+                    <div key={plot.number} className="fantasy-card bg-amber-50">
+                      <h3 className="font-bold text-stone-800 mb-2 text-lg">{plot.title}</h3>
+                      <p className="text-stone-600 text-sm mb-4">
+                        {plot.summary}
+                      </p>
                       <button
-                        onClick={() => handlePlotSelection(index + 1)}
+                        onClick={() => handlePlotSelection(plot.number)}
                         disabled={loading}
-                        className="fantasy-button w-full"
+                        className="fantasy-button w-full bg-amber-600 hover:bg-amber-700"
                       >
-                        {loading ? 'Selecting...' : 'Choose Plot'}
+                        {loading ? 'Selecting...' : `Choose Plot ${plot.number}`}
                       </button>
                     </div>
                   ))}
@@ -659,15 +1004,91 @@ Party: ${characterContext}`;
                 <p className="text-blue-700">
                   The campaign creator is choosing which plot to pursue. Please wait while they make their decision.
                 </p>
+                
+                {/* Show plot options to non-DM players */}
+                <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {getPlotData().map((plot) => (
+                    <div key={plot.number} className="bg-stone-50 border border-stone-200 rounded-lg p-3">
+                      <h4 className="font-bold text-stone-800 mb-2">{plot.title}</h4>
+                      <p className="text-stone-600 text-sm">
+                        {plot.summary}
+                      </p>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </div>
         )}
 
         {/* Storytelling Phase */}
-        {story?.status === 'storytelling' && (
+        {(story?.status === 'storytelling' || story?.status === 'paused') && (
           <div className="space-y-6">
             <h2 className="text-xl font-bold text-stone-800">Your Adventure</h2>
+            
+            {/* Story Phase Indicator - Only show to DM */}
+            {party?.dmId === user?.uid && (
+              <div className="bg-purple-100 border border-purple-200 rounded-lg p-4">
+                <h3 className="font-bold text-purple-800 mb-2">📖 Story Phase: {currentPhase}</h3>
+                <p className="text-purple-700 text-sm">
+                  {currentPhase === 'Investigation' && 'Explore, discover clues, and gather information about the situation.'}
+                  {currentPhase === 'Conflict' && 'Face challenges, threats, and make difficult choices.'}
+                  {currentPhase === 'Resolution' && 'Conclude the story arc and see the consequences of your actions.'}
+                </p>
+              </div>
+            )}
+            
+            {/* Discovered Objectives - Only show to DM */}
+            {party?.dmId === user?.uid && objectives.length > 0 && (
+              <div className="bg-emerald-100 border border-emerald-200 rounded-lg p-4">
+                <h3 className="font-bold text-emerald-800 mb-3">🎯 Discovered Objectives</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {getDiscoveredObjectives(objectives).map((objective) => (
+                    <div key={objective.id} className="bg-white border border-emerald-300 rounded-lg p-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <h4 className="font-semibold text-emerald-800 text-sm">{objective.title}</h4>
+                        <span className={`text-xs px-2 py-1 rounded-full ${
+                          objective.state === OBJECTIVE_STATES.COMPLETED 
+                            ? 'bg-green-100 text-green-800' 
+                            : objective.state === OBJECTIVE_STATES.IN_PROGRESS
+                            ? 'bg-blue-100 text-blue-800'
+                            : 'bg-yellow-100 text-yellow-800'
+                        }`}>
+                          {objective.state === OBJECTIVE_STATES.COMPLETED ? '✓ Complete' :
+                           objective.state === OBJECTIVE_STATES.IN_PROGRESS ? '⟳ In Progress' :
+                           '🔍 Discovered'}
+                        </span>
+                      </div>
+                      <p className="text-emerald-700 text-xs">{objective.description}</p>
+                    </div>
+                  ))}
+                </div>
+                
+                {/* Objective Hints */}
+                {objectiveHints.length > 0 && (
+                  <div className="mt-4 pt-4 border-t border-emerald-300">
+                    <div className="flex items-center justify-between mb-2">
+                      <h4 className="font-semibold text-emerald-800 text-sm">💡 Subtle Hints</h4>
+                      <button
+                        onClick={() => setShowObjectiveHints(!showObjectiveHints)}
+                        className="text-emerald-600 hover:text-emerald-800 text-xs"
+                      >
+                        {showObjectiveHints ? 'Hide' : 'Show'} Hints
+                      </button>
+                    </div>
+                    {showObjectiveHints && (
+                      <div className="space-y-2">
+                        {objectiveHints.map((hint, index) => (
+                          <div key={index} className="text-emerald-700 text-xs italic">
+                            {hint}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
             
             {/* Turn-taking guidance */}
             <div className="bg-blue-100 border border-blue-200 rounded-lg p-4">
@@ -679,27 +1100,35 @@ Party: ${characterContext}`;
             
             {/* Story Messages */}
             <div className="bg-stone-50 border border-stone-200 rounded-lg p-4 max-h-96 overflow-y-auto">
-              {story.storyMessages.map(message => (
+              {story.storyMessages
+                .filter(message => message.type !== 'plot_selection') // Filter out plot selection messages
+                .map(message => (
                 <div key={message.id} className="mb-4">
                   {message.role === 'assistant' ? (
                     <div className="bg-blue-100 border border-blue-200 rounded-lg p-3">
                       <div className="font-semibold text-blue-800 mb-1">Game Master</div>
-                      <div className="text-blue-900 whitespace-pre-wrap">{message.content}</div>
+                      <div 
+                        className="text-blue-900 whitespace-pre-wrap"
+                        dangerouslySetInnerHTML={{ __html: highlightKeywords(message.content) }}
+                      />
                     </div>
                   ) : (
                     <div className="bg-green-100 border border-green-200 rounded-lg p-3">
                       <div className="font-semibold text-green-800 mb-1">
                         {message.playerName}
                       </div>
-                      <div className="text-green-900">{message.content}</div>
+                      <div 
+                        className="text-green-900"
+                        dangerouslySetInnerHTML={{ __html: highlightKeywords(message.content) }}
+                      />
                     </div>
                   )}
                 </div>
               ))}
             </div>
 
-            {/* Response Interface */}
-            {story?.currentSpeaker ? (
+            {/* Response Interface - Only show when story is active, not paused */}
+            {story?.status === 'storytelling' && story?.currentSpeaker ? (
               <div className="space-y-4">
                 {/* Current Speaker Response - Only show to the user whose character is selected */}
                 {story.currentSpeaker.userId === user?.uid ? (
@@ -761,7 +1190,7 @@ Party: ${characterContext}`;
                             disabled={!playerResponse.trim()}
                             className="fantasy-button bg-green-600 hover:bg-green-700 text-sm py-2"
                           >
-                            ✨ Resolve Conflict
+                            🔍 Investigate the Area
                           </button>
                           <button
                             onClick={() => handleSendResponse('twist')}
@@ -796,58 +1225,80 @@ Party: ${characterContext}`;
                   </div>
                 )}
 
-                {/* Let someone else speak - Show to current speaker */}
-                {story?.currentSpeaker?.userId === user?.uid && (
+                {/* Let someone else speak - Show to current speaker and controller */}
+                {(story?.currentSpeaker?.userId === user?.uid || story?.currentController === user?.uid) && (
                   <div className="bg-stone-50 border border-stone-200 rounded-lg p-4">
-                    <h4 className="font-bold text-stone-800 mb-3">Let someone else speak</h4>
-                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                      {partyCharacters.map(character => (
-                        <button
-                          key={character.id}
-                          onClick={async () => {
-                            await setCurrentSpeaker(story.id, character);
-                            await setCurrentController(story.id, character.userId);
-                          }}
-                          disabled={character.id === story?.currentSpeaker?.id}
-                          className={`p-3 rounded-lg border-2 transition-colors ${
-                            character.id === story?.currentSpeaker?.id
-                              ? 'border-stone-300 bg-stone-100 text-stone-500 cursor-not-allowed'
-                              : 'border-stone-200 bg-white hover:border-stone-300 text-stone-700'
-                          }`}
-                        >
-                          <div className="font-medium">{character.name}</div>
-                          <div className="text-sm opacity-75">
-                            {character.race} {character.class}
-                          </div>
-                        </button>
-                      ))}
+                    <h4 className="font-bold text-stone-800 mb-3 text-center">Let someone else speak</h4>
+                    <div className="flex justify-center">
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-4 w-full max-w-4xl">
+                        {getSortedCharacters().map(character => {
+                          const isCurrentUser = character.userId === user?.uid;
+                          
+                          return (
+                            <button
+                              key={character.id}
+                              onClick={async () => {
+                                await setCurrentSpeaker(story.id, character);
+                                await setCurrentController(story.id, character.userId);
+                              }}
+                              disabled={character.id === story?.currentSpeaker?.id}
+                              className={`p-4 rounded-lg border-2 transition-colors text-center ${
+                                character.id === story?.currentSpeaker?.id
+                                  ? 'border-stone-300 bg-stone-100 text-stone-500 cursor-not-allowed'
+                                  : 'border-stone-200 bg-white hover:border-stone-300 text-stone-700'
+                              }`}
+                            >
+                              <div className="font-medium mb-1">
+                                <span>{character.name}</span>
+                                {isCurrentUser && (
+                                  <span className="text-blue-600 text-xs font-medium ml-1">(you)</span>
+                                )}
+                              </div>
+                              <div className="text-sm opacity-75">
+                                {character.race} {character.class}
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
                   </div>
                 )}
               </div>
             ) : (
               // Show character selection when no one is speaking
-              party?.dmId === user?.uid ? (
+              (party?.dmId === user?.uid || story?.currentController === user?.uid) ? (
                 <div className="bg-stone-50 border border-stone-200 rounded-lg p-4">
-                  <h3 className="font-bold text-stone-800 mb-3">
-                    {story.storyMessages.length > 0 ? 'Choose who speaks next' : 'Choose who speaks first'}
+                  <h3 className="font-bold text-stone-800 mb-3 text-center">
+                    Choose who speaks
                   </h3>
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                    {partyCharacters.map(character => (
-                      <button
-                        key={character.id}
-                        onClick={async () => {
-                          await setCurrentSpeaker(story.id, character);
-                          await setCurrentController(story.id, character.userId);
-                        }}
-                        className="p-3 rounded-lg border-2 border-stone-200 bg-white hover:border-stone-300 text-stone-700 transition-colors"
-                      >
-                        <div className="font-medium">{character.name}</div>
-                        <div className="text-sm opacity-75">
-                          {character.race} {character.class}
-                        </div>
-                      </button>
-                    ))}
+                  <div className="flex justify-center">
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4 w-full max-w-4xl">
+                      {getSortedCharacters().map(character => {
+                        const isCurrentUser = character.userId === user?.uid;
+                        
+                        return (
+                          <button
+                            key={character.id}
+                            onClick={async () => {
+                              await setCurrentSpeaker(story.id, character);
+                              await setCurrentController(story.id, character.userId);
+                            }}
+                            className="p-4 rounded-lg border-2 border-stone-200 bg-white hover:border-stone-300 text-stone-700 transition-colors text-center"
+                          >
+                            <div className="font-medium mb-1">
+                              <span>{character.name}</span>
+                              {isCurrentUser && (
+                                <span className="text-blue-600 text-xs font-medium ml-1">(you)</span>
+                              )}
+                            </div>
+                            <div className="text-sm opacity-75">
+                              {character.race} {character.class}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
               ) : (

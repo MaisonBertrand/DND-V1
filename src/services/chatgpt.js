@@ -44,15 +44,21 @@ export class DungeonMasterService {
 Always respond in character as a Dungeon Master, providing rich, descriptive content that enhances the gaming experience.`;
   }
 
-  async generateStoryPlots(partyCharacters, campaignSetting = '') {
+  async generateStoryPlots(partyCharacters, campaignSetting = '', partyInfo = null) {
     try {
       const characterDetails = partyCharacters.map(char => 
         `${char.name} - Level ${char.level} ${char.race} ${char.class} (${char.alignment})`
       ).join(', ');
 
+      // Build party context - use theme instead of name
+      let partyContext = '';
+      if (partyInfo) {
+        partyContext = `\nParty Theme: ${partyInfo.description || 'No theme provided'}`;
+      }
+
       const prompt = `As a Dungeon Master, I need you to generate 3 different story plot options for a D&D campaign.
 
-Party Composition: ${characterDetails}
+Party Composition: ${characterDetails}${partyContext}
 Campaign Setting: ${campaignSetting || 'Generic fantasy world'}
 
 For each plot option, provide:
@@ -61,6 +67,13 @@ For each plot option, provide:
 3. The main conflict or challenge
 4. Potential story hooks for the party
 5. Estimated campaign length (short, medium, or long)
+
+Important Guidelines:
+- Use the party theme to influence the plot lines and atmosphere
+- Incorporate themes and elements from the party theme to create a cohesive narrative
+- Consider how the party's background and composition might influence the plot
+- Make each plot distinct and appealing to different play styles
+- Focus on the characters and their individual stories
 
 Make each plot distinct and appealing to different play styles. Consider the party composition when crafting these options.`;
 
@@ -145,15 +158,21 @@ Make this feel like a professional campaign module with rich storytelling potent
     }
   }
 
-  async generateMultipleStoryPlots(partyCharacters, campaignSetting = '') {
+  async generateMultipleStoryPlots(partyCharacters, campaignSetting = '', partyInfo = null) {
     try {
       const characterDetails = partyCharacters.map(char => 
         `${char.name} - Level ${char.level} ${char.race} ${char.class} (${char.alignment})`
       ).join(', ');
 
+      // Build party context - use theme instead of name
+      let partyContext = '';
+      if (partyInfo) {
+        partyContext = `\nParty Theme: ${partyInfo.description || 'No theme provided'}`;
+      }
+
       const prompt = `As a Dungeon Master, I need you to generate 5 different story plot options for a D&D campaign, each with a detailed summary.
 
-Party Composition: ${characterDetails}
+Party Composition: ${characterDetails}${partyContext}
 Campaign Setting: ${campaignSetting || 'Generic fantasy world'}
 
 For each of the 5 plot options, provide:
@@ -167,12 +186,19 @@ For each of the 5 plot options, provide:
 8. Themes and motifs
 9. How each party member might be personally invested
 
+Important Guidelines:
+- Use the party theme to influence the plot lines and atmosphere
+- Incorporate themes and elements from the party theme to create a cohesive narrative
+- Consider how the party's background and composition might influence the plot
+- Make each plot distinct and appealing to different play styles
+- Focus on the characters and their individual stories
+
 Make each plot distinct and appealing to different play styles. Consider the party composition when crafting these options. Number each plot clearly (Plot 1, Plot 2, etc.).`;
 
       const response = await callBackendAPI([
         { role: "system", content: this.systemPrompt },
         { role: "user", content: prompt }
-      ], 'gpt-4', 2000, 0.8);
+      ], 'gpt-4', 1200, 0.8);
 
       return response.choices[0].message.content;
     } catch (error) {
@@ -245,7 +271,7 @@ Make this encounter balanced, engaging, and story-relevant.`;
     }
   }
 
-  async generateStoryContinuation(partyCharacters, storyHistory, playerResponse, responseType = 'individual') {
+  async generateStoryContinuation(partyCharacters, storyHistory, playerResponse, responseType = 'individual', partyInfo = null) {
     try {
       const characterDetails = partyCharacters.map(char => 
         `${char.name} - Level ${char.level} ${char.race} ${char.class}`
@@ -257,9 +283,15 @@ Make this encounter balanced, engaging, and story-relevant.`;
         content: msg.content
       }));
 
+      // Build party context - use theme instead of name
+      let partyContext = '';
+      if (partyInfo) {
+        partyContext = `\nParty Theme: ${partyInfo.description || 'No theme provided'}`;
+      }
+
       const prompt = `As a Dungeon Master, continue the story based on the player's response.
 
-Party: ${characterDetails}
+Party: ${characterDetails}${partyContext}
 Player Response: "${playerResponse}" (Type: ${responseType})
 Response Type Context:
 - individual: One character's personal action
@@ -270,6 +302,13 @@ Response Type Context:
 
 Previous Story Context:
 ${conversationHistory.map(msg => `${msg.role === 'assistant' ? 'DM' : 'Player'}: ${msg.content}`).join('\n')}
+
+Important Guidelines:
+- Use the party theme to influence the atmosphere and tone of the story
+- Incorporate themes and elements from the party theme to maintain narrative consistency
+- Consider how the party's background and composition might influence NPC reactions and story developments
+- Focus on the characters and their individual stories
+- The story should feel cohesive with the established theme
 
 Please provide a compelling continuation that:
 1. Acknowledges the player's action and its consequences
@@ -295,29 +334,49 @@ Keep your response engaging but concise (2-3 paragraphs maximum). Remember that 
     }
   }
 
-  async generatePlotOptions(partyCharacters) {
+  async generatePlotOptions(partyCharacters, partyInfo = null) {
     try {
       const characterDetails = partyCharacters.map(char => 
         `${char.name} - Level ${char.level} ${char.race} ${char.class}. ${char.personality || ''}. ${char.backstory || ''}`
       ).join('\n');
 
-      const prompt = `Generate 3 distinct campaign plot options for this party. For each plot, provide a compelling title and a brief summary (2-3 sentences). Format as:
+      // Build party context - use theme instead of description
+      let partyContext = '';
+      if (partyInfo) {
+        partyContext = `\nParty Theme: ${partyInfo.description || 'No theme provided'}`;
+      }
+
+      const systemMessage = `You are a Dungeon Master for D&D 5e. You MUST generate exactly 3 plot options, no more, no less. Follow the exact format provided. Do not use party names in the plots. Keep summaries brief (1-2 sentences maximum). DO NOT repeat plots or generate duplicates.`;
+
+      const prompt = `Generate exactly 3 distinct campaign plot options for this party. 
+
+REQUIRED FORMAT - Follow this exact structure:
 
 Plot 1: [Title]
-[Summary]
+[Brief summary - 1-2 sentences maximum]
 
 Plot 2: [Title]  
-[Summary]
+[Brief summary - 1-2 sentences maximum]
 
 Plot 3: [Title]
-[Summary]
+[Brief summary - 1-2 sentences maximum]
 
-Party: ${characterDetails}
+Party: ${characterDetails}${partyContext}
 
-Make each plot distinct and appealing to different play styles. Consider the party composition when crafting these options.`;
+CRITICAL REQUIREMENTS:
+- Generate EXACTLY 3 plots, no more, no less
+- Use the party theme to influence the plot lines and atmosphere
+- Do NOT use the party name in the plots - focus on the characters and theme
+- Each summary must be 1-2 sentences maximum
+- Follow the exact format above with "Plot 1:", "Plot 2:", "Plot 3:" labels
+- Do not add any additional text, explanations, or formatting
+- Do not repeat or duplicate any plots
+- Stop after Plot 3 - do not generate more plots
+
+Make each plot distinct and appealing to different play styles.`;
 
       const response = await callBackendAPI([
-        { role: "system", content: this.systemPrompt },
+        { role: "system", content: systemMessage },
         { role: "user", content: prompt }
       ], 'gpt-4', 600, 0.8);
 
@@ -328,15 +387,21 @@ Make each plot distinct and appealing to different play styles. Consider the par
     }
   }
 
-  async generateStoryIntroduction(partyCharacters, plotContent, selectedPlot) {
+  async generateStoryIntroduction(partyCharacters, plotContent, selectedPlot, partyInfo = null) {
     try {
       const characterDetails = partyCharacters.map(char => 
         `${char.name} - Level ${char.level} ${char.race} ${char.class}. ${char.personality || ''}. ${char.backstory || ''}`
       ).join('\n');
 
+      // Build party context - use theme instead of name
+      let partyContext = '';
+      if (partyInfo) {
+        partyContext = `\nParty Theme: ${partyInfo.description || 'No theme provided'}`;
+      }
+
       const prompt = `As a Dungeon Master, create an engaging story introduction for the beginning of this campaign.
 
-Party: ${characterDetails}
+Party: ${characterDetails}${partyContext}
 Selected Plot: Plot ${selectedPlot}
 Plot Details: ${plotContent}
 
@@ -346,6 +411,13 @@ Create an introduction that includes:
 3. The initial situation or hook that draws the party together
 4. A sense of atmosphere and setting that matches the chosen plot
 5. An opening scene that gives the party their first decision or action to take
+
+Important Guidelines:
+- Use the party theme to influence the atmosphere and context
+- Incorporate themes and elements from the party theme to create atmosphere and context
+- Consider how the party's background and composition might influence the starting situation
+- Focus on the characters and their individual stories
+- The story should feel cohesive with the established theme
 
 Make this feel like the opening of an epic adventure. Set the tone, establish the setting, and give the party a clear starting point. End with a situation that requires the party to make a choice or take action.
 
@@ -360,6 +432,175 @@ Keep the introduction engaging but concise (3-4 paragraphs maximum).`;
     } catch (error) {
       console.error('Error generating story introduction:', error);
       throw new Error(`Failed to generate story introduction: ${error.message}`);
+    }
+  }
+
+  async generateStructuredStoryResponse(partyCharacters, storyHistory, playerResponse, currentPhase, discoveredObjectives, partyInfo = null) {
+    try {
+      const characterDetails = partyCharacters.map(char => 
+        `${char.name} - Level ${char.level} ${char.race} ${char.class}`
+      ).join(', ');
+
+      const conversationHistory = storyHistory.map(msg => ({
+        role: msg.role,
+        content: msg.content
+      }));
+
+      let partyContext = '';
+      if (partyInfo) {
+        partyContext = `\nParty Theme: ${partyInfo.description || 'No theme provided'}`;
+      }
+
+      // Build objective context
+      const objectiveContext = discoveredObjectives.length > 0 
+        ? `\nDiscovered Objectives: ${discoveredObjectives.map(obj => obj.title).join(', ')}`
+        : '';
+
+      const prompt = `As a Dungeon Master, continue the story based on the player's response, considering the current story phase and discovered objectives.
+
+Party: ${characterDetails}${partyContext}
+Current Phase: ${currentPhase}
+Player Response: "${playerResponse}"${objectiveContext}
+
+Story Phases:
+- Investigation: Focus on discovery, clues, and gathering information
+- Conflict: Focus on tension, threats, and potential combat
+- Resolution: Focus on choices, consequences, and story conclusion
+
+Previous Story Context:
+${conversationHistory.map(msg => `${msg.role === 'assistant' ? 'DM' : 'Player'}: ${msg.content}`).join('\n')}
+
+Guidelines for ${currentPhase} Phase:
+${currentPhase === 'Investigation' ? 
+  '- Encourage exploration and discovery\n- Provide subtle clues and hints\n- Create opportunities for investigation\n- Build mystery and intrigue' :
+  currentPhase === 'Conflict' ?
+  '- Increase tension and stakes\n- Present clear threats or challenges\n- Create opportunities for combat or diplomacy\n- Force difficult choices' :
+  '- Provide clear resolution paths\n- Show consequences of previous choices\n- Allow for meaningful conclusions\n- Tie up loose ends'
+}
+
+Important Guidelines:
+- Use the party theme to influence the atmosphere and tone
+- Consider discovered objectives when crafting responses
+- Maintain story coherence and logical progression
+- Provide multiple possible directions for the party
+- End with a situation that invites the next player to respond
+- Keep responses engaging but concise (2-3 paragraphs maximum)
+
+Remember that objectives are discovered organically through player actions, not explicitly mentioned.`;
+
+      const response = await callBackendAPI([
+        { role: "system", content: this.systemPrompt },
+        ...conversationHistory,
+        { role: "user", content: prompt }
+      ], 'gpt-4', 800, 0.8);
+
+      return response.choices[0].message.content;
+    } catch (error) {
+      console.error('Error generating structured story response:', error);
+      throw new Error(`Failed to generate structured story response: ${error.message}`);
+    }
+  }
+
+  async generatePhaseTransition(partyCharacters, currentPhase, storyProgress, partyInfo = null) {
+    try {
+      const characterDetails = partyCharacters.map(char => 
+        `${char.name} - Level ${char.level} ${char.race} ${char.class}`
+      ).join(', ');
+
+      let partyContext = '';
+      if (partyInfo) {
+        partyContext = `\nParty Theme: ${partyInfo.description || 'No theme provided'}`;
+      }
+
+      const nextPhase = currentPhase === 'Investigation' ? 'Conflict' : 'Resolution';
+
+      const prompt = `As a Dungeon Master, create a natural transition from the ${currentPhase} phase to the ${nextPhase} phase of the story.
+
+Party: ${characterDetails}${partyContext}
+Current Phase: ${currentPhase}
+Next Phase: ${nextPhase}
+Story Progress: ${storyProgress}
+
+Create a transition that:
+1. Acknowledges the party's progress and discoveries
+2. Naturally escalates or resolves the situation
+3. Introduces new challenges or opportunities appropriate to the ${nextPhase} phase
+4. Maintains the story's momentum and engagement
+5. Provides clear direction for the party's next actions
+
+Phase Transition Guidelines:
+${nextPhase === 'Conflict' ? 
+  '- Escalate the situation with a clear threat or challenge\n- Introduce enemies, obstacles, or time pressure\n- Create urgency and stakes\n- Provide opportunities for combat or diplomacy' :
+  '- Present clear resolution paths based on previous choices\n- Show consequences of the party\'s actions\n- Allow for meaningful conclusions\n- Provide closure to the current story arc'
+}
+
+Important Guidelines:
+- Use the party theme to influence the transition's tone
+- Make the transition feel natural and earned
+- Maintain story coherence and logical progression
+- Provide multiple possible directions for the party
+- Keep the transition engaging but concise (2-3 paragraphs maximum)`;
+
+      const response = await callBackendAPI([
+        { role: "system", content: this.systemPrompt },
+        { role: "user", content: prompt }
+      ], 'gpt-4', 600, 0.8);
+
+      return response.choices[0].message.content;
+    } catch (error) {
+      console.error('Error generating phase transition:', error);
+      throw new Error(`Failed to generate phase transition: ${error.message}`);
+    }
+  }
+
+  async generateObjectiveCompletion(partyCharacters, completedObjective, storyContext, partyInfo = null) {
+    try {
+      const characterDetails = partyCharacters.map(char => 
+        `${char.name} - Level ${char.level} ${char.race} ${char.class}`
+      ).join(', ');
+
+      let partyContext = '';
+      if (partyInfo) {
+        partyContext = `\nParty Theme: ${partyInfo.description || 'No theme provided'}`;
+      }
+
+      const prompt = `As a Dungeon Master, acknowledge the completion of an objective and show its impact on the story.
+
+Party: ${characterDetails}${partyContext}
+Completed Objective: ${completedObjective.title}
+Objective Type: ${completedObjective.type}
+Story Context: ${storyContext}
+
+Create a response that:
+1. Acknowledges the party's success in completing the objective
+2. Shows the immediate consequences and impact
+3. Reveals new information or opportunities
+4. Maintains story momentum and engagement
+5. Provides direction for the party's next actions
+
+Objective Completion Guidelines:
+- Show how the completed objective affects the story
+- Reveal new information, NPCs, or opportunities
+- Maintain the story's tone and atmosphere
+- Provide clear next steps for the party
+- Keep the response engaging but concise (2-3 paragraphs maximum)
+
+Important Guidelines:
+- Use the party theme to influence the completion's tone
+- Make the completion feel meaningful and impactful
+- Maintain story coherence and logical progression
+- Provide multiple possible directions for the party
+- Don't explicitly mention "objectives" - make it feel natural`;
+
+      const response = await callBackendAPI([
+        { role: "system", content: this.systemPrompt },
+        { role: "user", content: prompt }
+      ], 'gpt-4', 600, 0.8);
+
+      return response.choices[0].message.content;
+    } catch (error) {
+      console.error('Error generating objective completion:', error);
+      throw new Error(`Failed to generate objective completion: ${error.message}`);
     }
   }
 }

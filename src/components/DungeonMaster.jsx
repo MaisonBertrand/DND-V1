@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { dungeonMasterService } from '../services/chatgpt';
 
-export default function DungeonMaster({ partyCharacters, onStoryGenerated, onCharacterDetailsGenerated }) {
+export default function DungeonMaster({ partyCharacters, onStoryGenerated, onCharacterDetailsGenerated, partyInfo = null }) {
   const [activeTab, setActiveTab] = useState('plots');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -26,7 +26,7 @@ export default function DungeonMaster({ partyCharacters, onStoryGenerated, onCha
     setLoading(true);
     setError('');
     try {
-      const plots = await dungeonMasterService.generateStoryPlots(partyCharacters, campaignSetting);
+      const plots = await dungeonMasterService.generateStoryPlots(partyCharacters, campaignSetting, partyInfo);
       setGeneratedContent(plots);
       if (onStoryGenerated) {
         onStoryGenerated(plots);
@@ -47,7 +47,7 @@ export default function DungeonMaster({ partyCharacters, onStoryGenerated, onCha
     setLoading(true);
     setError('');
     try {
-      const plots = await dungeonMasterService.generateMultipleStoryPlots(partyCharacters, campaignSetting);
+      const plots = await dungeonMasterService.generateMultipleStoryPlots(partyCharacters, campaignSetting, partyInfo);
       setGeneratedContent(plots);
       if (onStoryGenerated) {
         onStoryGenerated(plots);

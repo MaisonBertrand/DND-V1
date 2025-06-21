@@ -5,7 +5,8 @@ import {
   getCombatSession, 
   updateCombatSession, 
   subscribeToCombatSession,
-  updateCampaignStory 
+  updateCampaignStory,
+  getPartyCharacters
 } from '../firebase/database';
 
 export default function Combat() {
@@ -14,6 +15,10 @@ export default function Combat() {
   const [user, setUser] = useState(null);
   const [combatSession, setCombatSession] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [partyCharacters, setPartyCharacters] = useState([]);
+  const [selectedAction, setSelectedAction] = useState(null);
+  const [selectedTarget, setSelectedTarget] = useState(null);
+  const [actionMessage, setActionMessage] = useState('');
 
   useEffect(() => {
     const unsubscribe = onAuthChange((user) => {
@@ -46,11 +51,28 @@ export default function Combat() {
     try {
       setLoading(true);
       const session = await getCombatSession(partyId);
+      const characters = await getPartyCharacters(partyId);
+      setPartyCharacters(characters);
+      
       if (!session) {
         // No active combat session, redirect back to story
-        navigate(`/campaign-story/${partyId}`);
+        console.log('No combat session found, navigating to story with partyId:', partyId);
+        try {
+          navigate(`/campaign-story/${partyId}`);
+        } catch (error) {
+          console.error('Navigation error in loadCombatData:', error);
+          navigate('/dashboard');
+        }
         return;
       }
+      
+      // Check if there are enemies to fight
+      if (session.enemies && session.enemies.length === 0) {
+        // No enemies to fight, show message and redirect
+        setCombatSession({ ...session, status: 'no_enemies' });
+        return;
+      }
+      
       setCombatSession(session);
     } catch (error) {
       console.error('Error loading combat data:', error);
@@ -61,13 +83,13 @@ export default function Combat() {
 
   const generateEnemiesFromContext = (context, partySize) => {
     const enemyTypes = {
-      'goblin': { name: 'Goblin', hp: 12, ac: 14, level: 1 },
-      'orc': { name: 'Orc', hp: 30, ac: 16, level: 3 },
-      'troll': { name: 'Troll', hp: 84, ac: 15, level: 5 },
-      'dragon': { name: 'Dragon', hp: 200, ac: 19, level: 10 },
-      'bandit': { name: 'Bandit', hp: 16, ac: 12, level: 1 },
-      'skeleton': { name: 'Skeleton', hp: 13, ac: 13, level: 1 },
-      'zombie': { name: 'Zombie', hp: 22, ac: 8, level: 1 }
+      'goblin': { name: 'Goblin', hp: 12, ac: 14, level: 1, charisma: 8 },
+      'orc': { name: 'Orc', hp: 30, ac: 16, level: 3, charisma: 12 },
+      'troll': { name: 'Troll', hp: 84, ac: 15, level: 5, charisma: 7 },
+      'dragon': { name: 'Dragon', hp: 200, ac: 19, level: 10, charisma: 19 },
+      'bandit': { name: 'Bandit', hp: 16, ac: 12, level: 1, charisma: 10 },
+      'skeleton': { name: 'Skeleton', hp: 13, ac: 13, level: 1, charisma: 5 },
+      'zombie': { name: 'Zombie', hp: 22, ac: 8, level: 1, charisma: 3 }
     };
 
     const contextLower = context.toLowerCase();
@@ -94,6 +116,7 @@ export default function Combat() {
         maxHp: baseEnemy.hp + Math.floor(Math.random() * 10),
         ac: baseEnemy.ac + Math.floor(Math.random() * 3),
         initiative: Math.floor(Math.random() * 20) + 1,
+        charisma: baseEnemy.charisma,
         portrait: '/placeholder-enemy.png'
       });
     }
@@ -106,7 +129,7 @@ export default function Combat() {
     
     // Generate enemies if not already present
     let enemies = combatSession.enemies;
-    if (enemies.length === 0) {
+    if (!enemies || enemies.length === 0) {
       enemies = generateEnemiesFromContext(combatSession.storyContext, combatSession.partyMembers.length);
     }
     
@@ -127,6 +150,9 @@ export default function Combat() {
     await updateCombatSession(combatSession.id, {
       currentTurn: newTurn
     });
+    setSelectedAction(null);
+    setSelectedTarget(null);
+    setActionMessage('');
   };
 
   const previousTurn = async () => {
@@ -135,6 +161,9 @@ export default function Combat() {
     await updateCombatSession(combatSession.id, {
       currentTurn: newTurn
     });
+    setSelectedAction(null);
+    setSelectedTarget(null);
+    setActionMessage('');
   };
 
   const endCombat = async () => {
@@ -153,7 +182,13 @@ export default function Combat() {
     });
     
     // Navigate back to story
-    navigate(`/campaign-story/${partyId}`);
+    try {
+      console.log('Ending combat, navigating to story with partyId:', partyId);
+      navigate(`/campaign-story/${partyId}`);
+    } catch (error) {
+      console.error('Navigation error in endCombat:', error);
+      navigate('/dashboard');
+    }
   };
 
   const updateHp = async (combatantId, newHp) => {
@@ -178,6 +213,131 @@ export default function Combat() {
     }
   };
 
+  const getCurrentCombatant = () => {
+    if (!combatSession?.initiative || combatSession.currentTurn === undefined) return null;
+    return combatSession.initiative[combatSession.currentTurn];
+  };
+
+  const isCurrentUserTurn = () => {
+    const currentCombatant = getCurrentCombatant();
+    return currentCombatant && currentCombatant.userId === user?.uid;
+  };
+
+  const getCurrentUserCharacter = () => {
+    return partyCharacters.find(char => char.userId === user?.uid);
+  };
+
+  const handleAttack = async (weapon, target) => {
+    if (!combatSession || !weapon || !target) return;
+    
+    const currentChar = getCurrentUserCharacter();
+    if (!currentChar) return;
+    
+    // Simple attack calculation
+    const attackRoll = Math.floor(Math.random() * 20) + 1;
+    const attackBonus = Math.floor((currentChar.strength - 10) / 2);
+    const totalAttack = attackRoll + attackBonus;
+    
+    let message = `${currentChar.name} attacks ${target.name} with ${weapon}...\n`;
+    message += `Attack roll: ${attackRoll} + ${attackBonus} = ${totalAttack} vs AC ${target.ac}\n`;
+    
+    if (totalAttack >= target.ac) {
+      // Hit! Calculate damage
+      const damage = Math.floor(Math.random() * 8) + 1 + attackBonus; // Simple damage calculation
+      const newHp = Math.max(0, target.hp - damage);
+      
+      message += `HIT! Deals ${damage} damage. ${target.name} HP: ${target.hp} → ${newHp}`;
+      
+      await updateHp(target.id, newHp);
+    } else {
+      message += `MISS! The attack misses.`;
+    }
+    
+    setActionMessage(message);
+    setTimeout(() => {
+      setActionMessage('');
+      nextTurn();
+    }, 3000);
+  };
+
+  const handleSpell = async (spell, target) => {
+    if (!combatSession || !spell || !target) return;
+    
+    const currentChar = getCurrentUserCharacter();
+    if (!currentChar) return;
+    
+    let message = `${currentChar.name} casts ${spell.name} on ${target.name}...\n`;
+    message += `${spell.description}\n`;
+    
+    // Simple spell effect
+    const damage = Math.floor(Math.random() * 6) + 1;
+    const newHp = Math.max(0, target.hp - damage);
+    
+    message += `Deals ${damage} damage. ${target.name} HP: ${target.hp} → ${newHp}`;
+    
+    await updateHp(target.id, newHp);
+    
+    setActionMessage(message);
+    setTimeout(() => {
+      setActionMessage('');
+      nextTurn();
+    }, 3000);
+  };
+
+  const handlePersuade = async (target) => {
+    if (!combatSession || !target) return;
+    
+    const currentChar = getCurrentUserCharacter();
+    if (!currentChar) return;
+    
+    // Calculate persuasion based on charisma
+    const charismaMod = Math.floor((currentChar.charisma - 10) / 2);
+    const persuasionRoll = Math.floor(Math.random() * 20) + 1 + charismaMod;
+    const targetDC = target.charisma + 10; // Target's charisma + 10 as DC
+    
+    let message = `${currentChar.name} attempts to persuade ${target.name}...\n`;
+    message += `Charisma modifier: ${charismaMod}\n`;
+    message += `Persuasion roll: ${persuasionRoll} vs DC ${targetDC}\n`;
+    
+    if (persuasionRoll >= targetDC) {
+      message += `SUCCESS! ${target.name} is persuaded and may consider peaceful resolution.`;
+      // Could implement actual peaceful resolution logic here
+    } else {
+      message += `FAILURE! ${target.name} is not persuaded and remains hostile.`;
+    }
+    
+    setActionMessage(message);
+    setTimeout(() => {
+      setActionMessage('');
+      nextTurn();
+    }, 3000);
+  };
+
+  const handleInventoryUse = async (item, target) => {
+    if (!combatSession || !item || !target) return;
+    
+    const currentChar = getCurrentUserCharacter();
+    if (!currentChar) return;
+    
+    let message = `${currentChar.name} uses ${item} on ${target.name}...\n`;
+    
+    // Simple item effects
+    if (item.toLowerCase().includes('healing') || item.toLowerCase().includes('potion')) {
+      const healing = Math.floor(Math.random() * 8) + 1;
+      const newHp = Math.min(target.maxHp, target.hp + healing);
+      message += `Heals ${healing} HP. ${target.name} HP: ${target.hp} → ${newHp}`;
+      await updateHp(target.id, newHp);
+    } else {
+      message += `Uses ${item} but it has no combat effect.`;
+    }
+    
+    setActionMessage(message);
+    setTimeout(() => {
+      setActionMessage('');
+      nextTurn();
+    }, 3000);
+  };
+
   if (!user) {
     return null;
   }
@@ -187,7 +347,8 @@ export default function Combat() {
       <div className="fantasy-container py-8">
         <div className="fantasy-card">
           <div className="text-center py-8">
-            <div className="text-stone-600">Loading combat...</div>
+            <div className="text-stone-600 mb-4">⚔️ Setting up battle arena...</div>
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-stone-600 mx-auto"></div>
           </div>
         </div>
       </div>
@@ -201,7 +362,22 @@ export default function Combat() {
           <div className="text-center py-8">
             <div className="text-stone-600">No active combat session found.</div>
             <button 
-              onClick={() => navigate(`/campaign-story/${partyId}`)}
+              onClick={async () => {
+                // Resume the story from where it was paused
+                await updateCampaignStory(partyId, {
+                  status: 'storytelling',
+                  currentCombat: null
+                });
+                
+                // Navigate back to story
+                try {
+                  console.log('Returning to story from no combat session, partyId:', partyId);
+                  navigate(`/campaign-story/${partyId}`);
+                } catch (error) {
+                  console.error('Navigation error in return to story:', error);
+                  navigate('/dashboard');
+                }
+              }}
               className="fantasy-button mt-4"
             >
               Return to Story
@@ -211,6 +387,60 @@ export default function Combat() {
       </div>
     );
   }
+
+  // Show message if no enemies to fight
+  if (combatSession.status === 'no_enemies' || (combatSession.enemies && combatSession.enemies.length === 0)) {
+    const [returning, setReturning] = useState(false);
+    return (
+      <div className="fantasy-container py-8">
+        <div className="fantasy-card">
+          <div className="text-center py-8">
+            <div className="text-4xl mb-4">🕊️</div>
+            <h2 className="text-2xl font-bold text-stone-800 mb-4">No Enemies to Fight</h2>
+            <p className="text-stone-600 mb-6">
+              There are no enemies present in this area. Combat cannot begin.
+            </p>
+            <div className="space-y-3">
+              <button 
+                onClick={async () => {
+                  if (returning) return;
+                  setReturning(true);
+                  try {
+                    // Resume the story from where it was paused
+                    await updateCampaignStory(partyId, {
+                      status: 'storytelling',
+                      currentCombat: null
+                    });
+                    // Navigate back to story
+                    navigate(`/campaign-story/${partyId}`);
+                  } catch (error) {
+                    console.error('Error returning to story:', error);
+                    // Fallback: try to navigate anyway
+                    try {
+                      navigate(`/campaign-story/${partyId}`);
+                    } catch (navError) {
+                      console.error('Navigation also failed:', navError);
+                      navigate('/dashboard');
+                    }
+                  } finally {
+                    setReturning(false);
+                  }
+                }}
+                className="fantasy-button"
+                disabled={returning}
+              >
+                {returning ? 'Returning...' : 'Return to Story'}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const currentCombatant = getCurrentCombatant();
+  const isUserTurn = isCurrentUserTurn();
+  const currentUserChar = getCurrentUserCharacter();
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-blue-400 via-blue-500 to-blue-600 p-4">
@@ -239,7 +469,22 @@ export default function Combat() {
             )}
             {combatSession.storyContext && (
               <button 
-                onClick={() => navigate(`/campaign-story/${partyId}`)}
+                onClick={async () => {
+                  // Resume the story from where it was paused
+                  await updateCampaignStory(partyId, {
+                    status: 'storytelling',
+                    currentCombat: null
+                  });
+                  
+                  // Navigate back to story
+                  try {
+                    console.log('Returning to story from combat header, partyId:', partyId);
+                    navigate(`/campaign-story/${partyId}`);
+                  } catch (error) {
+                    console.error('Navigation error in return to story:', error);
+                    navigate('/dashboard');
+                  }
+                }}
                 className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg shadow-lg"
               >
                 📖 Return to Story
@@ -256,7 +501,221 @@ export default function Combat() {
           </div>
         )}
 
-        {/* Pokemon-Style Battle Arena */}
+        {/* Turn Order Display */}
+        {combatSession.combatState === 'active' && (
+          <div className="bg-white/90 backdrop-blur-sm rounded-lg p-4 mb-6 shadow-lg">
+            <h3 className="text-lg font-bold text-gray-800 mb-3">🎯 Turn Order</h3>
+            <div className="flex flex-wrap gap-3">
+              {combatSession.initiative.map((combatant, index) => (
+                <div
+                  key={combatant.id}
+                  className={`flex items-center space-x-2 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
+                    index === combatSession.currentTurn
+                      ? 'bg-yellow-400 text-yellow-900 shadow-lg scale-105'
+                      : 'bg-gray-200 text-gray-700'
+                  }`}
+                >
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center border-2 ${
+                    combatant.userId ? 'bg-blue-200 border-blue-400' : 'bg-red-200 border-red-400'
+                  }`}>
+                    <span className="font-bold text-xs">
+                      {combatant.name.charAt(0)}
+                    </span>
+                  </div>
+                  <div>
+                    <div className="font-bold">#{index + 1}</div>
+                    <div className="text-xs">{combatant.name}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Current Turn Display */}
+        {combatSession.combatState === 'active' && currentCombatant && (
+          <div className="bg-white/90 backdrop-blur-sm rounded-lg p-4 mb-6 shadow-lg">
+            <h3 className="text-lg font-bold text-gray-800 mb-3">
+              {isUserTurn ? '🎮 Your Turn!' : '⏳ Waiting...'}
+            </h3>
+            <div className="flex items-center space-x-4">
+              <div className={`w-16 h-16 rounded-full flex items-center justify-center border-4 ${
+                currentCombatant.userId ? 'bg-blue-200 border-blue-400' : 'bg-red-200 border-red-400'
+              }`}>
+                <span className="font-bold text-xl">
+                  {currentCombatant.name.charAt(0)}
+                </span>
+              </div>
+              <div>
+                <div className="font-bold text-xl">{currentCombatant.name}</div>
+                <div className="text-gray-600">{currentCombatant.class || currentCombatant.type}</div>
+                <div className="text-sm text-gray-500">HP: {currentCombatant.hp}/{currentCombatant.maxHp}</div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Action Interface - Only show to current player */}
+        {isUserTurn && currentUserChar && (
+          <div className="bg-white/90 backdrop-blur-sm rounded-lg p-6 mb-6 shadow-lg">
+            <h3 className="text-xl font-bold text-gray-800 mb-4">Choose Your Action</h3>
+            
+            {!selectedAction ? (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {/* Attack Option */}
+                <button
+                  onClick={() => setSelectedAction('attack')}
+                  className="bg-red-500 hover:bg-red-600 text-white font-bold py-4 px-6 rounded-lg shadow-lg transition-colors"
+                >
+                  ⚔️ Attack
+                </button>
+                
+                {/* Inventory Option */}
+                <button
+                  onClick={() => setSelectedAction('inventory')}
+                  className="bg-green-500 hover:bg-green-600 text-white font-bold py-4 px-6 rounded-lg shadow-lg transition-colors"
+                >
+                  🎒 Inventory
+                </button>
+                
+                {/* Speak/Persuade Option */}
+                <button
+                  onClick={() => setSelectedAction('persuade')}
+                  className="bg-blue-500 hover:bg-blue-600 text-white font-bold py-4 px-6 rounded-lg shadow-lg transition-colors"
+                >
+                  💬 Speak/Persuade
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {/* Action Details */}
+                {selectedAction === 'attack' && (
+                  <div>
+                    <h4 className="font-bold text-gray-800 mb-3">⚔️ Choose Your Attack</h4>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                      {/* Weapons */}
+                      <div>
+                        <h5 className="font-semibold text-gray-700 mb-2">Weapons:</h5>
+                        <div className="space-y-2">
+                          {currentUserChar.equipment?.filter(item => 
+                            item.toLowerCase().includes('sword') || 
+                            item.toLowerCase().includes('axe') || 
+                            item.toLowerCase().includes('bow') ||
+                            item.toLowerCase().includes('dagger') ||
+                            item.toLowerCase().includes('mace') ||
+                            item.toLowerCase().includes('spear')
+                          ).map(weapon => (
+                            <button
+                              key={weapon}
+                              onClick={() => setSelectedTarget({ type: 'weapon', item: weapon })}
+                              className="w-full text-left bg-gray-100 hover:bg-gray-200 p-2 rounded transition-colors"
+                            >
+                              {weapon}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      
+                      {/* Spells */}
+                      <div>
+                        <h5 className="font-semibold text-gray-700 mb-2">Spells:</h5>
+                        <div className="space-y-2">
+                          {currentUserChar.spells?.map(spell => (
+                            <button
+                              key={spell.name}
+                              onClick={() => setSelectedTarget({ type: 'spell', item: spell })}
+                              className="w-full text-left bg-purple-100 hover:bg-purple-200 p-2 rounded transition-colors"
+                            >
+                              {spell.name}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {selectedAction === 'inventory' && (
+                  <div>
+                    <h4 className="font-bold text-gray-800 mb-3">🎒 Choose Item to Use</h4>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+                      {currentUserChar.equipment?.map(item => (
+                        <button
+                          key={item}
+                          onClick={() => setSelectedTarget({ type: 'item', item: item })}
+                          className="bg-green-100 hover:bg-green-200 p-3 rounded transition-colors"
+                        >
+                          {item}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {selectedAction === 'persuade' && (
+                  <div>
+                    <h4 className="font-bold text-gray-800 mb-3">💬 Choose Target to Persuade</h4>
+                    <p className="text-gray-600 mb-4">
+                      Your Charisma: {currentUserChar.charisma} (Modifier: {Math.floor((currentUserChar.charisma - 10) / 2)})
+                    </p>
+                  </div>
+                )}
+
+                {/* Target Selection */}
+                {selectedTarget && (
+                  <div className="bg-gray-50 p-4 rounded-lg">
+                    <h5 className="font-semibold text-gray-800 mb-3">Select Target:</h5>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                      {combatSession.enemies.map(enemy => (
+                        <button
+                          key={enemy.id}
+                          onClick={() => {
+                            if (selectedAction === 'attack') {
+                              if (selectedTarget.type === 'weapon') {
+                                handleAttack(selectedTarget.item, enemy);
+                              } else if (selectedTarget.type === 'spell') {
+                                handleSpell(selectedTarget.item, enemy);
+                              }
+                            } else if (selectedAction === 'inventory') {
+                              handleInventoryUse(selectedTarget.item, enemy);
+                            } else if (selectedAction === 'persuade') {
+                              handlePersuade(enemy);
+                            }
+                          }}
+                          className="bg-red-100 hover:bg-red-200 p-3 rounded transition-colors text-left"
+                        >
+                          <div className="font-semibold">{enemy.name}</div>
+                          <div className="text-sm text-gray-600">HP: {enemy.hp}/{enemy.maxHp}</div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Back Button */}
+                <button
+                  onClick={() => {
+                    setSelectedAction(null);
+                    setSelectedTarget(null);
+                  }}
+                  className="bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg"
+                >
+                  ← Back
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Action Message */}
+        {actionMessage && (
+          <div className="bg-white/90 backdrop-blur-sm rounded-lg p-4 mb-6 shadow-lg">
+            <h4 className="font-bold text-gray-800 mb-2">Action Result:</h4>
+            <pre className="whitespace-pre-wrap text-gray-700 bg-gray-100 p-3 rounded">{actionMessage}</pre>
+          </div>
+        )}
+
+        {/* Battle Arena */}
         <div className="bg-gradient-to-b from-green-300 via-green-400 to-green-500 rounded-2xl p-6 shadow-2xl border-4 border-green-600">
           {/* Battle Field */}
           <div className="relative h-96 mb-6">
@@ -334,31 +793,6 @@ export default function Combat() {
               </div>
             </div>
           </div>
-
-          {/* Initiative Tracker */}
-          {combatSession.combatState === 'active' && (
-            <div className="bg-white/90 backdrop-blur-sm rounded-lg p-4 shadow-lg">
-              <h3 className="text-lg font-bold text-gray-800 mb-3">🎯 Turn Order</h3>
-              <div className="flex flex-wrap gap-2">
-                {combatSession.initiative.map((combatant, index) => (
-                  <div
-                    key={combatant.id}
-                    className={`px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
-                      index === combatSession.currentTurn
-                        ? 'bg-yellow-400 text-yellow-900 shadow-lg scale-105'
-                        : 'bg-gray-200 text-gray-700'
-                    }`}
-                  >
-                    <div className="flex items-center space-x-2">
-                      <span className="font-bold">#{index + 1}</span>
-                      <span>{combatant.name}</span>
-                      <span className="text-xs opacity-75">({combatant.class || combatant.type})</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
 
         {/* Detailed Stats Panel */}

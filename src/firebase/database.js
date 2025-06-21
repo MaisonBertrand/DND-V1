@@ -51,6 +51,40 @@ export const getUserProfile = async (userId) => {
   }
 };
 
+export const getUserProfiles = async (userIds) => {
+  try {
+    if (!userIds || userIds.length === 0) {
+      return [];
+    }
+    
+    // Firestore doesn't support 'in' queries with more than 10 items
+    // So we'll batch the requests if needed
+    const batches = [];
+    for (let i = 0; i < userIds.length; i += 10) {
+      const batch = userIds.slice(i, i + 10);
+      const q = query(
+        collection(db, 'userProfiles'),
+        where('userId', 'in', batch)
+      );
+      batches.push(getDocs(q));
+    }
+    
+    const results = await Promise.all(batches);
+    const profiles = [];
+    
+    results.forEach(querySnapshot => {
+      querySnapshot.docs.forEach(doc => {
+        profiles.push({ id: doc.id, ...doc.data() });
+      });
+    });
+    
+    return profiles;
+  } catch (error) {
+    console.error('Error getting user profiles:', error);
+    throw error;
+  }
+};
+
 export const updateUserProfile = async (userId, updates) => {
   try {
     const profile = await getUserProfile(userId);
