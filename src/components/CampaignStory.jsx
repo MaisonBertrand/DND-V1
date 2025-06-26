@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { onAuthChange } from '../firebase/auth';
 import { 
   getCampaignStory, 
@@ -15,8 +15,14 @@ import {
   setCurrentSpeaker,
   setCurrentController,
   createCombatSession,
-  subscribeToCombatSession
+  subscribeToCombatSession,
+  saveStoryState,
+  getStoryState,
+  updateStoryState,
+  getStoryConsistencyData
 } from '../firebase/database';
+import { db } from '../firebase/config';
+import { onSnapshot, query, collection, where } from 'firebase/firestore';
 import { dungeonMasterService } from '../services/chatgpt';
 import { 
   generateHiddenObjectives, 
@@ -27,10 +33,23 @@ import {
   generateObjectiveHints,
   OBJECTIVE_STATES
 } from '../services/objectives';
+import { 
+  createCampaignMetadata,
+  generateCampaignContext,
+  updateCampaignProgress,
+  checkPhaseTransition,
+  generateCampaignSummary,
+  saveCampaignSession,
+  CAMPAIGN_PHASES
+} from '../services/campaign';
+import { storyStateService } from '../services/storyState';
+import { combatService } from '../services/combat';
 
 export default function CampaignStory() {
   const { partyId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
+  const currentPath = location.pathname;
   const [user, setUser] = useState(null);
   const [story, setStory] = useState(null);
   const [party, setParty] = useState(null);
@@ -44,12 +63,14 @@ export default function CampaignStory() {
   const [isGeneratingPlots, setIsGeneratingPlots] = useState(false);
   const [isCombatStarting, setIsCombatStarting] = useState(false);
   const isGeneratingPlotsRef = useRef(false);
+  const hasStartedStoryRef = useRef(false);
   
   // Objective system state
   const [objectives, setObjectives] = useState([]);
   const [currentPhase, setCurrentPhase] = useState('Investigation');
   const [objectiveHints, setObjectiveHints] = useState([]);
   const [showObjectiveHints, setShowObjectiveHints] = useState(false);
+  const [storyState, setStoryState] = useState(null);
 
   useEffect(() => {
     const unsubscribe = onAuthChange((user) => {
@@ -75,7 +96,6 @@ export default function CampaignStory() {
         const unsubscribe = subscribeToCombatSession(partyId, (combatSession) => {
           if (combatSession && combatSession.status === 'active') {
             // Check if we're already on the combat page
-            const currentPath = window.location.pathname;
             if (!currentPath.includes('/combat/')) {
               // Combat has been initiated, redirect all players to combat screen
               navigate(`/combat/${partyId}`);
@@ -87,7 +107,32 @@ export default function CampaignStory() {
         console.error('Error subscribing to combat session:', error);
       }
     }
-  }, [partyId, navigate]);
+  }, [partyId, navigate, currentPath]);
+
+  // Subscribe to character updates to refresh character list in real-time
+  useEffect(() => {
+    if (partyId) {
+      try {
+        const unsubscribe = onSnapshot(
+          query(collection(db, 'characters'), where('partyId', '==', partyId)),
+          (querySnapshot) => {
+            const characters = querySnapshot.docs.map(doc => ({
+              id: doc.id,
+              ...doc.data()
+            }));
+            console.log('Characters updated in real-time:', characters);
+            setPartyCharacters(characters);
+          },
+          (error) => {
+            console.error('Error subscribing to character updates:', error);
+          }
+        );
+        return () => unsubscribe();
+      } catch (error) {
+        console.error('Error setting up character subscription:', error);
+      }
+    }
+  }, [partyId]);
 
   // Reset combat starting state when component unmounts
   useEffect(() => {
@@ -95,6 +140,14 @@ export default function CampaignStory() {
       setIsCombatStarting(false);
     };
   }, []);
+
+  // Reset story generation ref when story status changes
+  useEffect(() => {
+    if (story?.status === 'ready_up') {
+      hasStartedStoryRef.current = false;
+      isGeneratingPlotsRef.current = false;
+    }
+  }, [story?.status]);
 
   // Auto-ready up when user has a character but isn't ready
   useEffect(() => {
@@ -220,6 +273,7 @@ export default function CampaignStory() {
           // If story status changed to voting, stop generating plots
           if (updatedStory.status === 'voting') {
             setIsGeneratingPlots(false);
+            hasStartedStoryRef.current = false;
           }
           
           // Update objectives and phase if story is in storytelling mode
@@ -276,7 +330,7 @@ export default function CampaignStory() {
 
   const handleStartStory = async () => {
     // Prevent duplicate requests
-    if (isGeneratingPlotsRef.current || story?.status === 'voting' || story?.status === 'storytelling') {
+    if (isGeneratingPlotsRef.current || hasStartedStoryRef.current || story?.status === 'voting' || story?.status === 'storytelling') {
       console.log('Plot generation already in progress or completed');
       return;
     }
@@ -303,6 +357,7 @@ export default function CampaignStory() {
     
     try {
       isGeneratingPlotsRef.current = true;
+      hasStartedStoryRef.current = true;
       setIsGeneratingPlots(true);
       setLoading(true);
       
@@ -377,11 +432,24 @@ Party: ${characterContext}`;
       // Get the plot details from the story messages
       const plotMessage = story.storyMessages.find(msg => msg.type === 'plot_selection');
       
-      // Update story status to storytelling
+      // Generate campaign goal based on the selected plot
+      const campaignGoal = await dungeonMasterService.generateCampaignGoal(
+        partyCharacters,
+        plotMessage?.content || '',
+        party
+      );
+      
+      // Update story status to storytelling with campaign metadata
       await updateCampaignStory(story.id, {
         status: 'storytelling',
         currentPlot: plotNumber,
-        votingSession: null
+        votingSession: null,
+        campaignMetadata: {
+          ...story.campaignMetadata,
+          mainGoal: campaignGoal,
+          campaignPhase: CAMPAIGN_PHASES.INTRODUCTION,
+          plotDetails: plotMessage?.content || ''
+        }
       });
       
       // Add a message indicating the plot was chosen
@@ -409,8 +477,6 @@ Party: ${characterContext}`;
       // Set the DM as the initial controller
       await setCurrentController(story.id, party.dmId);
       
-      // Don't automatically set the first speaker - let DM choose
-      
     } catch (error) {
       setError('Failed to select plot');
       console.error(error);
@@ -419,157 +485,222 @@ Party: ${characterContext}`;
     }
   };
 
-  const handleSendResponse = async (responseType = null) => {
-    if (!playerResponse.trim() || !story?.currentSpeaker) return;
+  const handleSendResponse = async () => {
+    if (!playerResponse.trim() || !user || !story) return;
     
     try {
-      await addStoryMessage(story.id, {
+      setLoading(true);
+      
+      // Get current story state for consistency
+      const currentStoryState = storyState || await getStoryState(story.id);
+      
+      // Add player message with story state metadata
+      const playerMessage = await addStoryMessageWithMetadata(story.id, {
         role: 'user',
         content: playerResponse,
-        playerId: story.currentSpeaker.userId,
-        playerName: story.currentSpeaker.name
-      });
+        userId: user.uid,
+        characterName: partyCharacters.find(char => char.userId === user.uid)?.name || 'Unknown'
+      }, currentStoryState);
       
-      setPlayerResponse('');
-      // Clear current speaker after sending, but keep control
-      await setCurrentSpeaker(story.id, null);
-      
-      // Check for objective discovery based on player action
+      // Check for objective discovery
       const discoveredObjectives = checkObjectiveDiscovery(playerResponse, objectives);
       if (discoveredObjectives.length > 0) {
-        const updatedObjectives = objectives.map(obj => {
-          const discovered = discoveredObjectives.find(d => d.id === obj.id);
-          return discovered || obj;
+        setObjectives(prev => {
+          const updated = [...prev];
+          discoveredObjectives.forEach(newObj => {
+            const index = updated.findIndex(obj => obj.id === newObj.id);
+            if (index !== -1) {
+              updated[index] = newObj;
+            }
+          });
+          return updated;
         });
-        setObjectives(updatedObjectives);
       }
       
-      // Add context based on response type for DM controls
-      let enhancedPrompt = playerResponse;
-      let aiResponseType = 'individual';
-      
-      if (responseType && party?.dmId === user?.uid) {
-        switch (responseType) {
-          case 'combat':
-            enhancedPrompt = `${playerResponse}\n\n[DM NOTE: This response should naturally lead to or initiate combat. Include enemies, threats, or dangerous situations that require immediate action.]`;
-            aiResponseType = 'combat_initiation';
-            break;
-          case 'climax':
-            enhancedPrompt = `${playerResponse}\n\n[DM NOTE: Build dramatic tension and suspense. Create a sense of urgency, danger, or high stakes that raises the emotional intensity.]`;
-            aiResponseType = 'tension_building';
-            break;
-          case 'resolution':
-            enhancedPrompt = `${playerResponse}\n\n[DM NOTE: Provide resolution to current conflicts or challenges. Offer closure, rewards, or peaceful outcomes that satisfy the current story arc.]`;
-            aiResponseType = 'conflict_resolution';
-            break;
-          case 'twist':
-            enhancedPrompt = `${playerResponse}\n\n[DM NOTE: Introduce an unexpected plot twist or revelation. Add new information, betrayals, hidden motives, or surprising developments that change the story direction.]`;
-            aiResponseType = 'plot_twist';
-            break;
-          default:
-            enhancedPrompt = playerResponse;
-            aiResponseType = 'individual';
-        }
+      // Generate AI response with enhanced context
+      let aiResponse;
+      if (story.campaignMetadata && story.campaignMetadata.mainGoal) {
+        // Use campaign continuation for ongoing campaigns
+        aiResponse = await dungeonMasterService.generateCampaignContinuation(
+          partyCharacters, 
+          story.campaignMetadata,
+          story.storyMessages, 
+          playerResponse,
+          party
+        );
+      } else {
+        // Use enhanced story continuation with story state
+        aiResponse = await dungeonMasterService.generateStoryContinuation(
+          partyCharacters,
+          story.storyMessages,
+          playerResponse,
+          currentStoryState,
+          'individual',
+          party
+        );
       }
       
-      // Get discovered objectives for AI context
-      const discoveredObjectivesForAI = getDiscoveredObjectives(objectives);
-      
-      // Generate AI response using structured story system
-      const aiResponse = await dungeonMasterService.generateStructuredStoryResponse(
-        partyCharacters, 
-        story.storyMessages, 
-        enhancedPrompt, 
-        currentPhase,
-        discoveredObjectivesForAI,
-        party
+      // Update story state based on AI response
+      const updatedStoryState = storyStateService.updateStoryState(
+        currentStoryState,
+        aiResponse,
+        playerResponse,
+        partyCharacters.find(char => char.userId === user.uid)?.id
       );
       
-      // Enhanced combat detection - requires both combat context AND enemy presence
-      const combatKeywords = ['combat', 'battle', 'fight', 'attack', 'initiative', 'roll for initiative'];
-      const enemyKeywords = [
-        'enemy', 'enemies', 'monster', 'monsters', 'bandit', 'bandits', 
-        'goblin', 'goblins', 'orc', 'orcs', 'dragon', 'dragons', 
-        'troll', 'trolls', 'zombie', 'zombies', 'skeleton', 'skeletons', 
-        'assassin', 'assassins', 'guard', 'guards', 'soldier', 'soldiers',
-        'thief', 'thieves', 'brigand', 'brigands', 'raider', 'raiders',
-        'cultist', 'cultists', 'demon', 'demons', 'devil', 'devils',
-        'ghost', 'ghosts', 'specter', 'specters', 'wraith', 'wraiths',
-        'hobgoblin', 'hobgoblins', 'bugbear', 'bugbears', 'kobold', 'kobolds',
-        'ogre', 'ogres', 'giant', 'giants', 'beholder', 'beholders',
-        'lich', 'liches', 'vampire', 'vampires', 'werewolf', 'werewolves',
-        'hag', 'hags', 'witch', 'witches', 'necromancer', 'necromancers'
-      ];
+      // Save updated story state
+      await updateStoryState(story.id, updatedStoryState);
+      setStoryState(updatedStoryState);
       
-      const hasCombatContext = combatKeywords.some(keyword => 
-        aiResponse.toLowerCase().includes(keyword)
-      );
-      const hasEnemies = enemyKeywords.some(keyword => 
-        aiResponse.toLowerCase().includes(keyword)
-      );
-      
-      // Only initiate combat if BOTH combat context AND enemies are present
-      const isCombatResponse = hasCombatContext && hasEnemies;
-      
-      await addStoryMessage(story.id, {
+      // Add AI response with updated story state
+      await addStoryMessageWithMetadata(story.id, {
         role: 'assistant',
         content: aiResponse,
-        type: isCombatResponse ? 'combat_initiation' : 'story_continuation'
-      });
+        type: 'story_continuation'
+      }, updatedStoryState);
       
-      // Check for phase transition
-      await checkPhaseTransition();
-      
-      // If combat is initiated, transition to combat screen
-      if (isCombatResponse) {
-        // Check if combat is already starting or if there's an active combat session
-        if (isCombatStarting) {
-          return; // Prevent multiple combat sessions
-        }
+      // Update campaign metadata with new context
+      if (story.campaignMetadata) {
+        const newContext = generateCampaignContext(story.campaignMetadata, story.storyMessages, partyCharacters);
+        const newProgress = updateCampaignProgress(story.campaignMetadata, story.storyMessages, objectives);
+        const newPhase = checkPhaseTransition(story.campaignMetadata, story.storyMessages, objectives);
         
-        setIsCombatStarting(true);
-        
-        // Create combat session in database
-        const combatData = {
-          storyContext: aiResponse,
-          partyMembers: partyCharacters.map(char => ({
-            id: char.id,
-            name: char.name,
-            class: char.class,
-            level: char.level,
-            hp: char.hp || 10 + (char.constitution - 10) * 2,
-            maxHp: char.hp || 10 + (char.constitution - 10) * 2,
-            ac: char.ac || 10,
-            initiative: Math.floor(Math.random() * 20) + 1 + Math.floor((char.dexterity - 10) / 2),
-            userId: char.userId
-          })),
-          enemies: [], // Will be generated in combat screen
-          initiative: [] // Will be set when combat starts
+        const metadataUpdates = {
+          'campaignMetadata.storyContext': {
+            ...story.campaignMetadata.storyContext,
+            ...newContext
+          },
+          'campaignMetadata.campaignProgress': newProgress
         };
         
-        await createCombatSession(partyId, combatData);
+        if (newPhase) {
+          metadataUpdates['campaignMetadata.campaignPhase'] = newPhase;
+        }
         
-        // Pause the story
+        await updateCampaignStory(story.id, metadataUpdates);
+      } else {
+        console.warn('No campaign metadata found, skipping campaign updates');
+      }
+      
+      setPlayerResponse('');
+      
+      // Enhanced combat detection with story context
+      const combatDetection = detectCombatOpportunity(aiResponse, updatedStoryState, playerResponse);
+      
+      if (combatDetection.shouldInitiate) {
+        setIsCombatStarting(true);
+        
+        // Create enhanced combat session
+        const enhancedCombatData = {
+          storyContext: aiResponse,
+          partyMembers: partyCharacters,
+          enemies: generateEnemiesFromContext(aiResponse, partyCharacters.length),
+          environmentalFeatures: updatedStoryState.currentLocation?.features || [],
+          teamUpOpportunities: combatService.identifyTeamUpOpportunities(partyCharacters),
+          narrativeElements: combatService.extractNarrativeElements(aiResponse)
+        };
+        
+        const combatSession = await createEnhancedCombatSession(partyId, enhancedCombatData);
+        
+        // Pause story for combat
         await updateCampaignStory(story.id, {
           status: 'paused',
-          currentCombat: {
-            initiated: true,
-            storyContext: aiResponse,
-            timestamp: new Date()
-          }
+          currentCombat: combatSession.id
         });
         
-        // Navigation will be handled by the subscription for all players
+        // Redirect to combat after a short delay
+        setTimeout(() => {
+          navigate(`/combat/${partyId}`);
+        }, 2000);
       }
       
     } catch (error) {
       setError('Failed to send response');
       console.error(error);
+    } finally {
+      setLoading(false);
     }
   };
 
-  // Check and handle phase transitions
-  const checkPhaseTransition = async () => {
+  // Enhanced combat detection with story context
+  const detectCombatOpportunity = (aiResponse, storyState, playerResponse) => {
+    const combatKeywords = ['combat', 'battle', 'fight', 'attack', 'enemy', 'monster'];
+    const tensionKeywords = ['tension', 'threat', 'danger', 'hostile', 'aggressive'];
+    
+    // Check for explicit combat mentions
+    const hasCombatKeywords = combatKeywords.some(keyword => 
+      aiResponse.toLowerCase().includes(keyword)
+    );
+    
+    // Check for escalating tension
+    const hasTension = tensionKeywords.some(keyword => 
+      aiResponse.toLowerCase().includes(keyword)
+    );
+    
+    // Check story context for combat-appropriate situations
+    const isCombatAppropriate = storyState?.currentLocation?.atmosphere?.includes('dangerous') || 
+                               storyState?.currentLocation?.atmosphere?.includes('hostile') ||
+                               storyState?.currentLocation?.atmosphere?.includes('threatening');
+    
+    // Check if player response indicates combat intent
+    const playerWantsCombat = combatKeywords.some(keyword => 
+      playerResponse.toLowerCase().includes(keyword)
+    );
+    
+    return {
+      shouldInitiate: hasCombatKeywords || (hasTension && isCombatAppropriate) || playerWantsCombat,
+      reason: hasCombatKeywords ? 'explicit_combat' : 
+              hasTension && isCombatAppropriate ? 'escalating_tension' :
+              playerWantsCombat ? 'player_intent' : 'none'
+    };
+  };
+
+  // Enhanced enemy generation with story context
+  const generateEnemiesFromContext = (context, partySize) => {
+    const enemyTypes = {
+      'goblin': { name: 'Goblin', hp: 12, ac: 14, level: 1, charisma: 8 },
+      'orc': { name: 'Orc', hp: 30, ac: 16, level: 3, charisma: 12 },
+      'troll': { name: 'Troll', hp: 84, ac: 15, level: 5, charisma: 7 },
+      'dragon': { name: 'Dragon', hp: 200, ac: 19, level: 10, charisma: 19 },
+      'bandit': { name: 'Bandit', hp: 16, ac: 12, level: 1, charisma: 10 },
+      'skeleton': { name: 'Skeleton', hp: 13, ac: 13, level: 1, charisma: 5 },
+      'zombie': { name: 'Zombie', hp: 22, ac: 8, level: 1, charisma: 3 }
+    };
+
+    const contextLower = context.toLowerCase();
+    let enemyType = 'bandit'; // default
+
+    // Determine enemy type from context
+    if (contextLower.includes('goblin')) enemyType = 'goblin';
+    else if (contextLower.includes('orc')) enemyType = 'orcs';
+    else if (contextLower.includes('troll')) enemyType = 'troll';
+    else if (contextLower.includes('dragon')) enemyType = 'dragon';
+    else if (contextLower.includes('undead') || contextLower.includes('skeleton')) enemyType = 'skeleton';
+    else if (contextLower.includes('zombie')) enemyType = 'zombie';
+
+    const baseEnemy = enemyTypes[enemyType];
+    const enemyCount = Math.min(partySize + 1, 6); // Balance with party size
+
+    const generatedEnemies = [];
+    for (let i = 0; i < enemyCount; i++) {
+      generatedEnemies.push({
+        id: `enemy_${i}`,
+        name: `${baseEnemy.name} ${i + 1}`,
+        type: baseEnemy.name,
+        hp: baseEnemy.hp + Math.floor(Math.random() * 10),
+        maxHp: baseEnemy.hp + Math.floor(Math.random() * 10),
+        ac: baseEnemy.ac + Math.floor(Math.random() * 3),
+        initiative: Math.floor(Math.random() * 20) + 1,
+        charisma: baseEnemy.charisma,
+        portrait: '/placeholder-enemy.png'
+      });
+    }
+
+    return generatedEnemies;
+  };
+
+  // Change the local function name to avoid conflict with the imported one
+  const handlePhaseTransition = async () => {
     if (!story || !party) return;
     
     const messageCount = story.storyMessages?.length || 0;
@@ -766,6 +897,38 @@ Party: ${characterContext}`;
     });
   };
 
+  // Add campaign summary display
+  const renderCampaignSummary = () => {
+    if (!story?.campaignMetadata) return null;
+    
+    const metadata = story.campaignMetadata;
+    
+    return (
+      <div className="bg-purple-100 border border-purple-200 rounded-lg p-4 mb-6">
+        <h3 className="font-bold text-purple-800 mb-2">📖 Campaign Progress</h3>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+          <div>
+            <span className="font-semibold">Session:</span> {metadata.sessionNumber}
+          </div>
+          <div>
+            <span className="font-semibold">Phase:</span> {metadata.campaignPhase.replace('_', ' ')}
+          </div>
+          <div>
+            <span className="font-semibold">Progress:</span> {metadata.campaignProgress}%
+          </div>
+          <div>
+            <span className="font-semibold">Goal:</span> {metadata.mainGoal ? 'Set' : 'Pending'}
+          </div>
+        </div>
+        {metadata.mainGoal && (
+          <div className="mt-2 text-purple-700">
+            <span className="font-semibold">Main Goal:</span> {metadata.mainGoal}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   if (!user) {
     return (
       <div className="fantasy-container py-8">
@@ -873,16 +1036,26 @@ Party: ${characterContext}`;
                     <div key={character.id} className={`fantasy-card transition-all duration-200 ${
                       isReady ? 'bg-green-50 border-green-200' : 'bg-amber-50'
                     }`}>
-                      <div className="text-center">
-                        <div className="w-16 h-16 bg-stone-300 rounded-full mx-auto mb-2 flex items-center justify-center">
-                          <span className="text-xs text-stone-600">IMG</span>
-                        </div>
-                        <h3 className="font-bold text-stone-800">{character.name}</h3>
-                        <p className="text-sm text-stone-600">
-                          Level {character.level} {character.race} {character.class}
-                        </p>
+                    <div className="text-center">
+                      <div className="w-16 h-16 bg-stone-300 rounded-full mx-auto mb-2 flex items-center justify-center">
+                        <span className="text-xs text-stone-600">IMG</span>
+                      </div>
+                      <h3 className="font-bold text-stone-800">{character.name}</h3>
+                      <p className="text-sm text-stone-600">
+                        Level {character.level} {character.race} {character.class}
+                      </p>
                         {isCurrentUser && (
-                          <span className="text-blue-600 text-xs font-medium">(You)</span>
+                          <>
+                            <span className="text-blue-600 text-xs font-medium">(You)</span>
+                      <div className="mt-2">
+                              <button
+                                className="fantasy-button bg-emerald-600 hover:bg-emerald-700 text-xs px-3 py-1 mt-2"
+                                onClick={() => navigate(`/character-creation/${partyId}`)}
+                              >
+                                Edit Character
+                              </button>
+                            </div>
+                          </>
                         )}
                         <div className="mt-2">
                           {isReady ? (
@@ -895,10 +1068,10 @@ Party: ${characterContext}`;
                               <div className="w-3 h-3 border-2 border-stone-300 border-t-stone-600 rounded-full animate-spin"></div>
                               <span>Waiting...</span>
                             </div>
-                          )}
-                        </div>
+                        )}
                       </div>
                     </div>
+                  </div>
                   );
                 })
               ) : (
@@ -976,7 +1149,7 @@ Party: ${characterContext}`;
         {story?.status === 'voting' && (
           <div className="space-y-6">
             <h2 className="text-xl font-bold text-stone-800">Choose Your Adventure</h2>
-            
+
             {/* Plot Selection Interface for DM */}
             {party && party.dmId === user?.uid ? (
               <div className="space-y-4">
@@ -1165,43 +1338,6 @@ Party: ${characterContext}`;
                         Send
                       </button>
                     </div>
-                    
-                    {/* DM-only control options - hidden from other party members */}
-                    {party?.dmId === user?.uid && (
-                      <div className="mt-4 pt-4 border-t border-amber-300">
-                        <h4 className="font-bold text-amber-800 mb-3 text-sm">🎲 DM Controls (Hidden from party)</h4>
-                        <div className="grid grid-cols-2 gap-2">
-                          <button
-                            onClick={() => handleSendResponse('combat')}
-                            disabled={!playerResponse.trim()}
-                            className="fantasy-button bg-red-600 hover:bg-red-700 text-sm py-2"
-                          >
-                            ⚔️ Advance to Combat
-                          </button>
-                          <button
-                            onClick={() => handleSendResponse('climax')}
-                            disabled={!playerResponse.trim()}
-                            className="fantasy-button bg-purple-600 hover:bg-purple-700 text-sm py-2"
-                          >
-                            🌟 Build Tension
-                          </button>
-                          <button
-                            onClick={() => handleSendResponse('resolution')}
-                            disabled={!playerResponse.trim()}
-                            className="fantasy-button bg-green-600 hover:bg-green-700 text-sm py-2"
-                          >
-                            🔍 Investigate the Area
-                          </button>
-                          <button
-                            onClick={() => handleSendResponse('twist')}
-                            disabled={!playerResponse.trim()}
-                            className="fantasy-button bg-orange-600 hover:bg-orange-700 text-sm py-2"
-                          >
-                            🔄 Add Plot Twist
-                          </button>
-                        </div>
-                      </div>
-                    )}
                   </div>
                 ) : (
                   <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
@@ -1235,29 +1371,29 @@ Party: ${characterContext}`;
                           const isCurrentUser = character.userId === user?.uid;
                           
                           return (
-                            <button
-                              key={character.id}
-                              onClick={async () => {
-                                await setCurrentSpeaker(story.id, character);
-                                await setCurrentController(story.id, character.userId);
-                              }}
-                              disabled={character.id === story?.currentSpeaker?.id}
+                        <button
+                          key={character.id}
+                          onClick={async () => {
+                            await setCurrentSpeaker(story.id, character);
+                            await setCurrentController(story.id, character.userId);
+                          }}
+                          disabled={character.id === story?.currentSpeaker?.id}
                               className={`p-4 rounded-lg border-2 transition-colors text-center ${
-                                character.id === story?.currentSpeaker?.id
-                                  ? 'border-stone-300 bg-stone-100 text-stone-500 cursor-not-allowed'
-                                  : 'border-stone-200 bg-white hover:border-stone-300 text-stone-700'
-                              }`}
-                            >
+                            character.id === story?.currentSpeaker?.id
+                              ? 'border-stone-300 bg-stone-100 text-stone-500 cursor-not-allowed'
+                              : 'border-stone-200 bg-white hover:border-stone-300 text-stone-700'
+                          }`}
+                        >
                               <div className="font-medium mb-1">
                                 <span>{character.name}</span>
                                 {isCurrentUser && (
                                   <span className="text-blue-600 text-xs font-medium ml-1">(you)</span>
                                 )}
                               </div>
-                              <div className="text-sm opacity-75">
-                                {character.race} {character.class}
-                              </div>
-                            </button>
+                          <div className="text-sm opacity-75">
+                            {character.race} {character.class}
+                          </div>
+                        </button>
                           );
                         })}
                       </div>
@@ -1278,12 +1414,12 @@ Party: ${characterContext}`;
                         const isCurrentUser = character.userId === user?.uid;
                         
                         return (
-                          <button
-                            key={character.id}
-                            onClick={async () => {
-                              await setCurrentSpeaker(story.id, character);
-                              await setCurrentController(story.id, character.userId);
-                            }}
+                      <button
+                        key={character.id}
+                        onClick={async () => {
+                          await setCurrentSpeaker(story.id, character);
+                          await setCurrentController(story.id, character.userId);
+                        }}
                             className="p-4 rounded-lg border-2 border-stone-200 bg-white hover:border-stone-300 text-stone-700 transition-colors text-center"
                           >
                             <div className="font-medium mb-1">
@@ -1292,10 +1428,10 @@ Party: ${characterContext}`;
                                 <span className="text-blue-600 text-xs font-medium ml-1">(you)</span>
                               )}
                             </div>
-                            <div className="text-sm opacity-75">
-                              {character.race} {character.class}
-                            </div>
-                          </button>
+                        <div className="text-sm opacity-75">
+                          {character.race} {character.class}
+                        </div>
+                      </button>
                         );
                       })}
                     </div>
@@ -1315,6 +1451,9 @@ Party: ${characterContext}`;
                 </div>
               )
             )}
+
+            {/* Campaign Summary - Only show during storytelling */}
+            {story?.status === 'storytelling' && renderCampaignSummary()}
           </div>
         )}
       </div>

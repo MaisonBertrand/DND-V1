@@ -1,7 +1,14 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { onAuthChange } from '../firebase/auth';
-import { saveCharacter, getCharacterByUserAndParty } from '../firebase/database';
+import { 
+  saveCharacter, 
+  getCharacterByUserAndParty,
+  saveCharacterPreset,
+  getUserCharacterPresets,
+  deleteCharacterPreset,
+  updateCharacter
+} from '../firebase/database';
 
 export default function CharacterCreation() {
   const navigate = useNavigate();
@@ -9,6 +16,10 @@ export default function CharacterCreation() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(false);
   const [existingCharacter, setExistingCharacter] = useState(null);
+  const [characterPresets, setCharacterPresets] = useState([]);
+  const [showPresetModal, setShowPresetModal] = useState(false);
+  const [presetName, setPresetName] = useState('');
+  const [showLoadPresetModal, setShowLoadPresetModal] = useState(false);
   const [character, setCharacter] = useState({
     // Basic Info
     name: '',
@@ -72,9 +83,23 @@ export default function CharacterCreation() {
       if (partyId) {
         checkExistingCharacter(user.uid, partyId);
       }
+      loadCharacterPresets(user.uid);
     });
     return () => unsubscribe();
   }, [navigate, partyId]);
+
+  // If editing, load character data into form
+  useEffect(() => {
+    if (existingCharacter) {
+      setCharacter({ ...existingCharacter });
+      if (existingCharacter.weaponChoices) setWeaponChoices(existingCharacter.weaponChoices);
+      if (existingCharacter.spellChoices) setSpellChoices(existingCharacter.spellChoices);
+      if (existingCharacter.abilityScoreMethod) setAbilityScoreMethod(existingCharacter.abilityScoreMethod);
+      if (existingCharacter.rolledScores) setRolledScores(existingCharacter.rolledScores);
+      if (existingCharacter.assignedScores) setAssignedScores(existingCharacter.assignedScores);
+      if (existingCharacter.rolledScores) setHasRolled(existingCharacter.rolledScores.length > 0);
+    }
+  }, [existingCharacter]);
 
   const checkExistingCharacter = async (userId, partyId) => {
     try {
@@ -82,6 +107,15 @@ export default function CharacterCreation() {
       setExistingCharacter(existing);
     } catch (error) {
       // Handle error silently or show user-friendly message
+    }
+  };
+
+  const loadCharacterPresets = async (userId) => {
+    try {
+      const presets = await getUserCharacterPresets(userId);
+      setCharacterPresets(presets);
+    } catch (error) {
+      console.error('Error loading character presets:', error);
     }
   };
 
@@ -479,51 +513,137 @@ export default function CharacterCreation() {
         equipment: getStartingEquipment(character.class),
         weapons: weaponChoices,
         spells: spellChoices,
-        createdAt: new Date()
+        createdAt: existingCharacter ? existingCharacter.createdAt : new Date(),
+        updatedAt: new Date()
       };
-
-      await saveCharacter(user.uid, partyId, characterData);
-      console.log('Character created successfully!');
+      if (existingCharacter) {
+        // Update existing character
+        await updateCharacter(existingCharacter.id, characterData);
+        console.log('Character updated successfully!');
+      } else {
+        // Create new character
+        await saveCharacter(user.uid, partyId, characterData);
+        console.log('Character created successfully!');
+      }
       navigate(`/campaign-story/${partyId}`);
     } catch (error) {
-      console.error('Character creation error:', error);
-      console.error('Error creating character:', error.message);
+      console.error('Character creation/update error:', error);
+      console.error('Error creating/updating character:', error.message);
     } finally {
       setLoading(false);
     }
   };
 
+  // Character Preset Management Functions
+  const saveCurrentAsPreset = async () => {
+    if (!presetName.trim()) {
+      alert('Please enter a name for your preset');
+      return;
+    }
+
+    if (!character.name || !character.race || !character.class) {
+      alert('Please fill in at least the basic character information (name, race, class) before saving as preset');
+      return;
+    }
+
+    try {
+      console.log('Saving preset with data:', {
+        userId: user.uid,
+        presetName: presetName,
+        characterData: character,
+        weaponChoices,
+        spellChoices
+      });
+
+      const presetData = {
+        name: presetName,
+        data: {
+          ...character,
+          weaponChoices,
+          spellChoices,
+          abilityScoreMethod,
+          rolledScores,
+          assignedScores
+        }
+      };
+
+      console.log('Calling saveCharacterPreset with:', presetData);
+      const result = await saveCharacterPreset(user.uid, presetData);
+      console.log('Preset saved successfully:', result);
+      
+      setPresetName('');
+      setShowPresetModal(false);
+      await loadCharacterPresets(user.uid);
+      alert('Character preset saved successfully!');
+    } catch (error) {
+      console.error('Error saving preset:', error);
+      console.error('Error details:', {
+        message: error.message,
+        code: error.code,
+        stack: error.stack
+      });
+      
+      // Provide more specific error messages
+      if (error.message.includes('User profile not found')) {
+        alert('User profile not found. Please try logging out and back in.');
+      } else if (error.message.includes('permission')) {
+        alert('Permission denied. Please check your account status.');
+      } else {
+        alert(`Failed to save preset: ${error.message}`);
+      }
+    }
+  };
+
+  const handlePresetKeyPress = (e) => {
+    if (e.key === 'Enter' && presetName.trim()) {
+      saveCurrentAsPreset();
+    }
+  };
+
+  const loadPreset = (preset) => {
+    const presetData = preset.data;
+    setCharacter({
+      ...presetData,
+      // Reset party-specific fields
+      name: presetData.name + ' (Copy)',
+      equipment: [],
+      spells: presetData.spells || [],
+      proficiencies: presetData.proficiencies || []
+    });
+    
+    if (presetData.weaponChoices) {
+      setWeaponChoices(presetData.weaponChoices);
+    }
+    if (presetData.spellChoices) {
+      setSpellChoices(presetData.spellChoices);
+    }
+    if (presetData.abilityScoreMethod) {
+      setAbilityScoreMethod(presetData.abilityScoreMethod);
+    }
+    if (presetData.rolledScores) {
+      setRolledScores(presetData.rolledScores);
+      setAssignedScores(presetData.assignedScores || {});
+      setHasRolled(presetData.rolledScores.length > 0);
+    }
+    
+    setShowLoadPresetModal(false);
+  };
+
+  const deletePreset = async (presetId) => {
+    if (confirm('Are you sure you want to delete this preset? This action cannot be undone.')) {
+      try {
+        await deleteCharacterPreset(user.uid, presetId);
+        await loadCharacterPresets(user.uid);
+        alert('Preset deleted successfully!');
+      } catch (error) {
+        console.error('Error deleting preset:', error);
+        alert('Failed to delete preset. Please try again.');
+      }
+    }
+  };
+
   if (!user) {
     return null;
-  }
-
-  if (existingCharacter) {
-    return (
-      <div className="fantasy-container py-8">
-        <div className="fantasy-card">
-          <h1 className="fantasy-title text-center">Character Already Created</h1>
-          <div className="text-center py-8">
-            <p className="text-stone-600 mb-4">
-              You already have a character in this party: <strong>{existingCharacter.name}</strong>
-            </p>
-            <div className="space-y-4">
-              <button
-                onClick={() => navigate(`/campaign-story/${partyId}`)}
-                className="fantasy-button"
-              >
-                Go to Campaign
-              </button>
-              <button
-                onClick={() => navigate('/party-management')}
-                className="fantasy-button bg-stone-600 hover:bg-stone-700"
-              >
-                Back to Parties
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
   }
 
   return (
@@ -533,6 +653,33 @@ export default function CharacterCreation() {
         <p className="text-center text-stone-600 mb-6">
           Create your character to join the campaign. Once created, you'll be automatically ready to start the adventure!
         </p>
+        
+        {/* Character Preset Management */}
+        <div className="mb-8 p-4 bg-stone-50 rounded-lg border border-stone-200">
+          <h3 className="text-lg font-semibold text-stone-800 mb-4">Character Presets</h3>
+          <div className="flex flex-wrap gap-3 mb-4">
+            <button
+              type="button"
+              onClick={() => setShowLoadPresetModal(true)}
+              className="fantasy-button bg-amber-600 hover:bg-amber-700"
+              disabled={characterPresets.length === 0}
+            >
+              📋 Load Preset ({characterPresets.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowPresetModal(true)}
+              className="fantasy-button bg-emerald-600 hover:bg-emerald-700"
+            >
+              💾 Save as Preset
+            </button>
+          </div>
+          {characterPresets.length > 0 && (
+            <p className="text-sm text-stone-600">
+              Save your current character configuration as a preset to easily recreate it for other parties.
+            </p>
+          )}
+        </div>
         
         <form onSubmit={handleSubmit} className="space-y-8">
           {/* Basic Information */}
@@ -1028,6 +1175,125 @@ export default function CharacterCreation() {
           </div>
         </form>
       </div>
+
+      {/* Save Preset Modal */}
+      {showPresetModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="fantasy-card max-w-md w-full mx-4">
+            <h3 className="fantasy-title text-center mb-4">Save Character Preset</h3>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-stone-700 mb-2">
+                  Preset Name
+                </label>
+                <input
+                  type="text"
+                  value={presetName}
+                  onChange={(e) => setPresetName(e.target.value)}
+                  onKeyPress={handlePresetKeyPress}
+                  className="fantasy-input"
+                  placeholder="Enter a name for your preset"
+                  autoFocus
+                />
+              </div>
+              <div className="flex space-x-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowPresetModal(false);
+                    setPresetName('');
+                  }}
+                  className="fantasy-button bg-stone-600 hover:bg-stone-700 flex-1"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={saveCurrentAsPreset}
+                  className="fantasy-button bg-emerald-600 hover:bg-emerald-700 flex-1"
+                >
+                  Save Preset
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Load Preset Modal */}
+      {showLoadPresetModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="fantasy-card max-w-2xl w-full mx-4 max-h-[80vh] overflow-y-auto">
+            <h3 className="fantasy-title text-center mb-4">Load Character Preset</h3>
+            {characterPresets.length === 0 ? (
+              <div className="text-center py-8">
+                <p className="text-stone-600 mb-4">No character presets found.</p>
+                <p className="text-sm text-stone-500">
+                  Create a character and save it as a preset to see it here.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setShowLoadPresetModal(false)}
+                  className="fantasy-button mt-4"
+                >
+                  Close
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div className="grid gap-4">
+                  {characterPresets.map((preset) => (
+                    <div key={preset.id} className="border border-stone-200 rounded-lg p-4 hover:border-stone-300">
+                      <div className="flex justify-between items-start mb-3">
+                        <div>
+                          <h4 className="font-semibold text-stone-800">{preset.name}</h4>
+                          <p className="text-sm text-stone-600">
+                            {preset.data.race} {preset.data.class} • Level {preset.data.level}
+                          </p>
+                          {preset.data.background && (
+                            <p className="text-sm text-stone-500">{preset.data.background}</p>
+                          )}
+                          {preset.createdAt && (
+                            <p className="text-xs text-stone-400 mt-1">
+                              Created: {new Date(preset.createdAt.toDate()).toLocaleDateString()}
+                            </p>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => deletePreset(preset.id)}
+                          className="text-red-600 hover:text-red-800 text-sm"
+                          title="Delete preset"
+                        >
+                          🗑️
+                        </button>
+                      </div>
+                      <div className="flex space-x-2">
+                        <button
+                          type="button"
+                          onClick={() => loadPreset(preset)}
+                          className="fantasy-button bg-amber-600 hover:bg-amber-700 flex-1"
+                        >
+                          Load Preset
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex justify-center">
+                  <button
+                    type="button"
+                    onClick={() => setShowLoadPresetModal(false)}
+                    className="fantasy-button bg-stone-600 hover:bg-stone-700"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 } 

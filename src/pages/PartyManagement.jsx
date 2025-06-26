@@ -277,14 +277,14 @@ export default function PartyManagement() {
                 const memberProfiles = partyMemberProfiles[party.id] || [];
                 
                 return (
-                  <div key={party.id} className="fantasy-card bg-amber-50">
-                    <div className="flex justify-between items-start mb-4">
-                      <h3 className="text-xl font-bold text-stone-800">{party.name}</h3>
-                      <span className="text-sm text-stone-600">
-                        {party.members?.length || 1}/{party.maxPlayers} players
-                      </span>
-                    </div>
-                    
+                <div key={party.id} className="fantasy-card bg-amber-50">
+                  <div className="flex justify-between items-start mb-4">
+                    <h3 className="text-xl font-bold text-stone-800">{party.name}</h3>
+                    <span className="text-sm text-stone-600">
+                      {party.members?.length || 1}/{party.maxPlayers} players
+                    </span>
+                  </div>
+                  
                     {party.description && (
                       <div className="mb-4">
                         <span className="text-sm font-semibold text-stone-700">Theme: </span>
@@ -318,47 +318,47 @@ export default function PartyManagement() {
                         })}
                       </div>
                     </div>
-                    
-                    {party.dmId === user.uid && (
-                      <div className="mb-4">
-                        <label className="block text-sm font-medium text-stone-700 mb-2">
-                          Invite Code
-                        </label>
-                        <div className="flex items-center space-x-2">
-                          <input
-                            type="text"
-                            value={party.inviteCode}
-                            readOnly
-                            className="fantasy-input bg-stone-100"
-                          />
-                          <button
-                            onClick={() => copyInviteCode(party.inviteCode)}
-                            className="fantasy-button text-sm"
-                          >
-                            Copy
-                          </button>
-                        </div>
-                      </div>
-                    )}
-
-                    <div className="flex space-x-2">
-                      <button
-                        onClick={() => navigate(`/campaign-story/${party.id}`)}
-                        className="fantasy-button"
-                      >
-                        Campaign
-                      </button>
-                      {party.dmId === user.uid && (
+                  
+                  {party.dmId === user.uid && (
+                    <div className="mb-4">
+                      <label className="block text-sm font-medium text-stone-700 mb-2">
+                        Invite Code
+                      </label>
+                      <div className="flex items-center space-x-2">
+                        <input
+                          type="text"
+                          value={party.inviteCode}
+                          readOnly
+                          className="fantasy-input bg-stone-100"
+                        />
                         <button
-                          onClick={() => handleDisbandParty(party.id, party.name)}
-                          className="fantasy-button bg-red-600 hover:bg-red-700"
-                          disabled={loading}
+                          onClick={() => copyInviteCode(party.inviteCode)}
+                          className="fantasy-button text-sm"
                         >
-                          Disband
+                          Copy
                         </button>
-                      )}
+                      </div>
                     </div>
+                  )}
+
+                  <div className="flex space-x-2">
+                    <button
+                      onClick={() => navigate(`/campaign-story/${party.id}`)}
+                      className="fantasy-button"
+                    >
+                      Campaign
+                    </button>
+                    {party.dmId === user.uid && (
+                      <button
+                        onClick={() => handleDisbandParty(party.id, party.name)}
+                        className="fantasy-button bg-red-600 hover:bg-red-700"
+                        disabled={loading}
+                      >
+                        Disband
+                      </button>
+                    )}
                   </div>
+                </div>
                 );
               })}
             </div>

@@ -40,8 +40,10 @@ export class DungeonMasterService {
 - Balancing combat encounters and managing game mechanics
 - Creating memorable NPCs and villains
 - Adapting to player choices and creating dynamic narratives
+- Maintaining story consistency and character development
+- Building upon established relationships and plot threads
 
-Always respond in character as a Dungeon Master, providing rich, descriptive content that enhances the gaming experience.`;
+Always respond in character as a Dungeon Master, providing rich, descriptive content that enhances the gaming experience. Maintain consistency with previous story elements, character relationships, and established plot threads.`;
   }
 
   async generateStoryPlots(partyCharacters, campaignSetting = '', partyInfo = null) {
@@ -198,7 +200,7 @@ Make each plot distinct and appealing to different play styles. Consider the par
       const response = await callBackendAPI([
         { role: "system", content: this.systemPrompt },
         { role: "user", content: prompt }
-      ], 'gpt-4', 1200, 0.8);
+      ], 'gpt-4', 1500, 0.8);
 
       return response.choices[0].message.content;
     } catch (error) {
@@ -209,27 +211,27 @@ Make each plot distinct and appealing to different play styles. Consider the par
 
   async generateNPC(role, context = '') {
     try {
-      const prompt = `As a Dungeon Master, I need you to create a detailed NPC for my campaign.
+      const prompt = `As a Dungeon Master, I need you to create a detailed NPC for this role and context.
 
-Role: ${role}
-Context: ${context || 'General campaign use'}
+NPC Role: ${role}
+Context: ${context || 'General campaign context'}
 
 Please provide:
-1. Name and basic description
-2. Personality and mannerisms
+1. A detailed physical description
+2. Personality traits and mannerisms
 3. Background and motivations
-4. Role in the story
+4. Current situation and goals
 5. How they might interact with the party
-6. Potential plot hooks or quests they could offer
-7. Any secrets or hidden agendas
-8. Physical description and distinctive features
+6. Potential story hooks or plot threads they could introduce
+7. Their relationship to the world and other NPCs
+8. Any secrets or hidden aspects of their character
 
-Make this NPC memorable and useful for advancing the story.`;
+Make this NPC feel like a real person with depth and complexity.`;
 
       const response = await callBackendAPI([
         { role: "system", content: this.systemPrompt },
         { role: "user", content: prompt }
-      ], 'gpt-4', 600, 0.8);
+      ], 'gpt-4', 800, 0.7);
 
       return response.choices[0].message.content;
     } catch (error) {
@@ -240,24 +242,24 @@ Make this NPC memorable and useful for advancing the story.`;
 
   async generateCombatEncounter(partyLevel, partySize, difficulty = 'medium', theme = '') {
     try {
-      const prompt = `As a Dungeon Master, I need you to design a combat encounter for my party.
+      const prompt = `As a Dungeon Master, I need you to create a detailed combat encounter.
 
 Party Level: ${partyLevel}
-Party Size: ${partySize} players
+Party Size: ${partySize}
 Difficulty: ${difficulty}
 Theme: ${theme || 'General fantasy'}
 
 Please provide:
-1. Encounter description and setup
-2. Enemy composition and stats overview
-3. Terrain and environmental factors
-4. Tactical considerations
-5. Potential complications or reinforcements
-6. Rewards and loot suggestions
-7. Story integration and aftermath
-8. Alternative resolution methods (non-combat options)
+1. A detailed description of the encounter location
+2. Enemy types and their motivations
+3. Tactical considerations and terrain features
+4. Potential story elements or plot hooks
+5. Non-combat resolution options
+6. Consequences of victory or defeat
+7. Environmental hazards or advantages
+8. How this encounter fits into the larger story
 
-Make this encounter balanced, engaging, and story-relevant.`;
+Make this encounter feel meaningful and story-driven, not just a random fight.`;
 
       const response = await callBackendAPI([
         { role: "system", content: this.systemPrompt },
@@ -271,7 +273,8 @@ Make this encounter balanced, engaging, and story-relevant.`;
     }
   }
 
-  async generateStoryContinuation(partyCharacters, storyHistory, playerResponse, responseType = 'individual', partyInfo = null) {
+  // Enhanced story continuation with comprehensive context
+  async generateStoryContinuation(partyCharacters, storyHistory, playerResponse, storyState = null, responseType = 'individual', partyInfo = null) {
     try {
       const characterDetails = partyCharacters.map(char => 
         `${char.name} - Level ${char.level} ${char.race} ${char.class}`
@@ -289,6 +292,29 @@ Make this encounter balanced, engaging, and story-relevant.`;
         partyContext = `\nParty Theme: ${partyInfo.description || 'No theme provided'}`;
       }
 
+      // Enhanced context with story state
+      let enhancedContext = '';
+      if (storyState) {
+        enhancedContext = `
+STORY STATE CONTEXT:
+Current Location: ${storyState.currentLocation?.name || 'Unknown'} - ${storyState.currentLocation?.description || ''}
+Active NPCs: ${Object.keys(storyState.activeNPCs || {}).join(', ') || 'None'}
+Active Plot Threads: ${storyState.activePlotThreads?.map(t => `${t.title} (${Math.round(t.progress * 100)}%)`).join(', ') || 'None'}
+Recent Events: ${storyState.worldState?.recentEvents?.slice(-3).map(e => e.event).join(', ') || 'None'}
+
+CHARACTER RELATIONSHIPS:
+${partyCharacters.map(char => {
+  const arc = storyState.characterArcs?.[char.id] || {};
+  const relationships = Object.entries(arc.relationships || {}).map(([npc, rel]) => `${npc} (${rel})`).join(', ');
+  return `${char.name}: ${relationships || 'No established relationships'}`;
+}).join('\n')}
+
+NPC CONTEXT:
+${Object.entries(storyState.activeNPCs || {}).map(([npc, data]) => 
+  `${npc}: ${data.disposition} disposition, knowledge: ${data.knowledge?.join(', ') || 'none'}, goal: ${data.currentGoal || 'unknown'}`
+).join('\n')}`;
+      }
+
       const prompt = `As a Dungeon Master, continue the story based on the player's response.
 
 Party: ${characterDetails}${partyContext}
@@ -298,26 +324,33 @@ Response Type Context:
 - team: Group action or decision
 - investigate: Looking for clues or information
 - combat: Combat-related action
-- social: Social interaction or diplomacy
+- social: Social interaction or diplomacy${enhancedContext}
 
 Previous Story Context:
 ${conversationHistory.map(msg => `${msg.role === 'assistant' ? 'DM' : 'Player'}: ${msg.content}`).join('\n')}
 
-Important Guidelines:
-- Use the party theme to influence the atmosphere and tone of the story
-- Incorporate themes and elements from the party theme to maintain narrative consistency
-- Consider how the party's background and composition might influence NPC reactions and story developments
-- Focus on the characters and their individual stories
-- The story should feel cohesive with the established theme
+CRITICAL CONSISTENCY REQUIREMENTS:
+1. Maintain all established NPC relationships and dispositions from the story state
+2. Keep current location details consistent with previous descriptions
+3. Continue active plot threads naturally without contradictions
+4. Reference previous discoveries and character development
+5. Build upon established world state and recent events
+6. Ensure character actions align with their established motivations and relationships
+7. Maintain the established tone and atmosphere
+8. Reference specific NPCs that the party has already met
+9. Build upon existing plot threads rather than introducing new unrelated elements
+10. Consider character relationships when determining NPC reactions
 
 Please provide a compelling continuation that:
-1. Acknowledges the player's action and its consequences
-2. Advances the story naturally and creates new opportunities
-3. Maintains the campaign's tone and pacing
-4. Considers the response type and party composition
-5. Ends with a clear situation that invites the next player to respond
-6. Encourages character interaction and roleplay
-7. Provides multiple possible directions for the party to explore
+1. Acknowledges the player's action in context of the current situation and location
+2. References relevant NPCs and their established relationships with the party
+3. Continues or advances active plot threads appropriately
+4. Updates character relationships based on the action
+5. Maintains location and atmosphere consistency
+6. Ends with a clear situation that invites the next player to respond
+7. Encourages character interaction and roleplay
+8. Provides multiple possible directions for the party to explore
+9. Builds upon the established story state and character development
 
 Keep your response engaging but concise (2-3 paragraphs maximum). Remember that only one player responds at a time, so end with a situation that gives the next player something meaningful to react to.`;
 
@@ -435,7 +468,8 @@ Keep the introduction engaging but concise (3-4 paragraphs maximum).`;
     }
   }
 
-  async generateStructuredStoryResponse(partyCharacters, storyHistory, playerResponse, currentPhase, discoveredObjectives, partyInfo = null) {
+  // Enhanced structured story response with story state integration
+  async generateStructuredStoryResponse(partyCharacters, storyHistory, playerResponse, currentPhase, discoveredObjectives, storyState = null, partyInfo = null) {
     try {
       const characterDetails = partyCharacters.map(char => 
         `${char.name} - Level ${char.level} ${char.race} ${char.class}`
@@ -456,37 +490,55 @@ Keep the introduction engaging but concise (3-4 paragraphs maximum).`;
         ? `\nDiscovered Objectives: ${discoveredObjectives.map(obj => obj.title).join(', ')}`
         : '';
 
+      // Enhanced context with story state
+      let enhancedContext = '';
+      if (storyState) {
+        enhancedContext = `
+STORY STATE CONTEXT:
+Current Location: ${storyState.currentLocation?.name || 'Unknown'} - ${storyState.currentLocation?.description || ''}
+Active NPCs: ${Object.keys(storyState.activeNPCs || {}).join(', ') || 'None'}
+Active Plot Threads: ${storyState.activePlotThreads?.map(t => `${t.title} (${Math.round(t.progress * 100)}%)`).join(', ') || 'None'}
+Character Relationships: ${Object.entries(storyState.characterArcs || {}).map(([charId, arc]) => {
+  const char = partyCharacters.find(c => c.id === charId);
+  return `${char?.name}: ${Object.entries(arc.relationships || {}).map(([npc, rel]) => `${npc} (${rel})`).join(', ') || 'No relationships'}`;
+}).join('; ')}`;
+      }
+
       const prompt = `As a Dungeon Master, continue the story based on the player's response, considering the current story phase and discovered objectives.
 
 Party: ${characterDetails}${partyContext}
 Current Phase: ${currentPhase}
-Player Response: "${playerResponse}"${objectiveContext}
+Player Response: "${playerResponse}"${objectiveContext}${enhancedContext}
 
 Story Phases:
 - Investigation: Focus on discovery, clues, and gathering information
 - Conflict: Focus on tension, threats, and potential combat
 - Resolution: Focus on choices, consequences, and story conclusion
 
-Previous Story Context:
-${conversationHistory.map(msg => `${msg.role === 'assistant' ? 'DM' : 'Player'}: ${msg.content}`).join('\n')}
+CRITICAL CONSISTENCY REQUIREMENTS:
+1. Maintain all established NPC relationships and dispositions from the story state
+2. Keep current location details consistent with previous descriptions
+3. Continue active plot threads naturally without contradictions
+4. Reference previous discoveries and character development
+5. Build upon established world state and recent events
+6. Ensure character actions align with their established motivations and relationships
+7. Maintain the established tone and atmosphere
+8. Reference specific NPCs that the party has already met
+9. Build upon existing plot threads rather than introducing new unrelated elements
+10. Consider character relationships when determining NPC reactions
 
-Guidelines for ${currentPhase} Phase:
-${currentPhase === 'Investigation' ? 
-  '- Encourage exploration and discovery\n- Provide subtle clues and hints\n- Create opportunities for investigation\n- Build mystery and intrigue' :
-  currentPhase === 'Conflict' ?
-  '- Increase tension and stakes\n- Present clear threats or challenges\n- Create opportunities for combat or diplomacy\n- Force difficult choices' :
-  '- Provide clear resolution paths\n- Show consequences of previous choices\n- Allow for meaningful conclusions\n- Tie up loose ends'
-}
+Please provide a compelling continuation that:
+1. Acknowledges the player's action in context of the current situation and location
+2. References relevant NPCs and their established relationships with the party
+3. Continues or advances active plot threads appropriately
+4. Updates character relationships based on the action
+5. Maintains location and atmosphere consistency
+6. Ends with a clear situation that invites the next player to respond
+7. Encourages character interaction and roleplay
+8. Provides multiple possible directions for the party to explore
+9. Builds upon the established story state and character development
 
-Important Guidelines:
-- Use the party theme to influence the atmosphere and tone
-- Consider discovered objectives when crafting responses
-- Maintain story coherence and logical progression
-- Provide multiple possible directions for the party
-- End with a situation that invites the next player to respond
-- Keep responses engaging but concise (2-3 paragraphs maximum)
-
-Remember that objectives are discovered organically through player actions, not explicitly mentioned.`;
+Keep your response engaging but concise (2-3 paragraphs maximum). Remember that only one player responds at a time, so end with a situation that gives the next player something meaningful to react to.`;
 
       const response = await callBackendAPI([
         { role: "system", content: this.systemPrompt },
@@ -512,39 +564,25 @@ Remember that objectives are discovered organically through player actions, not 
         partyContext = `\nParty Theme: ${partyInfo.description || 'No theme provided'}`;
       }
 
-      const nextPhase = currentPhase === 'Investigation' ? 'Conflict' : 'Resolution';
-
-      const prompt = `As a Dungeon Master, create a natural transition from the ${currentPhase} phase to the ${nextPhase} phase of the story.
+      const prompt = `As a Dungeon Master, create a phase transition message for the story.
 
 Party: ${characterDetails}${partyContext}
 Current Phase: ${currentPhase}
-Next Phase: ${nextPhase}
 Story Progress: ${storyProgress}
 
 Create a transition that:
-1. Acknowledges the party's progress and discoveries
-2. Naturally escalates or resolves the situation
-3. Introduces new challenges or opportunities appropriate to the ${nextPhase} phase
-4. Maintains the story's momentum and engagement
-5. Provides clear direction for the party's next actions
+1. Acknowledges the progress made so far
+2. Signals the shift to the new phase
+3. Sets up the new challenges and opportunities
+4. Maintains the established tone and atmosphere
+5. Gives the party clear direction for the next phase
 
-Phase Transition Guidelines:
-${nextPhase === 'Conflict' ? 
-  '- Escalate the situation with a clear threat or challenge\n- Introduce enemies, obstacles, or time pressure\n- Create urgency and stakes\n- Provide opportunities for combat or diplomacy' :
-  '- Present clear resolution paths based on previous choices\n- Show consequences of the party\'s actions\n- Allow for meaningful conclusions\n- Provide closure to the current story arc'
-}
-
-Important Guidelines:
-- Use the party theme to influence the transition's tone
-- Make the transition feel natural and earned
-- Maintain story coherence and logical progression
-- Provide multiple possible directions for the party
-- Keep the transition engaging but concise (2-3 paragraphs maximum)`;
+Make this feel like a natural progression in the story.`;
 
       const response = await callBackendAPI([
         { role: "system", content: this.systemPrompt },
         { role: "user", content: prompt }
-      ], 'gpt-4', 600, 0.8);
+      ], 'gpt-4', 600, 0.7);
 
       return response.choices[0].message.content;
     } catch (error) {
@@ -564,43 +602,154 @@ Important Guidelines:
         partyContext = `\nParty Theme: ${partyInfo.description || 'No theme provided'}`;
       }
 
-      const prompt = `As a Dungeon Master, acknowledge the completion of an objective and show its impact on the story.
+      const prompt = `As a Dungeon Master, create a completion message for an objective.
 
 Party: ${characterDetails}${partyContext}
 Completed Objective: ${completedObjective.title}
-Objective Type: ${completedObjective.type}
 Story Context: ${storyContext}
 
-Create a response that:
-1. Acknowledges the party's success in completing the objective
-2. Shows the immediate consequences and impact
-3. Reveals new information or opportunities
-4. Maintains story momentum and engagement
-5. Provides direction for the party's next actions
+Create a completion message that:
+1. Celebrates the achievement
+2. Provides closure for this objective
+3. Sets up the next challenge or objective
+4. Maintains story momentum
+5. Acknowledges the party's efforts
 
-Objective Completion Guidelines:
-- Show how the completed objective affects the story
-- Reveal new information, NPCs, or opportunities
-- Maintain the story's tone and atmosphere
-- Provide clear next steps for the party
-- Keep the response engaging but concise (2-3 paragraphs maximum)
-
-Important Guidelines:
-- Use the party theme to influence the completion's tone
-- Make the completion feel meaningful and impactful
-- Maintain story coherence and logical progression
-- Provide multiple possible directions for the party
-- Don't explicitly mention "objectives" - make it feel natural`;
+Make this feel rewarding and meaningful.`;
 
       const response = await callBackendAPI([
         { role: "system", content: this.systemPrompt },
         { role: "user", content: prompt }
-      ], 'gpt-4', 600, 0.8);
+      ], 'gpt-4', 600, 0.7);
 
       return response.choices[0].message.content;
     } catch (error) {
       console.error('Error generating objective completion:', error);
       throw new Error(`Failed to generate objective completion: ${error.message}`);
+    }
+  }
+
+  async generateCampaignContinuation(partyCharacters, campaignMetadata, storyHistory, playerResponse, partyInfo = null) {
+    try {
+      const characterDetails = partyCharacters.map(char => 
+        `${char.name} - Level ${char.level} ${char.race} ${char.class}`
+      ).join(', ');
+
+      const conversationHistory = storyHistory.map(msg => ({
+        role: msg.role,
+        content: msg.content
+      }));
+
+      let partyContext = '';
+      if (partyInfo) {
+        partyContext = `\nParty Theme: ${partyInfo.description || 'No theme provided'}`;
+      }
+
+      const prompt = `As a Dungeon Master, continue the ongoing campaign story.
+
+Party: ${characterDetails}${partyContext}
+Campaign Goal: ${campaignMetadata.mainGoal || 'No specific goal'}
+Campaign Progress: ${campaignMetadata.campaignProgress || 'Beginning'}
+Player Response: "${playerResponse}"
+
+Previous Story Context:
+${conversationHistory.map(msg => `${msg.role === 'assistant' ? 'DM' : 'Player'}: ${msg.content}`).join('\n')}
+
+Continue the story while:
+1. Building toward the main campaign goal
+2. Maintaining consistency with previous events
+3. Developing character relationships and arcs
+4. Creating meaningful choices and consequences
+5. Advancing the overall plot
+
+Keep your response engaging but concise (2-3 paragraphs maximum).`;
+
+      const response = await callBackendAPI([
+        { role: "system", content: this.systemPrompt },
+        ...conversationHistory,
+        { role: "user", content: prompt }
+      ], 'gpt-4', 800, 0.8);
+
+      return response.choices[0].message.content;
+    } catch (error) {
+      console.error('Error generating campaign continuation:', error);
+      throw new Error(`Failed to generate campaign continuation: ${error.message}`);
+    }
+  }
+
+  async generateCampaignGoal(partyCharacters, plotContent, partyInfo = null) {
+    try {
+      const characterDetails = partyCharacters.map(char => 
+        `${char.name} - Level ${char.level} ${char.race} ${char.class}`
+      ).join(', ');
+
+      let partyContext = '';
+      if (partyInfo) {
+        partyContext = `\nParty Theme: ${partyInfo.description || 'No theme provided'}`;
+      }
+
+      const prompt = `As a Dungeon Master, create a clear campaign goal based on the selected plot.
+
+Party: ${characterDetails}${partyContext}
+Plot Content: ${plotContent}
+
+Create a campaign goal that:
+1. Is clear and achievable
+2. Provides direction for the entire campaign
+3. Involves all party members
+4. Has multiple possible paths to completion
+5. Creates meaningful stakes and consequences
+
+Make this goal compelling and motivating for the party.`;
+
+      const response = await callBackendAPI([
+        { role: "system", content: this.systemPrompt },
+        { role: "user", content: prompt }
+      ], 'gpt-4', 600, 0.7);
+
+      return response.choices[0].message.content;
+    } catch (error) {
+      console.error('Error generating campaign goal:', error);
+      throw new Error(`Failed to generate campaign goal: ${error.message}`);
+    }
+  }
+
+  async generateSessionSummary(campaignMetadata, storyMessages, objectives, partyCharacters, partyInfo = null) {
+    try {
+      const characterDetails = partyCharacters.map(char => 
+        `${char.name} - Level ${char.level} ${char.race} ${char.class}`
+      ).join(', ');
+
+      let partyContext = '';
+      if (partyInfo) {
+        partyContext = `\nParty Theme: ${partyInfo.description || 'No theme provided'}`;
+      }
+
+      const prompt = `As a Dungeon Master, create a session summary for this campaign session.
+
+Party: ${characterDetails}${partyContext}
+Campaign Goal: ${campaignMetadata.mainGoal || 'No specific goal'}
+Objectives: ${objectives.map(obj => obj.title).join(', ')}
+Story Messages: ${storyMessages.length} total messages
+
+Create a summary that:
+1. Recaps the major events of the session
+2. Highlights character development and relationships
+3. Notes progress toward objectives
+4. Sets up expectations for the next session
+5. Maintains the established tone and atmosphere
+
+Make this summary engaging and informative.`;
+
+      const response = await callBackendAPI([
+        { role: "system", content: this.systemPrompt },
+        { role: "user", content: prompt }
+      ], 'gpt-4', 800, 0.7);
+
+      return response.choices[0].message.content;
+    } catch (error) {
+      console.error('Error generating session summary:', error);
+      throw new Error(`Failed to generate session summary: ${error.message}`);
     }
   }
 }

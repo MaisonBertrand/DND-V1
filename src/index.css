@@ -35,4 +35,11 @@
   .fantasy-subtitle {
     @apply text-xl text-stone-600 mb-8;
   }
+  
+  .line-clamp-2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
 } 

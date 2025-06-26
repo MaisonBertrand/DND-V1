@@ -8,7 +8,8 @@ A beautifully styled web application for managing D&D campaigns, built with Reac
 - 📚 Campaign Management
 - 👥 Party System
 - 📝 Quest/Objective Tracking
-- 🎨 Fantasy-themed UI
+- �� Fantasy-themed UI
+- 💾 Character Presets (Save and reuse character configurations)
 
 ## Prerequisites
 

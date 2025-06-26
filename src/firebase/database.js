@@ -499,7 +499,7 @@ export const createCampaignStory = async (partyId) => {
   try {
     const story = {
       partyId,
-      status: 'ready_up', // ready_up, voting, storytelling, paused
+      status: 'ready_up', // ready_up, voting, storytelling, paused, completed
       currentPlot: null,
       storyMessages: [],
       votingSession: null,
@@ -706,6 +706,336 @@ export const subscribeToCombatSession = (partyId, callback) => {
     });
   } catch (error) {
     console.error('Error subscribing to combat session:', error);
+    throw error;
+  }
+};
+
+// Character Preset Management
+export const saveCharacterPreset = async (userId, presetData) => {
+  try {
+    console.log('saveCharacterPreset called with:', { userId, presetData });
+    
+    const profile = await getUserProfile(userId);
+    console.log('User profile retrieved:', profile);
+    
+    if (!profile) {
+      console.error('User profile not found for userId:', userId);
+      throw new Error('User profile not found');
+    }
+    
+    const preset = {
+      id: Date.now().toString(), // Simple ID generation
+      name: presetData.name,
+      data: presetData.data,
+      createdAt: new Date() // Use regular Date instead of serverTimestamp for arrays
+    };
+    
+    console.log('Created preset object:', preset);
+    
+    const existingPresets = profile.characterPresets || [];
+    console.log('Existing presets:', existingPresets);
+    
+    const updatedPresets = [...existingPresets, preset];
+    console.log('Updated presets array:', updatedPresets);
+    
+    const profileRef = doc(db, 'userProfiles', profile.id);
+    console.log('Updating profile with ID:', profile.id);
+    
+    await updateDoc(profileRef, {
+      characterPresets: updatedPresets,
+      updatedAt: serverTimestamp()
+    });
+    
+    console.log('Profile updated successfully');
+    return preset;
+  } catch (error) {
+    console.error('Error saving character preset:', error);
+    console.error('Error details:', {
+      message: error.message,
+      code: error.code,
+      stack: error.stack
+    });
+    throw error;
+  }
+};
+
+export const getUserCharacterPresets = async (userId) => {
+  try {
+    const profile = await getUserProfile(userId);
+    if (!profile) {
+      return [];
+    }
+    
+    return profile.characterPresets || [];
+  } catch (error) {
+    console.error('Error getting user character presets:', error);
+    throw error;
+  }
+};
+
+export const deleteCharacterPreset = async (userId, presetId) => {
+  try {
+    const profile = await getUserProfile(userId);
+    if (!profile) {
+      throw new Error('User profile not found');
+    }
+    
+    const existingPresets = profile.characterPresets || [];
+    const updatedPresets = existingPresets.filter(preset => preset.id !== presetId);
+    
+    const profileRef = doc(db, 'userProfiles', profile.id);
+    await updateDoc(profileRef, {
+      characterPresets: updatedPresets,
+      updatedAt: serverTimestamp()
+    });
+  } catch (error) {
+    console.error('Error deleting character preset:', error);
+    throw error;
+  }
+};
+
+export const updateCampaignMetadata = async (storyId, updates) => {
+  try {
+    const storyRef = doc(db, 'campaignStories', storyId);
+    const storyDoc = await getDoc(storyRef);
+    const storyData = storyDoc.data();
+    
+    const currentMetadata = storyData.campaignMetadata || {};
+    const updatedMetadata = {
+      ...currentMetadata,
+      ...updates,
+      lastUpdated: serverTimestamp()
+    };
+    
+    await updateDoc(storyRef, {
+      campaignMetadata: updatedMetadata,
+      lastUpdated: serverTimestamp()
+    });
+    
+    return updatedMetadata;
+  } catch (error) {
+    console.error('Error updating campaign metadata:', error);
+    throw error;
+  }
+};
+
+export const saveCampaignSession = async (storyId, sessionData) => {
+  try {
+    const storyRef = doc(db, 'campaignStories', storyId);
+    const storyDoc = await getDoc(storyRef);
+    const storyData = storyDoc.data();
+    
+    const sessions = storyData.campaignSessions || [];
+    const newSession = {
+      id: `session_${Date.now()}`,
+      ...sessionData,
+      timestamp: serverTimestamp()
+    };
+    
+    await updateDoc(storyRef, {
+      campaignSessions: [...sessions, newSession],
+      lastUpdated: serverTimestamp()
+    });
+    
+    return newSession;
+  } catch (error) {
+    console.error('Error saving campaign session:', error);
+    throw error;
+  }
+};
+
+export const addCampaignNote = async (storyId, note) => {
+  try {
+    const storyRef = doc(db, 'campaignStories', storyId);
+    const storyDoc = await getDoc(storyRef);
+    const storyData = storyDoc.data();
+    
+    const notes = storyData.campaignNotes || [];
+    const newNote = {
+      id: `note_${Date.now()}`,
+      content: note.content,
+      type: note.type || 'general',
+      timestamp: serverTimestamp(),
+      createdBy: note.createdBy
+    };
+    
+    await updateDoc(storyRef, {
+      campaignNotes: [...notes, newNote],
+      lastUpdated: serverTimestamp()
+    });
+    
+    return newNote;
+  } catch (error) {
+    console.error('Error adding campaign note:', error);
+    throw error;
+  }
+};
+
+export const updateCampaignGoal = async (storyId, goal) => {
+  try {
+    const storyRef = doc(db, 'campaignStories', storyId);
+    await updateDoc(storyRef, {
+      'campaignMetadata.mainGoal': goal,
+      lastUpdated: serverTimestamp()
+    });
+  } catch (error) {
+    console.error('Error updating campaign goal:', error);
+    throw error;
+  }
+};
+
+// Story State Management Functions
+export const saveStoryState = async (storyId, storyState) => {
+  try {
+    const storyRef = doc(db, 'campaignStories', storyId);
+    await updateDoc(storyRef, {
+      storyState: {
+        ...storyState,
+        lastUpdated: serverTimestamp()
+      },
+      lastUpdated: serverTimestamp()
+    });
+    
+    return storyState;
+  } catch (error) {
+    console.error('Error saving story state:', error);
+    throw error;
+  }
+};
+
+export const getStoryState = async (storyId) => {
+  try {
+    const storyRef = doc(db, 'campaignStories', storyId);
+    const storyDoc = await getDoc(storyRef);
+    const storyData = storyDoc.data();
+    
+    return storyData.storyState || null;
+  } catch (error) {
+    console.error('Error getting story state:', error);
+    throw error;
+  }
+};
+
+export const updateStoryState = async (storyId, updates) => {
+  try {
+    const storyRef = doc(db, 'campaignStories', storyId);
+    const storyDoc = await getDoc(storyRef);
+    const storyData = storyDoc.data();
+    
+    const currentState = storyData.storyState || {};
+    const updatedState = {
+      ...currentState,
+      ...updates,
+      lastUpdated: serverTimestamp()
+    };
+    
+    await updateDoc(storyRef, {
+      storyState: updatedState,
+      lastUpdated: serverTimestamp()
+    });
+    
+    return updatedState;
+  } catch (error) {
+    console.error('Error updating story state:', error);
+    throw error;
+  }
+};
+
+// Enhanced combat session management
+export const createEnhancedCombatSession = async (partyId, combatData) => {
+  try {
+    const combat = {
+      partyId,
+      status: 'active',
+      storyContext: combatData.storyContext,
+      partyMembers: combatData.partyMembers,
+      enemies: combatData.enemies,
+      initiative: combatData.initiative,
+      currentTurn: 0,
+      combatState: 'preparation',
+      environmentalFeatures: combatData.environmentalFeatures || [],
+      teamUpOpportunities: combatData.teamUpOpportunities || [],
+      narrativeElements: combatData.narrativeElements || {},
+      statusEffects: {},
+      cooldowns: {},
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    };
+    const docRef = await addDoc(collection(db, 'combatSessions'), combat);
+    return { id: docRef.id, ...combat };
+  } catch (error) {
+    console.error('Error creating enhanced combat session:', error);
+    throw error;
+  }
+};
+
+export const updateCombatSessionWithNarrative = async (combatId, updates) => {
+  try {
+    const combatRef = doc(db, 'combatSessions', combatId);
+    await updateDoc(combatRef, {
+      ...updates,
+      updatedAt: serverTimestamp()
+    });
+  } catch (error) {
+    console.error('Error updating combat session with narrative:', error);
+    throw error;
+  }
+};
+
+// Enhanced story message with metadata
+export const addStoryMessageWithMetadata = async (storyId, message, storyState = null) => {
+  try {
+    const storyRef = doc(db, 'campaignStories', storyId);
+    const storyDoc = await getDoc(storyRef);
+    const storyData = storyDoc.data();
+    
+    const newMessage = {
+      id: `msg_${Date.now()}`,
+      ...message,
+      timestamp: new Date(),
+      metadata: {
+        storyStateSnapshot: storyState ? {
+          currentLocation: storyState.currentLocation?.name,
+          activeNPCs: Object.keys(storyState.activeNPCs || {}),
+          activePlotThreads: storyState.activePlotThreads?.map(t => t.title) || [],
+          characterRelationships: storyState.characterArcs ? 
+            Object.entries(storyState.characterArcs).map(([charId, arc]) => ({
+              characterId: charId,
+              relationships: Object.keys(arc.relationships || {})
+            })) : []
+        } : null
+      }
+    };
+    
+    await updateDoc(storyRef, {
+      storyMessages: [...storyData.storyMessages, newMessage],
+      lastUpdated: serverTimestamp()
+    });
+    
+    return newMessage;
+  } catch (error) {
+    console.error('Error adding story message with metadata:', error);
+    throw error;
+  }
+};
+
+// Story consistency helpers
+export const getStoryConsistencyData = async (storyId) => {
+  try {
+    const storyRef = doc(db, 'campaignStories', storyId);
+    const storyDoc = await getDoc(storyRef);
+    const storyData = storyDoc.data();
+    
+    return {
+      storyState: storyData.storyState || null,
+      campaignMetadata: storyData.campaignMetadata || null,
+      recentMessages: storyData.storyMessages?.slice(-10) || [],
+      activeNPCs: storyData.storyState?.activeNPCs || {},
+      characterArcs: storyData.storyState?.characterArcs || {},
+      plotThreads: storyData.storyState?.activePlotThreads || []
+    };
+  } catch (error) {
+    console.error('Error getting story consistency data:', error);
     throw error;
   }
 }; 
