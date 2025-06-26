@@ -1,6 +1,10 @@
 // Backend API endpoint - update this URL after deploying to Render
 const BACKEND_URL = 'https://dnd-v1-backend.onrender.com';
 
+// Import dice rolling and action validation services
+import DiceRollingService from './diceRolling.js';
+import ActionValidationService from './actionValidation.js';
+
 // Helper function to call the backend proxy
 const callBackendAPI = async (messages, model = 'gpt-4', max_tokens = 1000, temperature = 0.8) => {
   try {
@@ -44,6 +48,10 @@ export class DungeonMasterService {
 - Building upon established relationships and plot threads
 
 Always respond in character as a Dungeon Master, providing rich, descriptive content that enhances the gaming experience. Maintain consistency with previous story elements, character relationships, and established plot threads.`;
+
+    // Initialize dice rolling and action validation services
+    this.diceService = new DiceRollingService();
+    this.actionValidationService = new ActionValidationService();
   }
 
   async generateStoryPlots(partyCharacters, campaignSetting = '', partyInfo = null) {
@@ -273,12 +281,60 @@ Make this encounter feel meaningful and story-driven, not just a random fight.`;
     }
   }
 
-  // Enhanced story continuation with comprehensive context
+  // Enhanced story continuation with comprehensive context and action validation
   async generateStoryContinuation(partyCharacters, storyHistory, playerResponse, storyState = null, responseType = 'individual', partyInfo = null) {
     try {
       const characterDetails = partyCharacters.map(char => 
         `${char.name} - Level ${char.level} ${char.race} ${char.class}`
       ).join(', ');
+
+      // Validate player action if it's an individual response
+      let actionValidation = null;
+      let diceResult = null;
+      let validationMessage = '';
+
+      if (responseType === 'individual') {
+        // Find the responding character (assuming the last character in the party is responding)
+        const respondingCharacter = partyCharacters[partyCharacters.length - 1];
+        
+        if (respondingCharacter) {
+          // Validate the action
+          actionValidation = this.actionValidationService.validatePlayerAction(
+            playerResponse, 
+            respondingCharacter, 
+            { context: 'story', storyState }
+          );
+
+          if (actionValidation.valid && actionValidation.diceResult) {
+            diceResult = actionValidation.diceResult;
+            
+            // Generate validation message based on dice results
+            if (diceResult.overallSuccess) {
+              validationMessage = `\n\nACTION VALIDATION: The action is within your character's capabilities.`;
+              if (diceResult.actions) {
+                const actionResults = diceResult.actions.map(action => 
+                  `${action.action}: ${action.check.isSuccess ? 'Success' : 'Failure'} (Roll: ${action.check.roll}, DC: ${action.check.dc})`
+                ).join(', ');
+                validationMessage += `\nDice Results: ${actionResults}`;
+              }
+            } else {
+              validationMessage = `\n\nACTION VALIDATION: Some aspects of this action are challenging for your character.`;
+              if (diceResult.actions) {
+                const failures = diceResult.actions.filter(action => !action.check.isSuccess);
+                const failureResults = failures.map(action => 
+                  `${action.action}: Failure (Roll: ${action.check.roll}, DC: ${action.check.dc})`
+                ).join(', ');
+                validationMessage += `\nFailed Actions: ${failureResults}`;
+              }
+            }
+          } else if (!actionValidation.valid) {
+            validationMessage = `\n\nACTION VALIDATION: ${actionValidation.response}`;
+            if (actionValidation.suggestion) {
+              validationMessage += `\nSuggestion: ${actionValidation.suggestion}`;
+            }
+          }
+        }
+      }
 
       // Build conversation history for context
       const conversationHistory = storyHistory.map(msg => ({
@@ -341,6 +397,13 @@ CRITICAL CONSISTENCY REQUIREMENTS:
 9. Build upon existing plot threads rather than introducing new unrelated elements
 10. Consider character relationships when determining NPC reactions
 
+ACTION VALIDATION GUIDELINES:
+- If the action validation shows the action is impossible, gently redirect the player while maintaining story flow
+- If the action validation shows the action is challenging, incorporate the difficulty into the narrative
+- If the action validation shows the action is successful, proceed with the action as described
+- Always maintain story coherence and character consistency
+- Use the validation results to inform how the action plays out in the story
+
 Please provide a compelling continuation that:
 1. Acknowledges the player's action in context of the current situation and location
 2. References relevant NPCs and their established relationships with the party
@@ -351,8 +414,9 @@ Please provide a compelling continuation that:
 7. Encourages character interaction and roleplay
 8. Provides multiple possible directions for the party to explore
 9. Builds upon the established story state and character development
+10. Incorporates action validation results naturally into the narrative
 
-Keep your response engaging but concise (2-3 paragraphs maximum). Remember that only one player responds at a time, so end with a situation that gives the next player something meaningful to react to.`;
+Keep your response engaging but concise (2-3 paragraphs maximum). Remember that only one player responds at a time, so end with a situation that gives the next player something meaningful to react to.${validationMessage}`;
 
       const response = await callBackendAPI([
         { role: "system", content: this.systemPrompt },
@@ -360,7 +424,11 @@ Keep your response engaging but concise (2-3 paragraphs maximum). Remember that 
         { role: "user", content: prompt }
       ], 'gpt-4', 800, 0.8);
 
-      return response.choices[0].message.content;
+      return {
+        content: response.choices[0].message.content,
+        actionValidation,
+        diceResult
+      };
     } catch (error) {
       console.error('Error generating story continuation:', error);
       throw new Error(`Failed to generate story continuation: ${error.message}`);

@@ -648,8 +648,12 @@ export class CombatService {
     }
     
     // Apply status effects
+    if (!target.statusEffects) {
+      target.statusEffects = [];
+    }
+    
     results.statusEffects.forEach(effect => {
-      if (!target.statusEffects.includes(effect.type)) {
+      if (!target.statusEffects.some(e => e.type === effect.type)) {
         target.statusEffects.push({
           type: effect.type,
           duration: effect.duration,
@@ -662,6 +666,11 @@ export class CombatService {
   // Update cooldowns
   updateCooldowns(combatSession, combatant, actionType) {
     const actionConfig = this.actionTypes[actionType];
+    
+    // Initialize cooldowns if not present
+    if (!combatant.cooldowns) {
+      combatant.cooldowns = {};
+    }
     
     // Set cooldown for this action
     combatant.cooldowns[actionType] = actionConfig.cooldown;
@@ -677,6 +686,11 @@ export class CombatService {
   // Check for status effect application
   checkStatusEffectApplication(combatant, actionType, target, results) {
     const statusEffects = [];
+    
+    // Initialize statusEffects if not present
+    if (!target.statusEffects) {
+      target.statusEffects = [];
+    }
     
     // Critical hits might apply status effects
     if (results.damage > 10) {
@@ -713,6 +727,10 @@ export class CombatService {
   // Process status effects at the start of a turn
   processStatusEffects(combatSession, combatant) {
     const effects = [];
+    
+    if (!combatant.statusEffects) {
+      return effects;
+    }
     
     combatant.statusEffects.forEach((effect, index) => {
       effect.duration--;

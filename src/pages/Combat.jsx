@@ -10,6 +10,10 @@ import {
   getPartyCharacters
 } from '../firebase/database';
 import { combatService } from '../services/combat';
+import DiceRollingService from '../services/diceRolling';
+import ActionValidationService from '../services/actionValidation';
+import DiceRollDisplay from '../components/DiceRollDisplay';
+import ActionValidationDisplay from '../components/ActionValidationDisplay';
 
 export default function Combat() {
   const { partyId } = useParams();
@@ -32,6 +36,17 @@ export default function Combat() {
   const [playerDied, setPlayerDied] = useState(false);
   const [deadPlayer, setDeadPlayer] = useState(null);
   const [lastProcessedTurn, setLastProcessedTurn] = useState(-1);
+  
+  // Dice rolling and action validation state
+  const [diceService] = useState(() => new DiceRollingService());
+  const [actionValidationService] = useState(() => new ActionValidationService());
+  const [showDiceRoll, setShowDiceRoll] = useState(false);
+  const [showActionValidation, setShowActionValidation] = useState(false);
+  const [currentDiceResult, setCurrentDiceResult] = useState(null);
+  const [currentValidation, setCurrentValidation] = useState(null);
+  const [pendingAction, setPendingAction] = useState(null);
+  const [customActionInput, setCustomActionInput] = useState('');
+  const [showCustomActionInput, setShowCustomActionInput] = useState(false);
 
   useEffect(() => {
     const unsubscribe = onAuthChange((user) => {
@@ -67,7 +82,7 @@ export default function Combat() {
           
           // Check if current turn is an enemy turn and auto-process
           // Only process if we haven't already processed this turn and it's not currently processing
-          const currentCombatant = session.initiative?.[session.currentTurn];
+          const currentCombatant = session.combatants?.[session.currentTurn];
           if (currentCombatant && 
               currentCombatant.id.startsWith('enemy_') && 
               session.combatState === 'active' &&
@@ -210,8 +225,14 @@ export default function Combat() {
       combatSession.storyContext
     );
     
+    // Extract party members and enemies from the combatants array for backward compatibility
+    const updatedPartyMembers = initializedCombat.combatants.filter(c => !c.id.startsWith('enemy_'));
+    const updatedEnemies = initializedCombat.combatants.filter(c => c.id.startsWith('enemy_'));
+    
     await updateCombatSessionWithNarrative(combatSession.id, {
       ...initializedCombat,
+      partyMembers: updatedPartyMembers,
+      enemies: updatedEnemies,
       combatState: 'active'
     });
   };
@@ -222,7 +243,7 @@ export default function Combat() {
 
   const previousTurn = async () => {
     if (!combatSession) return;
-    const newTurn = (combatSession.currentTurn - 1 + combatSession.initiative.length) % combatSession.initiative.length;
+    const newTurn = (combatSession.currentTurn - 1 + combatSession.combatants.length) % combatSession.combatants.length;
     await updateCombatSessionWithNarrative(combatSession.id, {
       currentTurn: newTurn
     });
@@ -279,22 +300,44 @@ export default function Combat() {
       const updatedEnemies = combatSession.enemies.map(enemy => 
         enemy.id === combatantId ? { ...enemy, hp: clampedHp } : enemy
       );
+      const updatedCombatants = combatSession.combatants.map(combatant => 
+        combatant.id === combatantId ? { ...combatant, hp: clampedHp } : combatant
+      );
       await updateCombatSessionWithNarrative(combatSession.id, {
-        enemies: updatedEnemies
+        enemies: updatedEnemies,
+        combatants: updatedCombatants
       });
+      
+      // Update local state immediately
+      setCombatSession(prevSession => ({
+        ...prevSession,
+        enemies: updatedEnemies,
+        combatants: updatedCombatants
+      }));
     } else {
       const updatedPartyMembers = combatSession.partyMembers.map(member => 
         member.id === combatantId ? { ...member, hp: clampedHp } : member
       );
+      const updatedCombatants = combatSession.combatants.map(combatant => 
+        combatant.id === combatantId ? { ...combatant, hp: clampedHp } : combatant
+      );
       await updateCombatSessionWithNarrative(combatSession.id, {
-        partyMembers: updatedPartyMembers
+        partyMembers: updatedPartyMembers,
+        combatants: updatedCombatants
       });
+      
+      // Update local state immediately
+      setCombatSession(prevSession => ({
+        ...prevSession,
+        partyMembers: updatedPartyMembers,
+        combatants: updatedCombatants
+      }));
     }
   };
 
   const getCurrentCombatant = (session = combatSession) => {
-    if (!session?.initiative || session.currentTurn === undefined) return null;
-    return session.initiative[session.currentTurn];
+    if (!session?.combatants || session.currentTurn === undefined) return null;
+    return session.combatants[session.currentTurn];
   };
 
   const isCurrentUserTurn = () => {
@@ -326,13 +369,13 @@ export default function Combat() {
       );
 
       if (result.success) {
-        // Extract updated party members and enemies from the initiative array
-        const updatedPartyMembers = combatSession.initiative.filter(c => !c.id.startsWith('enemy_'));
-        const updatedEnemies = combatSession.initiative.filter(c => c.id.startsWith('enemy_'));
+        // Extract updated party members and enemies from the combatants array
+        const updatedPartyMembers = combatSession.combatants.filter(c => !c.id.startsWith('enemy_'));
+        const updatedEnemies = combatSession.combatants.filter(c => c.id.startsWith('enemy_'));
         
         // Update the combat session in the database with the modified data
         await updateCombatSessionWithNarrative(combatSession.id, {
-          initiative: combatSession.initiative,
+          combatants: combatSession.combatants,
           partyMembers: updatedPartyMembers,
           enemies: updatedEnemies
         });
@@ -340,7 +383,7 @@ export default function Combat() {
         // Update local state to reflect the changes immediately
         setCombatSession(prevSession => ({
           ...prevSession,
-          initiative: combatSession.initiative,
+          combatants: [...combatSession.combatants], // Create a new array to trigger re-render
           partyMembers: updatedPartyMembers,
           enemies: updatedEnemies
         }));
@@ -423,13 +466,13 @@ export default function Combat() {
       const result = await combatService.executeEnemyTurn(combatSession, currentCombatant);
       
       if (result.success) {
-        // Extract updated party members and enemies from the initiative array
-        const updatedPartyMembers = combatSession.initiative.filter(c => !c.id.startsWith('enemy_'));
-        const updatedEnemies = combatSession.initiative.filter(c => c.id.startsWith('enemy_'));
+        // Extract updated party members and enemies from the combatants array
+        const updatedPartyMembers = combatSession.combatants.filter(c => !c.id.startsWith('enemy_'));
+        const updatedEnemies = combatSession.combatants.filter(c => c.id.startsWith('enemy_'));
         
         // Update the combat session in the database with the modified data
         await updateCombatSessionWithNarrative(combatSession.id, {
-          initiative: combatSession.initiative,
+          combatants: combatSession.combatants,
           partyMembers: updatedPartyMembers,
           enemies: updatedEnemies
         });
@@ -437,7 +480,7 @@ export default function Combat() {
         // Update local state to reflect the changes immediately
         setCombatSession(prevSession => ({
           ...prevSession,
-          initiative: combatSession.initiative,
+          combatants: [...combatSession.combatants], // Create a new array to trigger re-render
           partyMembers: updatedPartyMembers,
           enemies: updatedEnemies
         }));
@@ -498,15 +541,15 @@ export default function Combat() {
   const advanceTurn = async () => {
     if (!combatSession || processingTurn) return;
     
-    const newTurn = (combatSession.currentTurn + 1) % combatSession.initiative.length;
-    const nextCombatant = combatSession.initiative[newTurn];
+    const newTurn = (combatSession.currentTurn + 1) % combatSession.combatants.length;
+    const nextCombatant = combatSession.combatants[newTurn];
     
     console.log('Advancing turn:', {
       currentTurn: combatSession.currentTurn,
       newTurn,
       nextCombatant: nextCombatant?.name,
       isEnemy: nextCombatant?.id.startsWith('enemy_'),
-      totalCombatants: combatSession.initiative.length
+      totalCombatants: combatSession.combatants.length
     });
     
     // Update the combat session with new turn
@@ -566,7 +609,9 @@ export default function Combat() {
   const checkPlayerDeath = () => {
     if (!combatSession || !user) return;
     
-    const currentPlayer = combatSession.partyMembers.find(p => p.userId === user.uid);
+    // Check both partyMembers and combatants arrays for consistency
+    const currentPlayer = combatSession.partyMembers.find(p => p.userId === user.uid) ||
+                         combatSession.combatants.find(c => c.userId === user.uid && !c.id.startsWith('enemy_'));
     if (currentPlayer && currentPlayer.hp <= 0) {
       setPlayerDied(true);
       setDeadPlayer(currentPlayer);
@@ -582,6 +627,86 @@ export default function Combat() {
       // For regular combat, return to character creation
       navigate(`/character-creation/${partyId}`);
     }
+  };
+
+  // Dice rolling and action validation functions
+  const handleCustomAction = async (actionDescription) => {
+    if (!actionDescription.trim()) return;
+
+    const currentChar = getCurrentUserCharacter();
+    if (!currentChar) return;
+
+    // Validate the action
+    const validation = actionValidationService.validatePlayerAction(
+      actionDescription, 
+      currentChar, 
+      { context: 'combat', combatSession }
+    );
+
+    setCurrentValidation(validation);
+    setShowActionValidation(true);
+    setPendingAction(actionDescription);
+  };
+
+  const handleActionProceed = async () => {
+    if (!pendingAction) return;
+
+    const currentChar = getCurrentUserCharacter();
+    if (!currentChar) return;
+
+    // Perform dice checks for the action
+    const diceResult = diceService.validateAction(pendingAction, currentChar, { context: 'combat' });
+    setCurrentDiceResult(diceResult);
+    setShowDiceRoll(true);
+    setShowActionValidation(false);
+  };
+
+  const handleActionRevise = () => {
+    setShowActionValidation(false);
+    setShowCustomActionInput(true);
+  };
+
+  const handleDiceRollClose = () => {
+    setShowDiceRoll(false);
+    setCurrentDiceResult(null);
+    setPendingAction(null);
+  };
+
+  const handleActionValidationClose = () => {
+    setShowActionValidation(false);
+    setCurrentValidation(null);
+    setPendingAction(null);
+  };
+
+  const handleCustomActionSubmit = () => {
+    if (customActionInput.trim()) {
+      handleCustomAction(customActionInput);
+      setCustomActionInput('');
+      setShowCustomActionInput(false);
+    }
+  };
+
+  const performSkillCheck = (actionType, circumstances = []) => {
+    const currentChar = getCurrentUserCharacter();
+    if (!currentChar) return null;
+
+    return diceService.performSkillCheck(currentChar, actionType, circumstances);
+  };
+
+  const rollWithAdvantage = () => {
+    return diceService.rollWithAdvantage();
+  };
+
+  const rollWithDisadvantage = () => {
+    return diceService.rollWithDisadvantage();
+  };
+
+  const rollDie = (sides) => {
+    return diceService.rollDie(sides);
+  };
+
+  const rollDice = (number, sides) => {
+    return diceService.rollDice(number, sides);
   };
 
   if (!user) {
@@ -790,7 +915,7 @@ export default function Combat() {
           <div className="mb-6">
             <h3 className="font-bold text-stone-800 mb-3">🎯 Turn Order</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-              {combatSession.initiative.map((combatant, index) => (
+              {combatSession.combatants.map((combatant, index) => (
                 <div
                   key={combatant.id}
                   className={`p-3 rounded-lg border-2 transition-colors ${
@@ -970,7 +1095,142 @@ export default function Combat() {
             </div>
           </div>
         )}
+
+        {/* Custom Action Input */}
+        {showCustomActionInput && (
+          <div className="mb-6 p-4 bg-indigo-50 border border-indigo-200 rounded-lg">
+            <h3 className="font-bold text-indigo-800 mb-2">🎭 Custom Action</h3>
+            <p className="text-indigo-700 mb-3">
+              Describe the action you want to perform. The system will validate it and determine if it's possible.
+            </p>
+            <div className="space-y-3">
+              <textarea
+                value={customActionInput}
+                onChange={(e) => setCustomActionInput(e.target.value)}
+                placeholder="e.g., I attempt to backflip over the enemy and strike from behind..."
+                className="w-full p-3 border border-indigo-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                rows="3"
+              />
+              <div className="flex space-x-3">
+                <button
+                  onClick={handleCustomActionSubmit}
+                  className="fantasy-button bg-indigo-600 hover:bg-indigo-700"
+                >
+                  Validate Action
+                </button>
+                <button
+                  onClick={() => setShowCustomActionInput(false)}
+                  className="fantasy-button bg-stone-600 hover:bg-stone-700"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Dice Rolling Tools */}
+        {isCurrentUserTurn() && (
+          <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-lg">
+            <h3 className="font-bold text-amber-800 mb-2">🎲 Dice Tools</h3>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <button
+                onClick={() => {
+                  const result = rollWithAdvantage();
+                  setCurrentDiceResult(result);
+                  setShowDiceRoll(true);
+                }}
+                className="p-2 bg-green-100 hover:bg-green-200 border border-green-300 rounded text-sm font-medium"
+              >
+                Roll with Advantage
+              </button>
+              <button
+                onClick={() => {
+                  const result = rollWithDisadvantage();
+                  setCurrentDiceResult(result);
+                  setShowDiceRoll(true);
+                }}
+                className="p-2 bg-red-100 hover:bg-red-200 border border-red-300 rounded text-sm font-medium"
+              >
+                Roll with Disadvantage
+              </button>
+              <button
+                onClick={() => {
+                  const result = rollDie(20);
+                  setCurrentDiceResult({ roll: result, totalRoll: result, actionType: 'd20' });
+                  setShowDiceRoll(true);
+                }}
+                className="p-2 bg-blue-100 hover:bg-blue-200 border border-blue-300 rounded text-sm font-medium"
+              >
+                Roll d20
+              </button>
+              <button
+                onClick={() => {
+                  const result = rollDice(2, 6);
+                  const total = result.reduce((sum, roll) => sum + roll, 0);
+                  setCurrentDiceResult({ rolls: result, totalRoll: total, actionType: '2d6' });
+                  setShowDiceRoll(true);
+                }}
+                className="p-2 bg-purple-100 hover:bg-purple-200 border border-purple-300 rounded text-sm font-medium"
+              >
+                Roll 2d6
+              </button>
+            </div>
+            
+            {/* Quick Skill Checks */}
+            <div className="mt-3">
+              <h4 className="font-semibold text-amber-700 mb-2">Quick Skill Checks:</h4>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                {['attack', 'dodge', 'climb', 'jump', 'persuade', 'intimidate'].map(skill => (
+                  <button
+                    key={skill}
+                    onClick={() => {
+                      const result = performSkillCheck(skill);
+                      if (result) {
+                        setCurrentDiceResult(result);
+                        setShowDiceRoll(true);
+                      }
+                    }}
+                    className="p-2 bg-amber-100 hover:bg-amber-200 border border-amber-300 rounded text-xs font-medium capitalize"
+                  >
+                    {skill}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Custom Action Button */}
+        {isCurrentUserTurn() && (
+          <div className="mb-6 text-center">
+            <button
+              onClick={() => setShowCustomActionInput(true)}
+              className="fantasy-button bg-indigo-600 hover:bg-indigo-700"
+            >
+              🎭 Describe Custom Action
+            </button>
+          </div>
+        )}
       </div>
+
+      {/* Dice Roll Display Modal */}
+      {showDiceRoll && (
+        <DiceRollDisplay
+          diceResult={currentDiceResult}
+          onClose={handleDiceRollClose}
+        />
+      )}
+
+      {/* Action Validation Display Modal */}
+      {showActionValidation && (
+        <ActionValidationDisplay
+          validation={currentValidation}
+          onClose={handleActionValidationClose}
+          onProceed={handleActionProceed}
+          onRevise={handleActionRevise}
+        />
+      )}
     </div>
   );
 } 
