@@ -318,7 +318,7 @@ export default function Dashboard() {
         <div className="mb-8 p-6 bg-red-50 border border-red-200 rounded-lg">
           <h2 className="text-xl font-bold text-stone-800 mb-4">⚔️ Combat Testing</h2>
           <p className="text-stone-600 mb-4">
-            Test the new Pokemon-style combat system with pre-made characters and goblin enemies.
+            Test the new combat system with pre-made characters and goblin enemies.
           </p>
           <button
             onClick={handleTestCombat}
