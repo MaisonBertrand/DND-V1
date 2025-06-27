@@ -324,7 +324,7 @@ export class CombatService {
     }
 
     // Check cooldowns
-    if (combatant.cooldowns[actionType] > 0) {
+    if (combatant.cooldowns && combatant.cooldowns[actionType] > 0) {
       return {
         success: false,
         message: `${combatant.name} cannot use ${actionType} yet (cooldown: ${combatant.cooldowns[actionType]} turns)`
@@ -351,7 +351,9 @@ export class CombatService {
       narrative: narrative,
       results: results,
       statusEffects: statusEffects,
-      environmentalImpact: this.calculateEnvironmentalImpact(combatSession, actionType, results)
+      environmentalImpact: this.calculateEnvironmentalImpact(combatSession, actionType, results),
+      targetId: targetId,
+      combatSession: combatSession
     };
   }
 
@@ -369,6 +371,16 @@ export class CombatService {
     narrative = narrative.replace('{item}', additionalData.item || 'an item');
     narrative = narrative.replace('{environment}', additionalData.environment || 'surroundings');
     narrative = narrative.replace('{ally}', additionalData.ally || 'ally');
+    
+    // Add special attack information
+    if (additionalData.specialAttack && additionalData.specialAttack !== 'Standard Action') {
+      narrative = `${combatant.name} uses ${additionalData.specialAttack}! ` + narrative;
+    }
+    
+    // Add damage type information
+    if (additionalData.damageType && additionalData.damageType !== 'physical') {
+      narrative += ` The attack deals ${additionalData.damageType} damage.`;
+    }
     
     // Add class-specific flavor
     const classFlavor = this.getClassFlavor(combatant.class, actionType);
@@ -409,30 +421,40 @@ export class CombatService {
 
   // Get class-specific flavor text
   getClassFlavor(characterClass, actionType) {
-    const flavorTexts = {
-      fighter: {
-        attack: 'The force of the blow echoes through the battlefield.',
-        defend: 'Their stance is unbreakable.',
-        special: 'Years of training show in their precision.'
+    const classFlavors = {
+      'priest': {
+        'attack': 'Divine energy crackles around their weapon.',
+        'spell': 'Holy light emanates from their hands.',
+        'heal': 'A warm, healing glow surrounds them.'
       },
-      wizard: {
-        attack: 'Arcane energy crackles in the air.',
-        spell: 'The very fabric of reality seems to bend.',
-        special: 'Ancient knowledge flows through their mind.'
+      'wizard': {
+        'attack': 'Arcane energy flows through their weapon.',
+        'spell': 'Mystical runes appear in the air.',
+        'special': 'Ancient magic surges through them.'
       },
-      rogue: {
-        attack: 'The strike is almost too fast to see.',
-        defend: 'They seem to flow around the attack.',
-        special: 'Perfect timing and deadly precision.'
+      'warrior': {
+        'attack': 'Their combat training shows in every move.',
+        'special': 'Years of battle experience guide their strike.',
+        'defend': 'They adopt a defensive stance with practiced ease.'
       },
-      cleric: {
-        attack: 'Divine light illuminates the area.',
-        spell: 'The gods themselves seem to answer.',
-        special: 'Holy power radiates from their form.'
+      'rogue': {
+        'attack': 'They move with deadly precision.',
+        'special': 'Shadow and stealth enhance their attack.',
+        'defend': 'They dodge and weave with acrobatic grace.'
+      },
+      'boss': {
+        'attack': 'Their overwhelming presence fills the battlefield.',
+        'special': 'Ancient power courses through their veins.',
+        'spell': 'Reality itself seems to bend to their will.'
+      },
+      'undead': {
+        'attack': 'Necrotic energy pulses from their form.',
+        'spell': 'Death magic swirls around them.',
+        'special': 'The very air grows cold with their presence.'
       }
     };
     
-    return flavorTexts[characterClass?.toLowerCase()]?.[actionType] || '';
+    return classFlavors[characterClass?.toLowerCase()]?.[actionType] || '';
   }
 
   // Calculate action results
@@ -442,7 +464,10 @@ export class CombatService {
       healing: 0,
       statusEffects: [],
       environmentalEffects: [],
-      narrative: ''
+      narrative: '',
+      specialAttack: additionalData.specialAttack || 'Standard Action',
+      damageType: additionalData.damageType || 'physical',
+      attribute: additionalData.attribute || 'strength'
     };
 
     switch (actionType) {
@@ -480,30 +505,47 @@ export class CombatService {
     
     // Enhanced scaling for enemies based on level and attributes
     let levelScaling = 1;
+    let attributeMod = 0;
+    
     if (combatant.id.startsWith('enemy_')) {
       levelScaling = 1 + (combatant.level - 1) * 0.3; // 30% increase per level
       
-      // Attribute scaling for enemies
-      const primaryAttribute = this.getEnemyPrimaryAttribute(combatant.class);
-      const attributeMod = Math.floor((combatant[primaryAttribute] - 10) / 2);
+      // Use the specified attribute for damage calculation
+      const attribute = additionalData.attribute || 'strength';
+      attributeMod = Math.floor((combatant[attribute] - 10) / 2);
       
       // Item bonuses for enemies
       const itemBonus = this.calculateEnemyItemBonus(combatant);
       
-      let totalDamage = (baseDamage + strengthMod + weaponBonus + attributeMod + itemBonus) * levelScaling;
+      // Special attack bonuses
+      let specialBonus = 0;
+      if (additionalData.specialAttack && additionalData.specialAttack !== 'Standard Attack') {
+        specialBonus = Math.floor(Math.random() * 4) + 2; // +2 to +5 bonus for special attacks
+      }
+      
+      // Boss attack bonuses
+      if (additionalData.isBossAttack) {
+        specialBonus += 5; // Additional +5 for boss attacks
+      }
+      
+      let totalDamage = (baseDamage + strengthMod + weaponBonus + attributeMod + itemBonus + specialBonus) * levelScaling;
       
       // Critical hit (natural 20)
       if (Math.floor(Math.random() * 20) + 1 === 20) {
         totalDamage *= 2;
       }
       
-      console.log(`Enemy damage calculation for ${combatant.name}:`, {
+      console.log(`Enhanced enemy damage calculation for ${combatant.name}:`, {
         baseDamage,
         strengthMod,
         weaponBonus,
         attributeMod,
         itemBonus,
+        specialBonus,
         levelScaling,
+        specialAttack: additionalData.specialAttack,
+        damageType: additionalData.damageType,
+        attribute: additionalData.attribute,
         totalDamage: Math.max(1, Math.floor(totalDamage))
       });
       
@@ -520,16 +562,7 @@ export class CombatService {
         totalDamage *= 2;
       }
       
-      console.log(`Player damage calculation for ${combatant.name}:`, {
-        baseDamage,
-        strengthMod,
-        dexterityMod,
-        weaponBonus,
-        levelBonus,
-        totalDamage: Math.max(1, totalDamage)
-      });
-      
-      return Math.max(1, totalDamage);
+      return Math.max(1, Math.floor(totalDamage));
     }
   }
 
@@ -821,24 +854,39 @@ export class CombatService {
     }
   }
 
-  // Enemy AI decision making
+  // Choose enemy action
   chooseEnemyAction(enemy, combatSession) {
-    const availableActions = this.getEnemyAvailableActions(enemy, combatSession);
-    const validTargets = this.getEnemyValidTargets(enemy, combatSession);
+    const availableActions = this.getAvailableActions(enemy);
+    const validTargets = this.getValidTargets(enemy, 'attack', combatSession);
     
-    if (availableActions.length === 0 || validTargets.length === 0) {
-      return { action: 'defend', target: null };
+    console.log(`Enemy ${enemy.name} available actions:`, availableActions);
+    console.log(`Enemy ${enemy.name} valid targets:`, validTargets.map(t => t.name));
+    
+    // If no valid targets, default to defend
+    if (validTargets.length === 0) {
+      console.log(`No valid targets for ${enemy.name}, defaulting to defend`);
+      return {
+        action: 'defend',
+        target: null,
+        specialAttack: 'Defensive Stance',
+        damageType: 'defense',
+        attribute: 'dexterity'
+      };
     }
     
-    // AI decision logic
-    const decision = this.makeEnemyDecision(enemy, availableActions, validTargets, combatSession);
-    return decision;
+    return this.makeEnemyDecision(enemy, availableActions, validTargets, combatSession);
   }
 
   // Get available actions for enemy
-  getEnemyAvailableActions(enemy, combatSession) {
+  getAvailableActions(enemy) {
     const actions = [];
     const cooldowns = enemy.cooldowns || {};
+    
+    console.log('Getting enemy available actions for:', enemy.name, {
+      cooldowns,
+      class: enemy.class,
+      hasClassAbility: !!this.classAbilities[enemy.class?.toLowerCase()]
+    });
     
     // Basic actions
     Object.entries(this.actionTypes).forEach(([actionType, config]) => {
@@ -854,14 +902,72 @@ export class CombatService {
       }
     }
     
+    console.log('Available actions for enemy:', enemy.name, actions);
     return actions;
   }
 
   // Get valid targets for enemy
-  getEnemyValidTargets(enemy, combatSession) {
-    return combatSession.combatants.filter(combatant => 
-      !combatant.id.startsWith('enemy_') && combatant.hp > 0
-    );
+  getValidTargets(enemy, actionType, combatSession) {
+    const targets = [];
+    
+    // Get all alive combatants
+    const aliveCombatants = combatSession.combatants.filter(c => c.hp > 0);
+    
+    // If no alive combatants, return empty array
+    if (aliveCombatants.length === 0) {
+      console.log('No alive combatants found');
+      return [];
+    }
+    
+    // Determine valid targets based on action type
+    switch (actionType) {
+      case 'attack':
+      case 'spell':
+      case 'special':
+        // Can target enemies (opposite team)
+        if (enemy.id.startsWith('enemy_')) {
+          // Enemy targeting players
+          targets.push(...aliveCombatants.filter(c => !c.id.startsWith('enemy_')));
+        } else {
+          // Player targeting enemies
+          targets.push(...aliveCombatants.filter(c => c.id.startsWith('enemy_')));
+        }
+        break;
+        
+      case 'heal':
+      case 'item':
+        // Can target allies (same team)
+        if (enemy.id.startsWith('enemy_')) {
+          // Enemy targeting other enemies
+          targets.push(...aliveCombatants.filter(c => c.id.startsWith('enemy_')));
+        } else {
+          // Player targeting other players
+          targets.push(...aliveCombatants.filter(c => !c.id.startsWith('enemy_')));
+        }
+        break;
+        
+      case 'defend':
+      case 'environmental':
+        // Can target self or no target needed
+        targets.push(enemy);
+        break;
+        
+      case 'teamUp':
+        // Can target allies for team-up actions
+        if (enemy.id.startsWith('enemy_')) {
+          targets.push(...aliveCombatants.filter(c => c.id.startsWith('enemy_') && c.id !== enemy.id));
+        } else {
+          targets.push(...aliveCombatants.filter(c => !c.id.startsWith('enemy_') && c.id !== enemy.id));
+        }
+        break;
+        
+      default:
+        // Default to all targets
+        targets.push(...aliveCombatants);
+    }
+    
+    console.log(`Valid targets for ${enemy.name} (${actionType}):`, targets.map(t => t.name));
+    return targets;
   }
 
   // Make enemy decision based on situation
@@ -871,13 +977,99 @@ export class CombatService {
     // Health-based decision making
     const healthPercentage = enemy.hp / enemy.maxHp;
     
+    // Enhanced AI with special attacks and attributes
+    const enemyClass = enemy.class?.toLowerCase();
+    const enemyLevel = enemy.level || 1;
+    
+    // Special attacks based on enemy class and level
+    if (enemyClass === 'priest' || enemyClass === 'cleric') {
+      // Priests have healing and divine attacks
+      if (healthPercentage < 0.4 && availableActions.includes('spell')) {
+        return { 
+          action: 'spell', 
+          target: enemy.id, 
+          spellType: 'healing',
+          specialAttack: 'Divine Healing',
+          damageType: 'healing',
+          attribute: 'wisdom'
+        };
+      }
+      if (availableActions.includes('spell')) {
+        return { 
+          action: 'spell', 
+          target: target.id, 
+          spellType: 'divine',
+          specialAttack: 'Divine Smite',
+          damageType: 'radiant',
+          attribute: 'wisdom'
+        };
+      }
+    }
+    
+    if (enemyClass === 'wizard' || enemyClass === 'mage' || enemyClass === 'sorcerer') {
+      // Wizards have powerful spells
+      if (availableActions.includes('spell')) {
+        const spells = ['fireball', 'lightning', 'ice', 'arcane'];
+        const spellType = spells[Math.floor(Math.random() * spells.length)];
+        return { 
+          action: 'spell', 
+          target: target.id, 
+          spellType: spellType,
+          specialAttack: `${spellType.charAt(0).toUpperCase() + spellType.slice(1)} Spell`,
+          damageType: spellType === 'fireball' ? 'fire' : spellType === 'lightning' ? 'lightning' : spellType === 'ice' ? 'cold' : 'arcane',
+          attribute: 'intelligence'
+        };
+      }
+    }
+    
+    if (enemyClass === 'boss' || enemyClass === 'dragon') {
+      // Bosses have devastating attacks
+      if (availableActions.includes('special')) {
+        return { 
+          action: 'special', 
+          target: target.id, 
+          specialAttack: 'Devastating Strike',
+          damageType: 'physical',
+          attribute: 'strength',
+          isBossAttack: true
+        };
+      }
+    }
+    
+    if (enemyClass === 'undead' || enemyClass === 'skeleton' || enemyClass === 'zombie') {
+      // Undead have necrotic attacks
+      if (availableActions.includes('spell')) {
+        return { 
+          action: 'spell', 
+          target: target.id, 
+          spellType: 'necrotic',
+          specialAttack: 'Death Touch',
+          damageType: 'necrotic',
+          attribute: 'constitution'
+        };
+      }
+    }
+    
     // If low health, prioritize healing/defense
     if (healthPercentage < 0.3) {
       if (availableActions.includes('item')) {
-        return { action: 'item', target: enemy.id, itemType: 'healing' };
+        return { 
+          action: 'item', 
+          target: enemy.id, 
+          itemType: 'healing',
+          specialAttack: 'Use Healing Potion',
+          damageType: 'healing',
+          attribute: 'constitution'
+        };
       }
       if (availableActions.includes('defend')) {
-        return { action: 'defend', target: null };
+        return { 
+          action: 'defend', 
+          target: null,
+          specialAttack: 'Defensive Stance',
+          damageType: 'defense',
+          attribute: 'dexterity'
+        };
       }
     }
     
@@ -887,31 +1079,66 @@ export class CombatService {
     );
     
     if (lowHealthAllies.length > 1 && availableActions.includes('spell')) {
-      return { action: 'spell', target: target.id, spellType: 'area' };
+      return { 
+        action: 'spell', 
+        target: target.id, 
+        spellType: 'area',
+        specialAttack: 'Area Attack',
+        damageType: 'mixed',
+        attribute: 'intelligence'
+      };
     }
     
-    // Default to attack
+    // Default to attack with enhanced attributes
     if (availableActions.includes('attack')) {
-      return { action: 'attack', target: target.id };
+      return { 
+        action: 'attack', 
+        target: target.id,
+        specialAttack: 'Standard Attack',
+        damageType: 'physical',
+        attribute: 'strength'
+      };
     }
     
     // Fallback to any available action
     const action = availableActions[Math.floor(Math.random() * availableActions.length)];
-    return { action, target: target.id };
+    return { 
+      action, 
+      target: target.id,
+      specialAttack: 'Basic Action',
+      damageType: 'physical',
+      attribute: 'strength'
+    };
   }
 
   // Execute enemy turn automatically
   async executeEnemyTurn(combatSession, enemy) {
     const decision = this.chooseEnemyAction(enemy, combatSession);
     
+    console.log('Enemy decision details:', {
+      enemy: enemy.name,
+      decision: decision,
+      specialAttack: decision.specialAttack,
+      damageType: decision.damageType,
+      attribute: decision.attribute
+    });
+    
     if (decision.target) {
       return await this.executeAction(combatSession, enemy.id, decision.action, decision.target, {
         itemType: decision.itemType,
-        spellType: decision.spellType
+        spellType: decision.spellType,
+        specialAttack: decision.specialAttack,
+        damageType: decision.damageType,
+        attribute: decision.attribute,
+        isBossAttack: decision.isBossAttack
       });
     } else {
       // Defend action
-      return await this.executeAction(combatSession, enemy.id, 'defend', enemy.id);
+      return await this.executeAction(combatSession, enemy.id, 'defend', enemy.id, {
+        specialAttack: decision.specialAttack,
+        damageType: decision.damageType,
+        attribute: decision.attribute
+      });
     }
   }
 }

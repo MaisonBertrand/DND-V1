@@ -23,9 +23,19 @@ export default function ActionValidationDisplay({ validation, onClose, onProceed
     }
   };
 
+  const getActionResultColor = (isSuccess, degree) => {
+    if (degree === 'critical success') return 'text-green-800 bg-green-200';
+    if (degree === 'great success') return 'text-green-700 bg-green-100';
+    if (degree === 'success') return 'text-green-600 bg-green-50';
+    if (degree === 'failure') return 'text-red-600 bg-red-50';
+    if (degree === 'great failure') return 'text-red-700 bg-red-100';
+    if (degree === 'critical failure') return 'text-red-800 bg-red-200';
+    return isSuccess ? 'text-green-600 bg-green-100' : 'text-red-600 bg-red-100';
+  };
+
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg p-6 max-w-lg w-full mx-4 max-h-[80vh] overflow-y-auto">
+      <div className="bg-white rounded-lg p-6 max-w-2xl w-full mx-4 max-h-[80vh] overflow-y-auto">
         <div className="flex justify-between items-center mb-4">
           <h3 className="text-lg font-bold text-stone-800">Action Validation</h3>
           <button
@@ -52,8 +62,13 @@ export default function ActionValidationDisplay({ validation, onClose, onProceed
 
           {/* Response */}
           <div className="p-4 bg-stone-50 rounded-lg">
-            <h4 className="font-semibold text-stone-700 mb-2">Response</h4>
-            <p className="text-stone-600">{validation.response}</p>
+            <h4 className="font-semibold text-stone-700 mb-2">DM Response</h4>
+            <div className="text-stone-600 italic leading-relaxed">
+              {typeof validation.response === 'string' 
+                ? validation.response 
+                : validation.response.story
+              }
+            </div>
           </div>
 
           {/* Suggestion */}
@@ -67,19 +82,149 @@ export default function ActionValidationDisplay({ validation, onClose, onProceed
           {/* Dice Results */}
           {validation.diceResult && (
             <div className="p-4 bg-amber-50 rounded-lg">
-              <h4 className="font-semibold text-amber-700 mb-2">Dice Analysis</h4>
+              <h4 className="font-semibold text-amber-700 mb-2">Action Analysis</h4>
+              
+              {/* Summary */}
+              {validation.diceResult.summary && (
+                <div className="mb-3 p-2 bg-amber-100 rounded text-sm font-medium">
+                  {validation.diceResult.summary}
+                </div>
+              )}
+
+              {/* Context Information */}
+              {validation.diceResult.contextInfo && (
+                <div className="mb-3 p-3 bg-blue-50 rounded-lg border border-blue-200">
+                  <h5 className="font-semibold text-blue-700 mb-2 text-sm">Story Context</h5>
+                  <p className="text-blue-600 text-sm mb-2">{validation.diceResult.contextInfo.description}</p>
+                  
+                  {validation.diceResult.contextInfo.environmentalFeatures.length > 0 && (
+                    <div className="mb-2">
+                      <span className="text-xs font-medium text-blue-700">Environment:</span>
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {validation.diceResult.contextInfo.environmentalFeatures.map((feature, index) => (
+                          <span key={index} className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded">
+                            {feature}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  
+                  {validation.diceResult.contextInfo.npcs.length > 0 && (
+                    <div className="mb-2">
+                      <span className="text-xs font-medium text-blue-700">NPCs:</span>
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {validation.diceResult.contextInfo.npcs.map((npc, index) => (
+                          <span key={index} className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded">
+                            {npc.name}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  
+                  {validation.diceResult.contextInfo.circumstances.length > 0 && (
+                    <div>
+                      <span className="text-xs font-medium text-blue-700">Circumstances:</span>
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {validation.diceResult.contextInfo.circumstances.map((circumstance, index) => (
+                          <span key={index} className="text-xs bg-purple-100 text-purple-700 px-2 py-1 rounded">
+                            {circumstance}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+              
               {validation.diceResult.actions ? (
-                <div className="space-y-2">
+                <div className="space-y-3">
                   {validation.diceResult.actions.map((action, index) => (
-                    <div key={index} className="flex justify-between items-center text-sm">
-                      <span className="capitalize">{action.action}</span>
-                      <span className={`px-2 py-1 rounded text-xs font-medium ${
-                        action.check.isSuccess ? 'text-green-600 bg-green-100' : 'text-red-600 bg-red-100'
-                      }`}>
-                        {action.check.isSuccess ? 'Success' : 'Failure'}
-                      </span>
+                    <div key={index} className="border border-amber-200 rounded-lg p-3 bg-white">
+                      {/* Action Header */}
+                      <div className="flex justify-between items-start mb-2">
+                        <div className="flex-1">
+                          <div className="flex items-center space-x-2">
+                            <span className="font-semibold capitalize text-stone-800">
+                              {action.action}
+                            </span>
+                            {action.quantity > 1 && (
+                              <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded">
+                                ×{action.quantity}
+                              </span>
+                            )}
+                            {action.isSequence && (
+                              <span className="text-xs bg-purple-100 text-purple-700 px-2 py-1 rounded">
+                                Sequence
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-sm text-stone-600">{action.description}</p>
+                        </div>
+                        <span className={`px-3 py-1 rounded text-sm font-medium ${getActionResultColor(action.check.isSuccess, action.check.degree)}`}>
+                          {action.check.degree ? action.check.degree.replace('_', ' ').toUpperCase() : (action.check.isSuccess ? 'SUCCESS' : 'FAILURE')}
+                        </span>
+                      </div>
+                      
+                      {/* Action Details */}
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs text-stone-600">
+                        <div>
+                          <span className="font-medium">Roll:</span> {action.check.roll}
+                        </div>
+                        <div>
+                          <span className="font-medium">Total:</span> {action.check.totalRoll}
+                        </div>
+                        <div>
+                          <span className="font-medium">DC:</span> {action.check.dc}
+                        </div>
+                        <div>
+                          <span className="font-medium">Difficulty:</span> {action.difficulty}
+                        </div>
+                      </div>
+                      
+                      {/* Fatigue Penalty */}
+                      {action.fatiguePenalty > 0 && (
+                        <div className="mt-2 text-xs text-orange-600 bg-orange-50 p-2 rounded">
+                          ⚠️ Fatigue penalty: +{action.fatiguePenalty} DC (Action {action.position} of {action.totalInSequence})
+                        </div>
+                      )}
+
+                      {/* Context Modifiers */}
+                      {action.contextModifiers && (
+                        <div className="mt-2 text-xs text-blue-600 bg-blue-50 p-2 rounded">
+                          <span className="font-medium">Context modifiers:</span>
+                          <ul className="mt-1 space-y-1">
+                            {action.contextModifiers.map((modifier, idx) => (
+                              <li key={idx}>• {modifier}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                      
+                      {/* Circumstances */}
+                      {action.check.circumstances && action.check.circumstances.length > 0 && (
+                        <div className="mt-2 text-xs text-blue-600">
+                          <span className="font-medium">Circumstances:</span> {action.check.circumstances.join(', ')}
+                        </div>
+                      )}
                     </div>
                   ))}
+                  
+                  {/* Overall Results */}
+                  <div className="mt-4 p-3 bg-amber-100 rounded-lg">
+                    <div className="flex justify-between items-center text-sm font-medium">
+                      <span>Overall Success:</span>
+                      <span className={`px-2 py-1 rounded ${validation.diceResult.overallSuccess ? 'text-green-700 bg-green-200' : 'text-red-700 bg-red-200'}`}>
+                        {validation.diceResult.overallSuccess ? 'SUCCESS' : 'FAILURE'}
+                      </span>
+                    </div>
+                    {validation.diceResult.criticalFailures && validation.diceResult.criticalFailures.length > 0 && (
+                      <div className="mt-2 text-xs text-red-600">
+                        ⚠️ {validation.diceResult.criticalFailures.length} critical failure(s) detected
+                      </div>
+                    )}
+                  </div>
                 </div>
               ) : (
                 <div className="text-sm">

@@ -44,6 +44,10 @@ import {
 } from '../services/campaign';
 import { storyStateService } from '../services/storyState';
 import { combatService } from '../services/combat';
+import ActionValidationService from '../services/actionValidation';
+import DiceRollingService from '../services/diceRolling';
+import ActionValidationDisplay from './ActionValidationDisplay';
+import DiceRollDisplay from './DiceRollDisplay';
 
 export default function CampaignStory() {
   const { partyId } = useParams();
@@ -71,6 +75,14 @@ export default function CampaignStory() {
   const [objectiveHints, setObjectiveHints] = useState([]);
   const [showObjectiveHints, setShowObjectiveHints] = useState(false);
   const [storyState, setStoryState] = useState(null);
+
+  // Enhanced action validation state
+  const [showActionValidation, setShowActionValidation] = useState(false);
+  const [showDiceRoll, setShowDiceRoll] = useState(false);
+  const [currentValidation, setCurrentValidation] = useState(null);
+  const [currentDiceResult, setCurrentDiceResult] = useState(null);
+  const [actionValidationService] = useState(() => new ActionValidationService());
+  const [diceService] = useState(() => new DiceRollingService());
 
   useEffect(() => {
     const unsubscribe = onAuthChange((user) => {
@@ -494,12 +506,65 @@ Party: ${characterContext}`;
       // Get current story state for consistency
       const currentStoryState = storyState || await getStoryState(story.id);
       
+      // Get user character
+      const userCharacter = partyCharacters.find(char => char.userId === user.uid);
+      if (!userCharacter) {
+        setError('You need a character to participate in the story');
+        return;
+      }
+
+      // Enhanced action validation with atmospheric responses
+      const enhancedContext = {
+        context: 'campaign_story',
+        storyState: currentStoryState,
+        customContext: {
+          description: currentStoryState?.currentLocation?.description || 'A mysterious location',
+          environmentalFeatures: currentStoryState?.currentLocation?.features || [],
+          npcs: currentStoryState?.npcs || [],
+          circumstances: extractCircumstancesFromStoryState(currentStoryState)
+        }
+      };
+
+      // Validate action with atmospheric response
+      const validationResult = actionValidationService.validatePlayerAction(
+        playerResponse,
+        userCharacter,
+        enhancedContext
+      );
+
+      // Show action validation if there are dice results
+      if (validationResult.valid && validationResult.diceResult) {
+        setCurrentValidation(validationResult);
+        setShowActionValidation(true);
+        
+        if (validationResult.diceResult.actions) {
+          setCurrentDiceResult(validationResult.diceResult);
+          setShowDiceRoll(true);
+        }
+        
+        // Don't proceed with story until user confirms action
+        return;
+      }
+      
+      // If no dice validation needed, proceed with story
+      await processStoryResponse(playerResponse, userCharacter, currentStoryState, validationResult);
+      
+    } catch (error) {
+      setError('Failed to send response');
+      console.error(error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Process story response after action validation
+  const processStoryResponse = async (playerResponse, userCharacter, currentStoryState, validationResult) => {
       // Add player message with story state metadata
       const playerMessage = await addStoryMessageWithMetadata(story.id, {
         role: 'user',
         content: playerResponse,
         userId: user.uid,
-        characterName: partyCharacters.find(char => char.userId === user.uid)?.name || 'Unknown'
+      characterName: userCharacter.name
       }, currentStoryState);
       
       // Check for objective discovery
@@ -540,23 +605,73 @@ Party: ${characterContext}`;
         );
       }
       
-      // Update story state based on AI response
+    // Extract entities from AI response if validation result has entities
+    let extractedEntities = null;
+    if (validationResult && validationResult.entities) {
+      extractedEntities = validationResult.entities;
+    } else {
+      // Extract entities from AI response using action validation service
+      extractedEntities = actionValidationService.extractEntities(aiResponse, {
+        storyState: currentStoryState,
+        partyCharacters
+      });
+    }
+    
+    // Update story state based on AI response and extracted entities
       const updatedStoryState = storyStateService.updateStoryState(
         currentStoryState,
         aiResponse,
         playerResponse,
-        partyCharacters.find(char => char.userId === user.uid)?.id
-      );
+      userCharacter.id
+    );
+    
+    // Add extracted entities to story state
+    if (extractedEntities) {
+      updatedStoryState.extractedEntities = extractedEntities;
+      
+      // Store entities for future reference
+      if (!updatedStoryState.knownEntities) {
+        updatedStoryState.knownEntities = {
+          enemies: [],
+          items: [],
+          locations: [],
+          statusEffects: [],
+          questHooks: [],
+          npcs: []
+        };
+      }
+      
+      // Merge new entities with known entities
+      Object.keys(extractedEntities).forEach(category => {
+        if (extractedEntities[category] && extractedEntities[category].length > 0) {
+          extractedEntities[category].forEach(newEntity => {
+            const existingIndex = updatedStoryState.knownEntities[category].findIndex(
+              existing => existing.name.toLowerCase() === newEntity.name.toLowerCase()
+            );
+            if (existingIndex === -1) {
+              updatedStoryState.knownEntities[category].push(newEntity);
+            } else {
+              // Update existing entity with new information
+              updatedStoryState.knownEntities[category][existingIndex] = {
+                ...updatedStoryState.knownEntities[category][existingIndex],
+                ...newEntity
+              };
+            }
+          });
+        }
+      });
+    }
       
       // Save updated story state
       await updateStoryState(story.id, updatedStoryState);
       setStoryState(updatedStoryState);
       
-      // Add AI response with updated story state
+    // Add AI response with updated story state and entities
       await addStoryMessageWithMetadata(story.id, {
         role: 'assistant',
         content: aiResponse,
-        type: 'story_continuation'
+      type: 'story_continuation',
+      entities: extractedEntities
       }, updatedStoryState);
       
       // Update campaign metadata with new context
@@ -584,8 +699,8 @@ Party: ${characterContext}`;
       
       setPlayerResponse('');
       
-      // Enhanced combat detection with story context
-      const combatDetection = detectCombatOpportunity(aiResponse, updatedStoryState, playerResponse);
+    // Enhanced combat detection with story context and action validation
+    const combatDetection = detectCombatOpportunity(aiResponse, updatedStoryState, playerResponse, validationResult);
       
       if (combatDetection.shouldInitiate) {
         setIsCombatStarting(true);
@@ -594,10 +709,11 @@ Party: ${characterContext}`;
         const enhancedCombatData = {
           storyContext: aiResponse,
           partyMembers: partyCharacters,
-          enemies: generateEnemiesFromContext(aiResponse, partyCharacters.length),
+        enemies: generateEnemiesFromContext(aiResponse, partyCharacters.length, combatDetection.enemyType),
           environmentalFeatures: updatedStoryState.currentLocation?.features || [],
           teamUpOpportunities: combatService.identifyTeamUpOpportunities(partyCharacters),
-          narrativeElements: combatService.extractNarrativeElements(aiResponse)
+        narrativeElements: combatService.extractNarrativeElements(aiResponse),
+        extractedEntities: extractedEntities // Pass extracted entities to combat
         };
         
         const combatSession = await createEnhancedCombatSession(partyId, enhancedCombatData);
@@ -613,17 +729,35 @@ Party: ${characterContext}`;
           navigate(`/combat/${partyId}`);
         }, 2000);
       }
-      
-    } catch (error) {
-      setError('Failed to send response');
-      console.error(error);
-    } finally {
-      setLoading(false);
-    }
   };
 
-  // Enhanced combat detection with story context
-  const detectCombatOpportunity = (aiResponse, storyState, playerResponse) => {
+  // Extract circumstances from story state
+  const extractCircumstancesFromStoryState = (storyState) => {
+    const circumstances = [];
+    
+    if (!storyState) return circumstances;
+    
+    // Add location-based circumstances
+    if (storyState.currentLocation) {
+      const location = storyState.currentLocation;
+      if (location.atmosphere?.includes('dangerous')) circumstances.push('in danger');
+      if (location.atmosphere?.includes('hostile')) circumstances.push('in hostile environment');
+      if (location.atmosphere?.includes('peaceful')) circumstances.push('in peaceful environment');
+      if (location.lighting === 'dark') circumstances.push('in darkness');
+      if (location.weather === 'stormy') circumstances.push('in storm');
+    }
+    
+    // Add NPC-based circumstances
+    if (storyState.npcs?.length > 0) {
+      const hostileNPCs = storyState.npcs.filter(npc => npc.disposition === 'hostile');
+      if (hostileNPCs.length > 0) circumstances.push('with hostile NPCs');
+    }
+    
+    return circumstances;
+  };
+
+  // Enhanced combat detection with action validation
+  const detectCombatOpportunity = (aiResponse, storyState, playerResponse, validationResult) => {
     const combatKeywords = ['combat', 'battle', 'fight', 'attack', 'enemy', 'monster'];
     const tensionKeywords = ['tension', 'threat', 'danger', 'hostile', 'aggressive'];
     
@@ -646,17 +780,77 @@ Party: ${characterContext}`;
     const playerWantsCombat = combatKeywords.some(keyword => 
       playerResponse.toLowerCase().includes(keyword)
     );
+
+    // Check if action validation detected combat actions
+    const hasCombatActions = validationResult?.diceResult?.actions?.some(action => 
+      ['attack', 'spell', 'dodge', 'parry'].includes(action.action)
+    );
+
+    // Check for enemies in story context
+    const hasEnemies = storyState?.npcs?.some(npc => npc.disposition === 'hostile') ||
+                      aiResponse.toLowerCase().includes('enemy') ||
+                      aiResponse.toLowerCase().includes('monster') ||
+                      aiResponse.toLowerCase().includes('creature');
+
+    // Determine enemy type from context
+    let enemyType = 'bandit';
+    const contextLower = aiResponse.toLowerCase();
+    if (contextLower.includes('goblin')) enemyType = 'goblin';
+    else if (contextLower.includes('orc')) enemyType = 'orc';
+    else if (contextLower.includes('troll')) enemyType = 'troll';
+    else if (contextLower.includes('dragon')) enemyType = 'dragon';
+    else if (contextLower.includes('undead') || contextLower.includes('skeleton')) enemyType = 'skeleton';
+    else if (contextLower.includes('zombie')) enemyType = 'zombie';
     
     return {
-      shouldInitiate: hasCombatKeywords || (hasTension && isCombatAppropriate) || playerWantsCombat,
+      shouldInitiate: hasCombatKeywords || (hasTension && isCombatAppropriate) || playerWantsCombat || (hasCombatActions && hasEnemies),
       reason: hasCombatKeywords ? 'explicit_combat' : 
               hasTension && isCombatAppropriate ? 'escalating_tension' :
-              playerWantsCombat ? 'player_intent' : 'none'
+              playerWantsCombat ? 'player_intent' :
+              hasCombatActions && hasEnemies ? 'action_triggered_combat' : 'none',
+      enemyType: enemyType
     };
   };
 
+  // Action validation handlers
+  const handleActionValidationClose = () => {
+    setShowActionValidation(false);
+    setCurrentValidation(null);
+  };
+
+  const handleDiceRollClose = () => {
+    setShowDiceRoll(false);
+    setCurrentDiceResult(null);
+  };
+
+  const handleActionProceed = async () => {
+    if (!currentValidation) return;
+
+    const userCharacter = partyCharacters.find(char => char.userId === user.uid);
+    if (!userCharacter) return;
+
+    // Process the action with dice rolling
+    const diceResult = diceService.validateAction(
+      playerResponse,
+      userCharacter,
+      {
+        context: 'campaign_story',
+        validation: currentValidation
+      }
+    );
+
+    setCurrentDiceResult(diceResult);
+    setShowDiceRoll(true);
+    setShowActionValidation(false);
+  };
+
+  const handleActionRevise = () => {
+    setShowActionValidation(false);
+    setCurrentValidation(null);
+  };
+
   // Enhanced enemy generation with story context
-  const generateEnemiesFromContext = (context, partySize) => {
+  const generateEnemiesFromContext = (context, partySize, enemyType = 'bandit') => {
     const enemyTypes = {
       'goblin': { name: 'Goblin', hp: 12, ac: 14, level: 1, charisma: 8 },
       'orc': { name: 'Orc', hp: 30, ac: 16, level: 3, charisma: 12 },
@@ -667,18 +861,7 @@ Party: ${characterContext}`;
       'zombie': { name: 'Zombie', hp: 22, ac: 8, level: 1, charisma: 3 }
     };
 
-    const contextLower = context.toLowerCase();
-    let enemyType = 'bandit'; // default
-
-    // Determine enemy type from context
-    if (contextLower.includes('goblin')) enemyType = 'goblin';
-    else if (contextLower.includes('orc')) enemyType = 'orcs';
-    else if (contextLower.includes('troll')) enemyType = 'troll';
-    else if (contextLower.includes('dragon')) enemyType = 'dragon';
-    else if (contextLower.includes('undead') || contextLower.includes('skeleton')) enemyType = 'skeleton';
-    else if (contextLower.includes('zombie')) enemyType = 'zombie';
-
-    const baseEnemy = enemyTypes[enemyType];
+    const baseEnemy = enemyTypes[enemyType] || enemyTypes['bandit'];
     const enemyCount = Math.min(partySize + 1, 6); // Balance with party size
 
     const generatedEnemies = [];
@@ -1457,6 +1640,35 @@ Party: ${characterContext}`;
           </div>
         )}
       </div>
+
+      {/* Action Validation Modal */}
+      {showActionValidation && currentValidation && (
+        <ActionValidationDisplay
+          validation={currentValidation}
+          onClose={handleActionValidationClose}
+          onProceed={handleActionProceed}
+          onRevise={handleActionRevise}
+          context="campaign"
+        />
+      )}
+
+      {/* Dice Roll Modal */}
+      {showDiceRoll && currentDiceResult && (
+        <DiceRollDisplay
+          diceResult={currentDiceResult}
+          onClose={handleDiceRollClose}
+          onProceed={async () => {
+            handleDiceRollClose();
+            if (currentValidation) {
+              const userCharacter = partyCharacters.find(char => char.userId === user.uid);
+              if (userCharacter) {
+                await processStoryResponse(playerResponse, userCharacter, storyState, currentValidation);
+              }
+            }
+          }}
+          context="campaign"
+        />
+      )}
     </div>
   );
 } 

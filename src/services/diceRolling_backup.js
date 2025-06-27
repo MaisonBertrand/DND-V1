@@ -391,15 +391,13 @@ export class DiceRollingService {
     }
 
     // Extract action types from description
-    let detectedActions = this.extractActionsFromDescription(description);
-    // Filter out actions with undefined type
-    detectedActions = detectedActions.filter(action => action.type !== undefined);
+    const detectedActions = this.extractActionsFromDescription(description);
     
     if (detectedActions.length === 0) {
       return {
         possible: true,
-        reason: 'No valid action detected. Action appears to be narrative or unsupported.',
-        suggestion: 'Try a different action or rephrase your input.',
+        reason: 'Action appears to be narrative in nature.',
+        suggestion: 'This will be handled through story progression.',
         actions: [],
         overallSuccess: true,
         hasCriticalFailures: false,
@@ -438,7 +436,7 @@ export class DiceRollingService {
       const fatiguePenalty = Math.max(0, index * 2); // +2 DC for each additional action
       
       // Combine original circumstances with custom context
-      const baseCircumstances = Array.isArray(action.circumstances) ? [...action.circumstances] : [];
+      const baseCircumstances = [...action.circumstances];
       if (fatiguePenalty > 0) {
         baseCircumstances.push(`while fatigued (action ${index + 1} of ${detectedActions.length})`);
       }
@@ -840,7 +838,7 @@ export class DiceRollingService {
       const action = actions[i];
       
       // Apply cumulative modifier from previous actions
-      const circumstances = Array.isArray(action.circumstances) ? [...action.circumstances] : [];
+      const circumstances = [...action.circumstances];
       if (cumulativeModifier > 0) {
         circumstances.push('with momentum');
       } else if (cumulativeModifier < 0) {

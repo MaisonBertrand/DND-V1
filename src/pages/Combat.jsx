@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { onAuthChange } from '../firebase/auth';
 import { 
   getCombatSession, 
@@ -10,14 +10,11 @@ import {
   getPartyCharacters
 } from '../firebase/database';
 import { combatService } from '../services/combat';
-import DiceRollingService from '../services/diceRolling';
-import ActionValidationService from '../services/actionValidation';
-import DiceRollDisplay from '../components/DiceRollDisplay';
-import ActionValidationDisplay from '../components/ActionValidationDisplay';
 
 export default function Combat() {
   const { partyId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const [user, setUser] = useState(null);
   const [combatSession, setCombatSession] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -36,17 +33,17 @@ export default function Combat() {
   const [playerDied, setPlayerDied] = useState(false);
   const [deadPlayer, setDeadPlayer] = useState(null);
   const [lastProcessedTurn, setLastProcessedTurn] = useState(-1);
+  const [damageAnimation, setDamageAnimation] = useState(null);
+  const [showDamageAnimation, setShowDamageAnimation] = useState(false);
+  const [enemyTurnComplete, setEnemyTurnComplete] = useState(false);
+  const [partyMembersReady, setPartyMembersReady] = useState(new Set());
+  const [battleLog, setBattleLog] = useState([]);
+  const [combatReady, setCombatReady] = useState(false);
+  const [turnComplete, setTurnComplete] = useState(false);
   
-  // Dice rolling and action validation state
-  const [diceService] = useState(() => new DiceRollingService());
-  const [actionValidationService] = useState(() => new ActionValidationService());
-  const [showDiceRoll, setShowDiceRoll] = useState(false);
-  const [showActionValidation, setShowActionValidation] = useState(false);
-  const [currentDiceResult, setCurrentDiceResult] = useState(null);
-  const [currentValidation, setCurrentValidation] = useState(null);
-  const [pendingAction, setPendingAction] = useState(null);
-  const [customActionInput, setCustomActionInput] = useState('');
-  const [showCustomActionInput, setShowCustomActionInput] = useState(false);
+  // Check if this is a test combat session
+  const isTestCombat = location.state?.isTestCombat;
+  const testData = location.state;
 
   useEffect(() => {
     const unsubscribe = onAuthChange((user) => {
@@ -60,13 +57,17 @@ export default function Combat() {
   }, [navigate]);
 
   useEffect(() => {
-    if (user && partyId) {
+    if (isTestCombat && testData) {
+      // Initialize test combat session
+      initializeTestCombat();
+    } else if (partyId) {
+      // Load regular combat session
       loadCombatData();
     }
-  }, [user, partyId]);
+  }, [isTestCombat, testData, partyId]);
 
   useEffect(() => {
-    if (partyId) {
+    if (partyId && !isTestCombat) {
       const unsubscribe = subscribeToCombatSession(partyId, (session) => {
         setCombatSession(session);
         setLoading(false);
@@ -102,50 +103,176 @@ export default function Combat() {
       });
       return () => unsubscribe();
     }
-  }, [partyId, lastProcessedTurn, processingTurn, isEnemyTurn]);
+  }, [partyId, lastProcessedTurn, processingTurn, isEnemyTurn, isTestCombat]);
+
+  // Additional useEffect for test combat sessions
+  useEffect(() => {
+    if (combatSession && isTestCombat && combatSession.combatState === 'active') {
+      const currentCombatant = combatSession.combatants?.[combatSession.currentTurn];
+      console.log('Test combat useEffect check:', {
+        currentTurn: combatSession.currentTurn,
+        currentCombatant: currentCombatant?.name,
+        isEnemy: currentCombatant?.id.startsWith('enemy_'),
+        lastProcessedTurn,
+        processingTurn,
+        isEnemyTurn,
+        totalCombatants: combatSession.combatants?.length,
+        combatState: combatSession.combatState
+      });
+      
+      // Only process if this is an enemy turn that hasn't been processed yet
+      if (currentCombatant && 
+          currentCombatant.id.startsWith('enemy_') && 
+          combatSession.currentTurn !== lastProcessedTurn &&
+          !processingTurn &&
+          !isEnemyTurn) {
+        
+        console.log('Auto-processing test enemy turn for:', currentCombatant.name, 'turn:', combatSession.currentTurn);
+        setLastProcessedTurn(combatSession.currentTurn);
+        
+        // Delay to allow UI to update first
+        setTimeout(() => {
+          processEnemyTurn();
+        }, 1000);
+      }
+    }
+  }, [combatSession?.currentTurn, isTestCombat, lastProcessedTurn, processingTurn, isEnemyTurn]);
+
+  // Update available actions when combat session or turn changes
+  useEffect(() => {
+    if (combatSession && combatSession.combatState === 'active') {
+      updateAvailableActions(combatSession);
+    }
+  }, [combatSession?.currentTurn, combatSession?.combatState]);
+
+  // Auto-advance turn when all party members are ready
+  useEffect(() => {
+    if (enemyTurnComplete && areAllPartyMembersReady()) {
+      console.log('All party members ready, advancing to next turn');
+      setEnemyTurnComplete(false);
+      setPartyMembersReady(new Set());
+      advanceTurn();
+    }
+  }, [enemyTurnComplete, partyMembersReady]);
+
+  const initializeTestCombat = async () => {
+    try {
+      setLoading(true);
+      
+      console.log('Initializing test combat with data:', testData);
+      
+      // Create a test combat session
+      const testSession = {
+        id: 'test_combat_session',
+        partyMembers: testData.partyMembers || [],
+        enemies: testData.enemies || [],
+        storyContext: testData.storyContext || 'Test combat environment',
+        combatState: 'initialized',
+        currentTurn: 0,
+        combatants: [],
+        round: 1
+      };
+
+      console.log('Test session created:', {
+        partyMembers: testSession.partyMembers.length,
+        enemies: testSession.enemies.length,
+        enemies: testSession.enemies
+      });
+
+      // Check if we have enemies
+      if (!testSession.enemies || testSession.enemies.length === 0) {
+        console.error('No enemies provided for test combat!');
+        setCombatSession({ 
+          ...testSession, 
+          status: 'no_enemies',
+          combatState: 'ended'
+        });
+        setLoading(false);
+        return;
+      }
+
+      // Initialize combat with Pokemon-style mechanics
+      const initializedCombat = combatService.initializeCombat(
+        testSession.partyMembers,
+        testSession.enemies,
+        testSession.storyContext
+      );
+
+      console.log('Combat initialized:', {
+        combatants: initializedCombat.combatants.length,
+        enemies: initializedCombat.combatants.filter(c => c.id.startsWith('enemy_')).length,
+        players: initializedCombat.combatants.filter(c => !c.id.startsWith('enemy_')).length,
+        turnOrder: initializedCombat.combatants.map(c => `${c.name} (${c.initiative})`)
+      });
+
+      // Use the combatants in their proper initiative order - don't reorder them!
+      const finalSession = {
+        ...testSession,
+        ...initializedCombat,
+        currentTurn: 0,
+        combatState: 'active'
+      };
+
+      console.log('Final test session:', {
+        combatants: finalSession.combatants.length,
+        enemies: finalSession.combatants.filter(c => c.id.startsWith('enemy_')).map(e => e.name),
+        players: finalSession.combatants.filter(c => !c.id.startsWith('enemy_')).map(p => p.name),
+        enemyIds: finalSession.combatants.filter(c => c.id.startsWith('enemy_')).map(e => e.id),
+        playerIds: finalSession.combatants.filter(c => !c.id.startsWith('enemy_')).map(p => p.id),
+        turnOrder: finalSession.combatants.map((c, i) => `${i}: ${c.name} (${c.initiative})`)
+      });
+
+      setCombatSession(finalSession);
+      setLoading(false);
+      
+      // Update available actions for the current combatant
+      updateAvailableActions(finalSession);
+      setEnvironmentalFeatures(finalSession.environmentalFeatures || []);
+      setTeamUpOpportunities(finalSession.teamUpOpportunities || []);
+    } catch (error) {
+      console.error('Error initializing test combat:', error);
+      setLoading(false);
+    }
+  };
 
   const loadCombatData = async () => {
+    if (!partyId) {
+      console.log('No partyId provided, skipping loadCombatData');
+      return;
+    }
+    
     try {
       setLoading(true);
       const session = await getCombatSession(partyId);
       
-      // Check if this is a test combat session
-      const isTestCombat = partyId === 'test-combat-party';
-      
       if (!session) {
-        // No active combat session
-        if (isTestCombat) {
-          // For test combat, redirect to dashboard if no session
-          console.log('No test combat session found, redirecting to dashboard');
-          navigate('/dashboard');
-        } else {
-          // For regular combat, redirect back to story
+        // No active combat session, redirect back to story
           console.log('No combat session found, navigating to story with partyId:', partyId);
           try {
             navigate(`/campaign-story/${partyId}`);
           } catch (error) {
             console.error('Navigation error in loadCombatData:', error);
             navigate('/dashboard');
-          }
         }
         return;
       }
       
-      // For test combat, skip loading party characters and campaign story
-      if (!isTestCombat) {
         const characters = await getPartyCharacters(partyId);
         setPartyCharacters(characters);
-      } else {
-        // For test combat, use the party members from the session
-        setPartyCharacters(session.partyMembers || []);
-      }
       
       // Check if there are enemies to fight
-      if (session.enemies && session.enemies.length === 0) {
+      if (session.enemies && session.enemies.length === 0 && !isTestCombat) {
         // No enemies to fight, show message and redirect
+        console.log('No enemies found in regular combat session');
         setCombatSession({ ...session, status: 'no_enemies' });
         return;
       }
+      
+      console.log('Setting combat session:', {
+        enemies: session.enemies?.length,
+        combatants: session.combatants?.length,
+        isTestCombat
+      });
       
       setCombatSession(session);
       updateAvailableActions(session);
@@ -160,7 +287,16 @@ export default function Combat() {
 
   const updateAvailableActions = (session) => {
     const currentCombatant = getCurrentCombatant(session);
-    if (!currentCombatant) return;
+    if (!currentCombatant) {
+      console.log('No current combatant found for updateAvailableActions');
+      return;
+    }
+
+    console.log('Updating available actions for:', currentCombatant.name, {
+      class: currentCombatant.class,
+      cooldowns: currentCombatant.cooldowns,
+      isEnemy: currentCombatant.id.startsWith('enemy_')
+    });
 
     const actions = [];
     const cooldowns = currentCombatant.cooldowns || {};
@@ -212,64 +348,608 @@ export default function Combat() {
       });
     }
 
+    console.log('Generated actions for:', currentCombatant.name, actions);
     setAvailableActions(actions);
+  };
+
+  const addToBattleLog = (entry) => {
+    const timestamp = new Date().toLocaleTimeString();
+    const logEntry = {
+      id: `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`, // Unique ID
+      timestamp,
+      round: combatSession?.round || 1,
+      turn: combatSession?.currentTurn || 0,
+      ...entry
+    };
+    setBattleLog(prev => [...prev, logEntry]);
   };
 
   const startCombat = async () => {
     if (!combatSession) return;
     
-    // Initialize combat with Pokemon-style mechanics
-    const initializedCombat = combatService.initializeCombat(
-      combatSession.partyMembers,
-      combatSession.enemies,
-      combatSession.storyContext
-    );
-    
-    // Extract party members and enemies from the combatants array for backward compatibility
-    const updatedPartyMembers = initializedCombat.combatants.filter(c => !c.id.startsWith('enemy_'));
-    const updatedEnemies = initializedCombat.combatants.filter(c => c.id.startsWith('enemy_'));
-    
-    await updateCombatSessionWithNarrative(combatSession.id, {
-      ...initializedCombat,
-      partyMembers: updatedPartyMembers,
-      enemies: updatedEnemies,
-      combatState: 'active'
-    });
+    try {
+      setProcessingTurn(true);
+      
+      // Clear battle log for new combat
+      setBattleLog([]);
+      
+      const updatedSession = {
+        ...combatSession,
+        combatState: 'ready',
+        currentTurn: 0,
+        round: 1
+      };
+
+      if (isTestCombat) {
+        setCombatSession(updatedSession);
+        updateAvailableActions(updatedSession);
+      } else {
+        await updateCombatSession(partyId, updatedSession);
+      }
+      
+      // Add combat start entry to battle log
+      addToBattleLog({
+        type: 'combat_start',
+        description: 'Combat is ready to begin!'
+      });
+      
+    } catch (error) {
+      console.error('Error starting combat:', error);
+    } finally {
+      setProcessingTurn(false);
+    }
   };
 
-  const nextTurn = async () => {
-    await advanceTurn();
-  };
-
-  const previousTurn = async () => {
+  const beginCombat = async () => {
     if (!combatSession) return;
-    const newTurn = (combatSession.currentTurn - 1 + combatSession.combatants.length) % combatSession.combatants.length;
-    await updateCombatSessionWithNarrative(combatSession.id, {
-      currentTurn: newTurn
+    
+    try {
+      setProcessingTurn(true);
+      
+      const updatedSession = {
+        ...combatSession,
+        combatState: 'active'
+      };
+
+      if (isTestCombat) {
+        setCombatSession(updatedSession);
+        updateAvailableActions(updatedSession);
+      } else {
+        await updateCombatSession(partyId, updatedSession);
+      }
+      
+      // Add combat begin entry to battle log
+      addToBattleLog({
+        type: 'combat_begin',
+        description: 'Fight!'
+      });
+      
+      setCombatReady(true);
+      
+    } catch (error) {
+      console.error('Error beginning combat:', error);
+    } finally {
+      setProcessingTurn(false);
+    }
+  };
+
+  const executeAction = async (actionType, targetId, additionalData = {}) => {
+    if (!combatSession || combatSession.combatState !== 'active') {
+      console.error('Combat not active');
+      return;
+    }
+
+    const currentCombatant = getCurrentCombatant();
+    if (!currentCombatant) {
+      console.error('No current combatant');
+      return;
+    }
+
+    console.log('Executing action:', {
+      actionType,
+      targetId,
+      currentCombatant: currentCombatant.name,
+      additionalData
     });
-    setSelectedAction(null);
-    setSelectedTarget(null);
-    setActionMessage('');
-    setNarrativeDescription('');
+
+    try {
+      setProcessingTurn(true);
+      
+      // Record the action in battle log
+      const target = combatSession.combatants.find(c => c.id === targetId);
+      addToBattleLog({
+        type: 'action',
+        actor: currentCombatant.name,
+        action: actionType,
+        target: target?.name || 'Unknown',
+        description: `${currentCombatant.name} uses ${actionType}${target ? ` on ${target.name}` : ''}`
+      });
+
+      const result = await combatService.executeAction(
+        combatSession,
+        currentCombatant.id,
+        actionType,
+        targetId,
+        additionalData
+      );
+
+      if (result.success) {
+        console.log('Action executed successfully:', result);
+        
+        // Update combat session with result - fix the undefined error
+        const updatedSession = {
+          ...combatSession,
+          ...(result.updatedSession || {}),
+          currentTurn: (result.updatedSession?.currentTurn !== undefined) 
+            ? result.updatedSession.currentTurn 
+            : combatSession.currentTurn
+        };
+
+        // Record damage/healing in battle log
+        if (result.damage) {
+          addToBattleLog({
+            type: 'damage',
+            actor: currentCombatant.name,
+            target: target?.name || 'Unknown',
+            damage: result.damage,
+            description: `${currentCombatant.name} deals ${result.damage} damage to ${target?.name || 'Unknown'}`
+          });
+        }
+
+        if (result.healing) {
+          addToBattleLog({
+            type: 'healing',
+            actor: currentCombatant.name,
+            target: target?.name || 'Unknown',
+            healing: result.healing,
+            description: `${currentCombatant.name} heals ${target?.name || 'Unknown'} for ${result.healing} HP`
+          });
+        }
+
+        // Record status effects
+        if (result.statusEffects && result.statusEffects.length > 0) {
+          result.statusEffects.forEach(effect => {
+            addToBattleLog({
+              type: 'status_effect',
+              actor: currentCombatant.name,
+              target: target?.name || 'Unknown',
+              effect: effect.type,
+              description: `${target?.name || 'Unknown'} is affected by ${effect.type}`
+            });
+          });
+        }
+
+        // Record death
+        if (result.targetDied) {
+          addToBattleLog({
+            type: 'death',
+            actor: currentCombatant.name,
+            target: target?.name || 'Unknown',
+            description: `${target?.name || 'Unknown'} has been defeated!`
+          });
+        }
+
+        setCombatSession(updatedSession);
+        
+        // Show damage animation
+        if (result.damage && target) {
+          setDamageAnimation({
+            targetId: target.id,
+            damage: result.damage,
+            type: 'damage'
+          });
+          setShowDamageAnimation(true);
+          setTimeout(() => setShowDamageAnimation(false), 2000);
+        }
+
+        // Check if combat should end
+        if (result.combatEnded) {
+          console.log('Combat ended');
+          if (isTestCombat) {
+            navigate('/test-environment', { 
+              state: { 
+                ...testData,
+                combatResult: result.combatResult 
+              } 
+            });
+          } else {
+            await endCombat();
+          }
+          return;
+        }
+
+        // Check if target is dead and no more enemies
+        const remainingEnemies = updatedSession.combatants.filter(c => 
+          c.id.startsWith('enemy_') && c.hp > 0
+        );
+        
+        if (remainingEnemies.length === 0) {
+          console.log('No more enemies, ending combat');
+          if (isTestCombat) {
+            navigate('/test-environment', { 
+              state: { 
+                ...testData,
+                combatResult: 'victory' 
+              } 
+            });
+          } else {
+            await endCombat();
+          }
+          return;
+        }
+
+        // Set turn complete and wait for confirmation
+        setTurnComplete(true);
+        
+      } else {
+        console.error('Action execution failed:', result.error);
+        setActionMessage(result.error || 'Action failed');
+      }
+    } catch (error) {
+      console.error('Error executing action:', error);
+      setActionMessage('Error executing action');
+    } finally {
+      setProcessingTurn(false);
+    }
+  };
+
+  const confirmTurnComplete = async () => {
+    setTurnComplete(false);
+    setEnemyTurnComplete(false);
+    setPartyMembersReady(new Set());
+    
+    // Advance to next turn
+    setTimeout(() => {
+      advanceTurn();
+    }, 500);
+  };
+
+  const processEnemyTurn = async () => {
+    if (!combatSession || combatSession.combatState !== 'active') {
+      console.error('Combat not active');
+      return;
+    }
+
+    const currentCombatant = getCurrentCombatant();
+    if (!currentCombatant || !currentCombatant.id.startsWith('enemy_')) {
+      console.error('Not an enemy turn');
+      return;
+    }
+
+    console.log('Processing enemy turn for:', currentCombatant.name);
+
+    try {
+      setProcessingTurn(true);
+      setIsEnemyTurn(true);
+
+      // Record enemy turn start in battle log
+      addToBattleLog({
+        type: 'turn_start',
+        actor: currentCombatant.name,
+        description: `${currentCombatant.name}'s turn begins`
+      });
+
+      // Use the correct method name from combat service
+      const selectedAction = combatService.chooseEnemyAction(currentCombatant, combatSession);
+      console.log('Selected enemy action:', selectedAction);
+
+      if (!selectedAction) {
+        console.log('No action selected for enemy');
+        addToBattleLog({
+          type: 'no_action',
+          actor: currentCombatant.name,
+          description: `${currentCombatant.name} cannot decide on an action`
+        });
+        
+        setTimeout(() => {
+          advanceTurn();
+        }, 1000);
+        return;
+      }
+
+      // Fix: Use the correct property names from the combat service
+      const actionType = selectedAction.action; // Changed from selectedAction.type
+      const targetId = selectedAction.target; // Changed from target.id
+
+      if (!actionType) {
+        console.log('No action type in selected action');
+        addToBattleLog({
+          type: 'no_action',
+          actor: currentCombatant.name,
+          description: `${currentCombatant.name} has no valid action type`
+        });
+        
+        setTimeout(() => {
+          advanceTurn();
+        }, 1000);
+        return;
+      }
+
+      // Get the target combatant
+      const target = combatSession.combatants.find(c => c.id === targetId);
+      if (!target && actionType !== 'defend') {
+        console.log('No target found for enemy action');
+        addToBattleLog({
+          type: 'no_target',
+          actor: currentCombatant.name,
+          action: actionType,
+          description: `${currentCombatant.name} cannot find a target for ${actionType}`
+        });
+        
+        setTimeout(() => {
+          advanceTurn();
+        }, 1000);
+        return;
+      }
+
+      // Record the action in battle log
+      addToBattleLog({
+        type: 'action',
+        actor: currentCombatant.name,
+        action: actionType,
+        target: target?.name || 'self',
+        description: `${currentCombatant.name} uses ${actionType}${target ? ` on ${target.name}` : ''}`
+      });
+
+      // Execute the action
+      const result = await combatService.executeAction(
+        combatSession,
+        currentCombatant.id,
+        actionType,
+        targetId,
+        selectedAction // Pass the full selectedAction object as additionalData
+      );
+
+      if (result.success) {
+        console.log('Enemy action executed successfully:', result);
+
+        // Update combat session
+        const updatedSession = {
+          ...combatSession,
+          ...(result.updatedSession || {}),
+          currentTurn: (result.updatedSession?.currentTurn !== undefined) 
+            ? result.updatedSession.currentTurn 
+            : combatSession.currentTurn
+        };
+
+        // Record damage/healing in battle log
+        if (result.damage) {
+          addToBattleLog({
+            type: 'damage',
+            actor: currentCombatant.name,
+            target: target?.name || 'self',
+            damage: result.damage,
+            description: `${currentCombatant.name} deals ${result.damage} damage to ${target?.name || 'self'}`
+          });
+        }
+
+        if (result.healing) {
+          addToBattleLog({
+            type: 'healing',
+            actor: currentCombatant.name,
+            target: target?.name || 'self',
+            healing: result.healing,
+            description: `${currentCombatant.name} heals ${target?.name || 'self'} for ${result.healing} HP`
+          });
+        }
+
+        // Record status effects
+        if (result.statusEffects && result.statusEffects.length > 0) {
+          result.statusEffects.forEach(effect => {
+            addToBattleLog({
+              type: 'status_effect',
+              actor: currentCombatant.name,
+              target: target?.name || 'self',
+              effect: effect.type,
+              description: `${target?.name || 'self'} is affected by ${effect.type}`
+            });
+          });
+        }
+
+        // Record death
+        if (result.targetDied) {
+          addToBattleLog({
+            type: 'death',
+            actor: currentCombatant.name,
+            target: target?.name || 'self',
+            description: `${target?.name || 'self'} has been defeated!`
+          });
+        }
+
+        setCombatSession(updatedSession);
+
+        // Show damage animation
+        if (result.damage && target) {
+          setDamageAnimation({
+            targetId: target.id,
+            damage: result.damage,
+            type: 'damage'
+          });
+          setShowDamageAnimation(true);
+          setTimeout(() => setShowDamageAnimation(false), 2000);
+        }
+
+        // Generate narrative description
+        const narrative = combatService.generateActionNarrative(
+          currentCombatant,
+          actionType,
+          target,
+          selectedAction
+        );
+
+        setEnemyTurnMessage(`${currentCombatant.name} uses ${actionType}!`);
+        setEnemyTurnNarrative(narrative);
+
+        // Check if combat should end
+        if (result.combatEnded) {
+          console.log('Combat ended');
+          if (isTestCombat) {
+            navigate('/test-environment', { 
+              state: { 
+                ...testData,
+                combatResult: result.combatResult 
+              } 
+            });
+          } else {
+            await endCombat();
+          }
+          return;
+        }
+
+        // Check if all players are dead
+        const remainingPlayers = updatedSession.combatants.filter(c => 
+          !c.id.startsWith('enemy_') && c.hp > 0
+        );
+        
+        if (remainingPlayers.length === 0) {
+          console.log('All players dead, ending combat');
+          if (isTestCombat) {
+            navigate('/test-environment', { 
+              state: { 
+                ...testData,
+                combatResult: 'defeat' 
+              } 
+            });
+          } else {
+            await endCombat();
+          }
+          return;
+        }
+
+        // Set enemy turn complete and wait for party confirmation
+        setEnemyTurnComplete(true);
+        setPartyMembersReady(new Set());
+
+      } else {
+        console.error('Enemy action execution failed:', result.error);
+        addToBattleLog({
+          type: 'action_failed',
+          actor: currentCombatant.name,
+          action: actionType,
+          description: `${currentCombatant.name}'s ${actionType} failed`
+        });
+        
+        setTimeout(() => {
+          advanceTurn();
+        }, 1000);
+      }
+    } catch (error) {
+      console.error('Error processing enemy turn:', error);
+      addToBattleLog({
+        type: 'error',
+        actor: currentCombatant.name,
+        description: `Error during ${currentCombatant.name}'s turn`
+      });
+      
+      setTimeout(() => {
+        advanceTurn();
+      }, 1000);
+    } finally {
+      setProcessingTurn(false);
+      setIsEnemyTurn(false);
+    }
+  };
+
+  const advanceTurn = async () => {
+    if (!combatSession || combatSession.combatState !== 'active') {
+      console.error('Combat not active');
+      return;
+    }
+
+    console.log('Advancing turn from:', combatSession.currentTurn);
+
+    // Find the next alive combatant
+    let nextTurn = (combatSession.currentTurn + 1) % combatSession.combatants.length;
+    let attempts = 0;
+    const maxAttempts = combatSession.combatants.length;
+
+    while (attempts < maxAttempts) {
+      const nextCombatant = combatSession.combatants[nextTurn];
+      
+      if (nextCombatant && nextCombatant.hp > 0) {
+        break; // Found an alive combatant
+      }
+      
+      nextTurn = (nextTurn + 1) % combatSession.combatants.length;
+      attempts++;
+    }
+
+    // If we've checked all combatants and none are alive, end combat
+    if (attempts >= maxAttempts) {
+      console.log('No alive combatants found, ending combat');
+      if (isTestCombat) {
+        navigate('/test-environment', { 
+          state: { 
+            ...testData,
+            combatResult: 'draw' 
+          } 
+        });
+      } else {
+        await endCombat();
+      }
+      return;
+    }
+
+    // Check if we've completed a full round
+    if (nextTurn === 0) {
+      const updatedSession = {
+        ...combatSession,
+        currentTurn: nextTurn,
+        round: combatSession.round + 1
+      };
+      
+      if (isTestCombat) {
+        setCombatSession(updatedSession);
+      } else {
+        await updateCombatSession(partyId, updatedSession);
+      }
+    } else {
+      const updatedSession = {
+        ...combatSession,
+        currentTurn: nextTurn
+      };
+      
+      if (isTestCombat) {
+        setCombatSession(updatedSession);
+      } else {
+        await updateCombatSession(partyId, updatedSession);
+      }
+    }
+
+    console.log('Turn advanced to:', nextTurn, 'combatant:', combatSession.combatants[nextTurn]?.name);
+
+    // Update available actions for the new current combatant
+    const newSession = isTestCombat ? combatSession : await getCombatSession(partyId);
+    if (newSession) {
+      updateAvailableActions(newSession);
+    }
   };
 
   const endCombat = async () => {
     if (!combatSession) return;
     
-    // Check if this is a test combat session
-    const isTestCombat = partyId === 'test-combat-party';
-    
     // Generate combat summary
     const summary = combatService.generateCombatSummary(combatSession, 'victory');
     
     // Mark combat session as ended
+    if (isTestCombat) {
+      // For test combat, update only local state
+      setCombatSession(prevSession => ({
+        ...prevSession,
+        status: 'ended',
+        combatState: 'ended',
+        summary: summary
+      }));
+      
+      // For test combat, navigate back to test environment
+      navigate('/test-environment');
+    } else {
     await updateCombatSessionWithNarrative(combatSession.id, {
       status: 'ended',
       combatState: 'ended',
       summary: summary
     });
     
-    if (!isTestCombat) {
       // For regular combat, return story to active state
       await updateCampaignStory(partyId, {
         status: 'storytelling',
@@ -284,10 +964,6 @@ export default function Combat() {
         console.error('Navigation error in endCombat:', error);
         navigate('/dashboard');
       }
-    } else {
-      // For test combat, navigate back to dashboard
-      console.log('Ending test combat, navigating to dashboard');
-      navigate('/dashboard');
     }
   };
 
@@ -303,10 +979,19 @@ export default function Combat() {
       const updatedCombatants = combatSession.combatants.map(combatant => 
         combatant.id === combatantId ? { ...combatant, hp: clampedHp } : combatant
       );
+      if (isTestCombat) {
+        // For test combat, update only local state
+        setCombatSession(prevSession => ({
+          ...prevSession,
+          enemies: updatedEnemies,
+          combatants: updatedCombatants
+        }));
+      } else {
       await updateCombatSessionWithNarrative(combatSession.id, {
         enemies: updatedEnemies,
         combatants: updatedCombatants
       });
+      }
       
       // Update local state immediately
       setCombatSession(prevSession => ({
@@ -321,10 +1006,19 @@ export default function Combat() {
       const updatedCombatants = combatSession.combatants.map(combatant => 
         combatant.id === combatantId ? { ...combatant, hp: clampedHp } : combatant
       );
+      if (isTestCombat) {
+        // For test combat, update only local state
+        setCombatSession(prevSession => ({
+          ...prevSession,
+          partyMembers: updatedPartyMembers,
+          combatants: updatedCombatants
+        }));
+      } else {
       await updateCombatSessionWithNarrative(combatSession.id, {
         partyMembers: updatedPartyMembers,
         combatants: updatedCombatants
       });
+      }
       
       // Update local state immediately
       setCombatSession(prevSession => ({
@@ -336,390 +1030,129 @@ export default function Combat() {
   };
 
   const getCurrentCombatant = (session = combatSession) => {
-    if (!session?.combatants || session.currentTurn === undefined) return null;
-    return session.combatants[session.currentTurn];
+    if (!session?.combatants || session.currentTurn === undefined) {
+      console.log('getCurrentCombatant: No session or combatants');
+      return null;
+    }
+    
+    const combatant = session.combatants[session.currentTurn];
+    console.log('getCurrentCombatant:', {
+      currentTurn: session.currentTurn,
+      totalCombatants: session.combatants.length,
+      combatant: combatant?.name,
+      isEnemy: combatant?.id.startsWith('enemy_'),
+      hp: combatant?.hp
+    });
+    
+    return combatant;
   };
 
   const isCurrentUserTurn = () => {
     const currentCombatant = getCurrentCombatant();
-    return currentCombatant && currentCombatant.userId === user?.uid;
+    if (!currentCombatant) return false;
+    
+    // For test combat, if the current combatant is not an enemy, it's the user's turn
+    if (isTestCombat) {
+      return !currentCombatant.id.startsWith('enemy_');
+    }
+    
+    // For regular combat, check if the current combatant belongs to the current user
+    return currentCombatant.userId === user?.uid;
   };
 
   const getCurrentUserCharacter = () => {
+    // For test combat, return the current combatant if it's not an enemy
+    if (isTestCombat) {
+      const currentCombatant = getCurrentCombatant();
+      if (currentCombatant && !currentCombatant.id.startsWith('enemy_')) {
+        return currentCombatant;
+      }
+      return null;
+    }
+    
+    // For regular combat, find the character belonging to the current user
     return partyCharacters.find(char => char.userId === user?.uid);
-  };
-
-  // Enhanced executeAction for player turns
-  const executeAction = async (actionType, targetId, additionalData = {}) => {
-    if (!combatSession || !actionType || !targetId || processingTurn) return;
-    
-    const currentChar = getCurrentUserCharacter();
-    if (!currentChar) return;
-
-    try {
-      setProcessingTurn(true);
-      
-      // Execute action using combat service
-      const result = await combatService.executeAction(
-        combatSession,
-        currentChar.id,
-        actionType,
-        targetId,
-        additionalData
-      );
-
-      if (result.success) {
-        // Extract updated party members and enemies from the combatants array
-        const updatedPartyMembers = combatSession.combatants.filter(c => !c.id.startsWith('enemy_'));
-        const updatedEnemies = combatSession.combatants.filter(c => c.id.startsWith('enemy_'));
-        
-        // Update the combat session in the database with the modified data
-        await updateCombatSessionWithNarrative(combatSession.id, {
-          combatants: combatSession.combatants,
-          partyMembers: updatedPartyMembers,
-          enemies: updatedEnemies
-        });
-
-        // Update local state to reflect the changes immediately
-        setCombatSession(prevSession => ({
-          ...prevSession,
-          combatants: [...combatSession.combatants], // Create a new array to trigger re-render
-          partyMembers: updatedPartyMembers,
-          enemies: updatedEnemies
-        }));
-
-        setActionMessage(result.results.damage > 0 ? 
-          `Dealt ${result.results.damage} damage!` : 
-          result.results.healing > 0 ? 
-          `Healed ${result.results.healing} HP!` : 
-          'Action completed!'
-        );
-        setNarrativeDescription(result.narrative);
-        
-        // Process status effects
-        if (result.statusEffects.length > 0) {
-          const statusMessage = result.statusEffects.map(effect => 
-            `${effect.type} applied to target!`
-          ).join(', ');
-          setActionMessage(prev => prev + ' ' + statusMessage);
-        }
-        
-        // Show environmental impact
-        if (result.environmentalImpact.length > 0) {
-          setActionMessage(prev => prev + ' ' + result.environmentalImpact.join(', '));
-        }
-        
-        // Check for enemy death
-        const targetEnemy = updatedEnemies.find(e => e.id === targetId);
-        if (targetEnemy && targetEnemy.hp <= 0) {
-          setActionMessage(prev => prev + ` ${targetEnemy.name} has been defeated!`);
-        }
-        
-        // Auto-advance turn after delay
-        setTimeout(() => {
-          advanceTurn();
-        }, 3000);
-      } else {
-        setActionMessage(result.message);
-      }
-    } catch (error) {
-      console.error('Error executing action:', error);
-      setActionMessage('Failed to execute action');
-    } finally {
-      setProcessingTurn(false);
-    }
-  };
-
-  // Process enemy turn automatically
-  const processEnemyTurn = async () => {
-    if (!combatSession || isEnemyTurn || processingTurn) {
-      console.log('Enemy turn blocked - already processing or enemy turn active');
-      return;
-    }
-    
-    const currentCombatant = getCurrentCombatant();
-    if (!currentCombatant || !currentCombatant.id.startsWith('enemy_')) {
-      console.log('Enemy turn blocked - not an enemy turn');
-      return;
-    }
-    
-    // Check if we've already processed this turn
-    if (lastProcessedTurn === combatSession.currentTurn) {
-      console.log('Enemy turn blocked - already processed turn:', combatSession.currentTurn);
-      return;
-    }
-    
-    console.log('Starting enemy turn for:', currentCombatant.name);
-    setIsEnemyTurn(true);
-    setProcessingTurn(true);
-    setLastProcessedTurn(combatSession.currentTurn);
-    
-    try {
-      // Show enemy thinking message
-      setEnemyTurnMessage(`${currentCombatant.name} is thinking...`);
-      setEnemyTurnNarrative('');
-      
-      // Delay for dramatic effect
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      
-      // Execute enemy action
-      const result = await combatService.executeEnemyTurn(combatSession, currentCombatant);
-      
-      if (result.success) {
-        // Extract updated party members and enemies from the combatants array
-        const updatedPartyMembers = combatSession.combatants.filter(c => !c.id.startsWith('enemy_'));
-        const updatedEnemies = combatSession.combatants.filter(c => c.id.startsWith('enemy_'));
-        
-        // Update the combat session in the database with the modified data
-        await updateCombatSessionWithNarrative(combatSession.id, {
-          combatants: combatSession.combatants,
-          partyMembers: updatedPartyMembers,
-          enemies: updatedEnemies
-        });
-
-        // Update local state to reflect the changes immediately
-        setCombatSession(prevSession => ({
-          ...prevSession,
-          combatants: [...combatSession.combatants], // Create a new array to trigger re-render
-          partyMembers: updatedPartyMembers,
-          enemies: updatedEnemies
-        }));
-
-        // Show enemy action with animation
-        setEnemyTurnMessage(
-          result.results.damage > 0 ? 
-            `${currentCombatant.name} deals ${result.results.damage} damage!` : 
-            result.results.healing > 0 ? 
-            `${currentCombatant.name} heals ${result.results.healing} HP!` : 
-            `${currentCombatant.name} takes action!`
-        );
-        setEnemyTurnNarrative(result.narrative);
-        
-        // Show status effects
-        if (result.statusEffects.length > 0) {
-          const statusMessage = result.statusEffects.map(effect => 
-            `${effect.type} applied!`
-          ).join(', ');
-          setEnemyTurnMessage(prev => prev + ' ' + statusMessage);
-        }
-        
-        // Show environmental impact
-        if (result.environmentalImpact.length > 0) {
-          setEnemyTurnMessage(prev => prev + ' ' + result.environmentalImpact.join(', '));
-        }
-        
-        // Check for player death
-        const targetPlayer = updatedPartyMembers.find(p => p.id === result.targetId);
-        if (targetPlayer && targetPlayer.hp <= 0) {
-          setEnemyTurnMessage(prev => prev + ` ${targetPlayer.name} has fallen!`);
-        }
-        
-        // Delay before advancing turn
-        await new Promise(resolve => setTimeout(resolve, 2500));
-        
-        // Advance to next turn without recursion
-        await advanceTurn();
-      } else {
-        setEnemyTurnMessage(result.message);
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        await advanceTurn();
-      }
-    } catch (error) {
-      console.error('Error processing enemy turn:', error);
-      setEnemyTurnMessage('Enemy turn failed');
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      await advanceTurn();
-    } finally {
-      setIsEnemyTurn(false);
-      setProcessingTurn(false);
-      setEnemyTurnMessage('');
-      setEnemyTurnNarrative('');
-    }
-  };
-
-  // Separate function to advance turn without recursion
-  const advanceTurn = async () => {
-    if (!combatSession || processingTurn) return;
-    
-    const newTurn = (combatSession.currentTurn + 1) % combatSession.combatants.length;
-    const nextCombatant = combatSession.combatants[newTurn];
-    
-    console.log('Advancing turn:', {
-      currentTurn: combatSession.currentTurn,
-      newTurn,
-      nextCombatant: nextCombatant?.name,
-      isEnemy: nextCombatant?.id.startsWith('enemy_'),
-      totalCombatants: combatSession.combatants.length
-    });
-    
-    // Update the combat session with new turn
-    await updateCombatSessionWithNarrative(combatSession.id, {
-      currentTurn: newTurn
-    });
-    
-    // Update local state immediately
-    setCombatSession(prevSession => ({
-      ...prevSession,
-      currentTurn: newTurn
-    }));
-    
-    // Reset turn processing state
-    setLastProcessedTurn(-1);
-    
-    // Clear UI state
-    setSelectedAction(null);
-    setSelectedTarget(null);
-    setActionMessage('');
-    setNarrativeDescription('');
-    
-    // Check for combat end conditions
-    const endCondition = combatService.checkCombatEnd(combatSession);
-    if (endCondition.ended) {
-      console.log('Combat ended:', endCondition);
-      setActionMessage(endCondition.narrative);
-      setTimeout(() => {
-        endCombat();
-      }, 3000);
-      return;
-    }
-    
-    // Check if next turn is an enemy turn
-    if (nextCombatant && nextCombatant.id.startsWith('enemy_')) {
-      console.log('Next turn is enemy turn, scheduling processEnemyTurn');
-      // Process enemy turn after a short delay
-      setTimeout(() => {
-        processEnemyTurn();
-      }, 1000);
-    } else {
-      console.log('Next turn is player turn');
-    }
-  };
-
-  // Process status effects at the start of turn
-  const processStatusEffects = (combatant) => {
-    if (!combatant.statusEffects || combatant.statusEffects.length === 0) return;
-    
-    const effects = combatService.processStatusEffects(combatSession, combatant);
-    if (effects.length > 0) {
-      setActionMessage(effects.join(', '));
-    }
   };
 
   // Check if current player is dead
   const checkPlayerDeath = () => {
-    if (!combatSession || !user) return;
+    if (!combatSession) return;
     
-    // Check both partyMembers and combatants arrays for consistency
+    if (isTestCombat) {
+      // For test combat, check if the test character is dead
+      const testCharacter = combatSession.combatants.find(c => !c.id.startsWith('enemy_'));
+      if (testCharacter && testCharacter.hp <= 0) {
+        setPlayerDied(true);
+        setDeadPlayer(testCharacter);
+      }
+    } else if (user) {
+      // For regular combat, check if the current user's character is dead
     const currentPlayer = combatSession.partyMembers.find(p => p.userId === user.uid) ||
                          combatSession.combatants.find(c => c.userId === user.uid && !c.id.startsWith('enemy_'));
     if (currentPlayer && currentPlayer.hp <= 0) {
       setPlayerDied(true);
       setDeadPlayer(currentPlayer);
+      }
     }
   };
 
   // Handle player death
   const handlePlayerDeath = () => {
-    if (partyId === 'test-combat-party') {
-      // For test combat, return to dashboard
+    if (isTestCombat) {
+      // For test combat, navigate to dashboard
       navigate('/dashboard');
     } else {
-      // For regular combat, return to character creation
+      // For regular combat, navigate to character creation
       navigate(`/character-creation/${partyId}`);
     }
   };
 
-  // Dice rolling and action validation functions
-  const handleCustomAction = async (actionDescription) => {
-    if (!actionDescription.trim()) return;
-
-    const currentChar = getCurrentUserCharacter();
-    if (!currentChar) return;
-
-    // Validate the action
-    const validation = actionValidationService.validatePlayerAction(
-      actionDescription, 
-      currentChar, 
-      { context: 'combat', combatSession }
-    );
-
-    setCurrentValidation(validation);
-    setShowActionValidation(true);
-    setPendingAction(actionDescription);
-  };
-
-  const handleActionProceed = async () => {
-    if (!pendingAction) return;
-
-    const currentChar = getCurrentUserCharacter();
-    if (!currentChar) return;
-
-    // Perform dice checks for the action
-    const diceResult = diceService.validateAction(pendingAction, currentChar, { context: 'combat' });
-    setCurrentDiceResult(diceResult);
-    setShowDiceRoll(true);
-    setShowActionValidation(false);
-  };
-
-  const handleActionRevise = () => {
-    setShowActionValidation(false);
-    setShowCustomActionInput(true);
-  };
-
-  const handleDiceRollClose = () => {
-    setShowDiceRoll(false);
-    setCurrentDiceResult(null);
-    setPendingAction(null);
-  };
-
-  const handleActionValidationClose = () => {
-    setShowActionValidation(false);
-    setCurrentValidation(null);
-    setPendingAction(null);
-  };
-
-  const handleCustomActionSubmit = () => {
-    if (customActionInput.trim()) {
-      handleCustomAction(customActionInput);
-      setCustomActionInput('');
-      setShowCustomActionInput(false);
+  // Handle "Okay" button click to proceed after enemy turn
+  const handleProceedAfterEnemyTurn = () => {
+    if (isTestCombat) {
+      // For test combat, just proceed immediately
+      setEnemyTurnComplete(false);
+      setPartyMembersReady(new Set());
+      advanceTurn();
+    } else {
+      // For regular combat, mark current user as ready
+      const currentUserId = user?.uid;
+      if (currentUserId) {
+        setPartyMembersReady(prev => new Set([...prev, currentUserId]));
+      }
     }
   };
 
-  const performSkillCheck = (actionType, circumstances = []) => {
-    const currentChar = getCurrentUserCharacter();
-    if (!currentChar) return null;
-
-    return diceService.performSkillCheck(currentChar, actionType, circumstances);
-  };
-
-  const rollWithAdvantage = () => {
-    return diceService.rollWithAdvantage();
-  };
-
-  const rollWithDisadvantage = () => {
-    return diceService.rollWithDisadvantage();
-  };
-
-  const rollDie = (sides) => {
-    return diceService.rollDie(sides);
-  };
-
-  const rollDice = (number, sides) => {
-    return diceService.rollDice(number, sides);
+  // Check if all party members are ready to proceed
+  const areAllPartyMembersReady = () => {
+    if (isTestCombat) {
+      return true; // Test combat doesn't need multiple confirmations
+    }
+    
+    if (!combatSession?.partyMembers) return false;
+    
+    const alivePartyMembers = combatSession.partyMembers.filter(member => member.hp > 0);
+    const readyMembers = partyMembersReady.size;
+    
+    return readyMembers >= alivePartyMembers.length;
   };
 
   if (!user) {
     return null;
   }
 
+  // Show loading state
   if (loading) {
     return (
       <div className="fantasy-container py-8">
         <div className="fantasy-card">
           <div className="text-center py-8">
-            <div className="text-stone-600 mb-4">⚔️ Setting up battle arena...</div>
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-stone-600 mx-auto"></div>
+            <div className="text-4xl mb-4">⚔️</div>
+            <h2 className="text-2xl font-bold text-stone-800 mb-4">Loading Combat...</h2>
+            <p className="text-stone-600 mb-6">
+              Preparing the battlefield and gathering combatants...
+            </p>
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-amber-600 mx-auto"></div>
           </div>
         </div>
       </div>
@@ -732,27 +1165,6 @@ export default function Combat() {
         <div className="fantasy-card">
           <div className="text-center py-8">
             <div className="text-stone-600">No active combat session found.</div>
-            <button 
-              onClick={async () => {
-                // Resume the story from where it was paused
-                await updateCampaignStory(partyId, {
-                  status: 'storytelling',
-                  currentCombat: null
-                });
-                
-                // Navigate back to story
-                try {
-                  console.log('Returning to story from no combat session, partyId:', partyId);
-                  navigate(`/campaign-story/${partyId}`);
-                } catch (error) {
-                  console.error('Navigation error in return to story:', error);
-                  navigate('/dashboard');
-                }
-              }}
-              className="fantasy-button mt-4"
-            >
-              Return to Story
-            </button>
           </div>
         </div>
       </div>
@@ -760,7 +1172,7 @@ export default function Combat() {
   }
 
   // Show message if no enemies to fight
-  if (combatSession.status === 'no_enemies' || (combatSession.enemies && combatSession.enemies.length === 0)) {
+  if ((combatSession.status === 'no_enemies' || (combatSession.enemies && combatSession.enemies.length === 0)) && !isTestCombat) {
     return (
       <div className="fantasy-container py-8">
         <div className="fantasy-card">
@@ -770,27 +1182,9 @@ export default function Combat() {
             <p className="text-stone-600 mb-6">
               There are no enemies present in this area. Combat cannot begin.
             </p>
-            <button 
-              onClick={async () => {
-                // Resume the story from where it was paused
-                await updateCampaignStory(partyId, {
-                  status: 'storytelling',
-                  currentCombat: null
-                });
-                
-                // Navigate back to story
-                try {
-                  console.log('Returning to story from no enemies, partyId:', partyId);
-                  navigate(`/campaign-story/${partyId}`);
-                } catch (error) {
-                  console.error('Navigation error in return to story:', error);
-                  navigate('/dashboard');
-                }
-              }}
-              className="fantasy-button"
-            >
-              Return to Story
-            </button>
+            <p className="text-stone-500 text-sm">
+              The combat session will end automatically.
+            </p>
           </div>
         </div>
       </div>
@@ -843,6 +1237,7 @@ export default function Combat() {
   }
 
   return (
+    <div className="min-h-screen bg-gray-900 text-white p-4">
     <div className="fantasy-container py-8">
       <div className="fantasy-card">
         {/* Combat Header */}
@@ -855,17 +1250,9 @@ export default function Combat() {
               </button>
             )}
             {combatSession.combatState === 'active' && (
-              <div className="flex space-x-2">
-                <button onClick={previousTurn} className="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded-lg shadow-lg">
-                  ← Previous
-                </button>
-                <button onClick={nextTurn} className="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded-lg shadow-lg">
-                  Next →
-                </button>
                 <button onClick={endCombat} className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg shadow-lg">
                   End Combat
                 </button>
-              </div>
             )}
           </div>
         </div>
@@ -875,24 +1262,6 @@ export default function Combat() {
           <div className="mb-6 p-4 bg-stone-50 border border-stone-200 rounded-lg">
             <h3 className="font-bold text-stone-800 mb-2">Story Context</h3>
             <p className="text-stone-700 italic">{combatSession.storyContext}</p>
-            <button 
-              onClick={async () => {
-                await updateCampaignStory(partyId, {
-                  status: 'storytelling',
-                  currentCombat: null
-                });
-                try {
-                  console.log('Returning to story from combat header, partyId:', partyId);
-                  navigate(`/campaign-story/${partyId}`);
-                } catch (error) {
-                  console.error('Navigation error in return to story:', error);
-                  navigate('/dashboard');
-                }
-              }}
-              className="text-sm text-stone-600 hover:text-stone-800 mt-2"
-            >
-              ← Return to Story
-            </button>
           </div>
         )}
 
@@ -915,11 +1284,11 @@ export default function Combat() {
           <div className="mb-6">
             <h3 className="font-bold text-stone-800 mb-3">🎯 Turn Order</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-              {combatSession.combatants.map((combatant, index) => (
+                {combatSession.combatants.map((combatant) => (
                 <div
                   key={combatant.id}
                   className={`p-3 rounded-lg border-2 transition-colors ${
-                    index === combatSession.currentTurn
+                      combatant.id === combatSession.combatants[combatSession.currentTurn]?.id
                       ? 'border-amber-500 bg-amber-50'
                       : 'border-stone-200 bg-white'
                   }`}
@@ -928,7 +1297,7 @@ export default function Combat() {
                     <div>
                       <div className="font-medium text-stone-800">
                         {combatant.name}
-                        {index === combatSession.currentTurn && (
+                          {combatant.id === combatSession.combatants[combatSession.currentTurn]?.id && (
                           <span className="ml-2 text-amber-600">← Current Turn</span>
                         )}
                       </div>
@@ -950,6 +1319,19 @@ export default function Combat() {
             </div>
           </div>
         )}
+
+          {/* Damage Animation */}
+          {showDamageAnimation && damageAnimation && (
+            <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
+              <div className={`animate-bounce text-6xl font-bold px-6 py-4 rounded-lg shadow-lg ${
+                damageAnimation.type === 'healing' 
+                  ? 'text-green-600 bg-green-100' 
+                  : 'text-red-600 bg-red-100'
+              }`}>
+                {damageAnimation.type === 'healing' ? '+' : '-'}{damageAnimation.damage}
+              </div>
+            </div>
+          )}
 
         {/* Current Turn Actions */}
         {combatSession.combatState === 'active' && currentCombatant && (
@@ -1053,24 +1435,93 @@ export default function Combat() {
 
         {/* Enemy Turn Animation */}
         {isEnemyTurn && (
-          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg animate-pulse">
-            <h4 className="font-bold text-red-800 mb-2">🦹 Enemy Turn</h4>
+            <div className="mb-6 p-6 bg-red-50 border-2 border-red-300 rounded-lg animate-pulse">
+              <div className="text-center">
+                <h4 className="font-bold text-red-800 mb-3 text-xl">🦹 Enemy Turn</h4>
             {enemyTurnMessage && (
-              <div className="text-red-700 font-medium mb-2">
+                  <div className="text-red-700 font-bold text-lg mb-3 bg-white p-3 rounded border border-red-200">
                 {enemyTurnMessage}
               </div>
             )}
             {enemyTurnNarrative && (
-              <div className="mt-2 p-3 bg-white border border-red-300 rounded">
+                  <div className="mt-3 p-4 bg-white border border-red-300 rounded">
                 <p className="text-stone-700 italic">{enemyTurnNarrative}</p>
               </div>
             )}
-            <div className="mt-3 flex items-center justify-center">
-              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-red-600"></div>
-              <span className="ml-2 text-red-600 text-sm">Enemy is acting...</span>
+                <div className="mt-4 flex items-center justify-center">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-red-600"></div>
+                  <span className="ml-3 text-red-600 font-medium">Enemy is acting...</span>
+                </div>
+              </div>
             </div>
-          </div>
-        )}
+          )}
+
+          {/* Proceed After Enemy Turn */}
+          {enemyTurnComplete && (
+            <div className="mb-6 p-6 bg-blue-50 border-2 border-blue-300 rounded-lg">
+              <div className="text-center">
+                <h4 className="font-bold text-blue-800 mb-3 text-xl">✅ Enemy Turn Complete</h4>
+                <p className="text-blue-700 mb-4">
+                  {isTestCombat 
+                    ? "The enemy has finished their turn. Click 'Confirm' to proceed to the next turn."
+                    : "The enemy has finished their turn. All party members must click 'Confirm' to proceed."
+                  }
+                </p>
+                
+                {!isTestCombat && (
+                  <div className="mb-4 p-3 bg-white border border-blue-300 rounded">
+                    <p className="text-sm text-blue-600">
+                      <strong>Ready to continue:</strong> {partyMembersReady.size} / {combatSession?.partyMembers?.filter(m => m.hp > 0).length || 0} party members
+                    </p>
+                    {partyMembersReady.size > 0 && (
+                      <div className="mt-2 text-xs text-blue-500">
+                        Waiting for: {combatSession?.partyMembers
+                          ?.filter(m => m.hp > 0 && !partyMembersReady.has(m.userId))
+                          ?.map(m => m.name)
+                          ?.join(', ') || 'None'}
+                      </div>
+                    )}
+                  </div>
+                )}
+                
+                <div className="flex flex-col sm:flex-row gap-3 justify-center items-center">
+                  <button
+                    onClick={handleProceedAfterEnemyTurn}
+                    disabled={!isTestCombat && partyMembersReady.has(user?.uid)}
+                    className={`fantasy-button px-8 py-3 text-lg font-semibold ${
+                      !isTestCombat && partyMembersReady.has(user?.uid)
+                        ? 'bg-green-600 cursor-not-allowed'
+                        : 'bg-blue-600 hover:bg-blue-700 shadow-lg'
+                    }`}
+                  >
+                    {!isTestCombat && partyMembersReady.has(user?.uid) 
+                      ? '✓ Ready' 
+                      : 'Confirm'
+                    }
+                  </button>
+                  
+                  {isTestCombat && (
+                    <button
+                      onClick={() => {
+                        setEnemyTurnComplete(false);
+                        setPartyMembersReady(new Set());
+                        advanceTurn();
+                      }}
+                      className="fantasy-button px-6 py-3 bg-gray-600 hover:bg-gray-700 text-white"
+                    >
+                      Skip Confirmation
+                    </button>
+                  )}
+                </div>
+                
+                <div className="mt-4 p-3 bg-yellow-50 border border-yellow-300 rounded">
+                  <p className="text-sm text-yellow-700">
+                    <strong>Note:</strong> Review the battle log and enemy actions before continuing to the next turn.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
 
         {/* Processing Turn Indicator */}
         {processingTurn && !isEnemyTurn && (
@@ -1096,141 +1547,83 @@ export default function Combat() {
           </div>
         )}
 
-        {/* Custom Action Input */}
-        {showCustomActionInput && (
-          <div className="mb-6 p-4 bg-indigo-50 border border-indigo-200 rounded-lg">
-            <h3 className="font-bold text-indigo-800 mb-2">🎭 Custom Action</h3>
-            <p className="text-indigo-700 mb-3">
-              Describe the action you want to perform. The system will validate it and determine if it's possible.
-            </p>
-            <div className="space-y-3">
-              <textarea
-                value={customActionInput}
-                onChange={(e) => setCustomActionInput(e.target.value)}
-                placeholder="e.g., I attempt to backflip over the enemy and strike from behind..."
-                className="w-full p-3 border border-indigo-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                rows="3"
-              />
-              <div className="flex space-x-3">
-                <button
-                  onClick={handleCustomActionSubmit}
-                  className="fantasy-button bg-indigo-600 hover:bg-indigo-700"
-                >
-                  Validate Action
-                </button>
-                <button
-                  onClick={() => setShowCustomActionInput(false)}
-                  className="fantasy-button bg-stone-600 hover:bg-stone-700"
-                >
-                  Cancel
-                </button>
-              </div>
+        {/* Fight! Confirmation */}
+        {combatSession?.combatState === 'ready' && !combatReady && (
+          <div className="mb-6 p-8 bg-red-50 border-2 border-red-300 rounded-lg">
+            <div className="text-center">
+              <h4 className="font-bold text-red-800 mb-4 text-2xl">⚔️ Combat Ready!</h4>
+              <p className="text-red-700 mb-6 text-lg">
+                All combatants are in position. Click 'Fight!' to begin the battle.
+              </p>
+              <button
+                onClick={beginCombat}
+                disabled={processingTurn}
+                className="fantasy-button px-12 py-4 text-xl font-bold bg-red-600 hover:bg-red-700 shadow-lg"
+              >
+                {processingTurn ? 'Preparing...' : 'Fight!'}
+              </button>
             </div>
           </div>
         )}
 
-        {/* Dice Rolling Tools */}
-        {isCurrentUserTurn() && (
-          <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-lg">
-            <h3 className="font-bold text-amber-800 mb-2">🎲 Dice Tools</h3>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {/* Player Turn Complete Confirmation */}
+        {turnComplete && (
+          <div className="mb-6 p-6 bg-green-50 border-2 border-green-300 rounded-lg">
+            <div className="text-center">
+              <h4 className="font-bold text-green-800 mb-3 text-xl">✅ Turn Complete</h4>
+              <p className="text-green-700 mb-4">
+                Your action has been executed. Click 'Confirm' to proceed to the next turn.
+              </p>
               <button
-                onClick={() => {
-                  const result = rollWithAdvantage();
-                  setCurrentDiceResult(result);
-                  setShowDiceRoll(true);
-                }}
-                className="p-2 bg-green-100 hover:bg-green-200 border border-green-300 rounded text-sm font-medium"
+                onClick={confirmTurnComplete}
+                className="fantasy-button px-8 py-3 text-lg font-semibold bg-green-600 hover:bg-green-700 shadow-lg"
               >
-                Roll with Advantage
+                Confirm
               </button>
-              <button
-                onClick={() => {
-                  const result = rollWithDisadvantage();
-                  setCurrentDiceResult(result);
-                  setShowDiceRoll(true);
-                }}
-                className="p-2 bg-red-100 hover:bg-red-200 border border-red-300 rounded text-sm font-medium"
-              >
-                Roll with Disadvantage
-              </button>
-              <button
-                onClick={() => {
-                  const result = rollDie(20);
-                  setCurrentDiceResult({ roll: result, totalRoll: result, actionType: 'd20' });
-                  setShowDiceRoll(true);
-                }}
-                className="p-2 bg-blue-100 hover:bg-blue-200 border border-blue-300 rounded text-sm font-medium"
-              >
-                Roll d20
-              </button>
-              <button
-                onClick={() => {
-                  const result = rollDice(2, 6);
-                  const total = result.reduce((sum, roll) => sum + roll, 0);
-                  setCurrentDiceResult({ rolls: result, totalRoll: total, actionType: '2d6' });
-                  setShowDiceRoll(true);
-                }}
-                className="p-2 bg-purple-100 hover:bg-purple-200 border border-purple-300 rounded text-sm font-medium"
-              >
-                Roll 2d6
-              </button>
+            </div>
+          </div>
+        )}
+              </div>
+            </div>
+      
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Left column - Combat info and actions */}
+        <div className="lg:col-span-2 space-y-6">
+          {/* ... existing combat content ... */}
             </div>
             
-            {/* Quick Skill Checks */}
-            <div className="mt-3">
-              <h4 className="font-semibold text-amber-700 mb-2">Quick Skill Checks:</h4>
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                {['attack', 'dodge', 'climb', 'jump', 'persuade', 'intimidate'].map(skill => (
-                  <button
-                    key={skill}
-                    onClick={() => {
-                      const result = performSkillCheck(skill);
-                      if (result) {
-                        setCurrentDiceResult(result);
-                        setShowDiceRoll(true);
-                      }
-                    }}
-                    className="p-2 bg-amber-100 hover:bg-amber-200 border border-amber-300 rounded text-xs font-medium capitalize"
-                  >
-                    {skill}
-                  </button>
-                ))}
+        {/* Right column - Battle Log */}
+        <div className="lg:col-span-1">
+          <div className="bg-gray-800 rounded-lg p-4 h-96 overflow-y-auto">
+            <h3 className="text-lg font-semibold mb-4 text-yellow-400">Battle Log</h3>
+            <div className="space-y-2">
+              {battleLog.length === 0 ? (
+                <p className="text-gray-400 text-sm">No actions recorded yet...</p>
+              ) : (
+                battleLog.map((entry) => (
+                  <div key={entry.id} className="text-sm border-l-2 pl-3 py-1">
+                    <div className="flex justify-between items-start mb-1">
+                      <span className="text-gray-400 text-xs">{entry.timestamp}</span>
+                      <span className="text-blue-400 text-xs">R{entry.round} T{entry.turn}</span>
               </div>
+                    <div className={`${
+                      entry.type === 'damage' ? 'text-red-400' :
+                      entry.type === 'healing' ? 'text-green-400' :
+                      entry.type === 'death' ? 'text-red-600 font-semibold' :
+                      entry.type === 'status_effect' ? 'text-purple-400' :
+                      entry.type === 'action_failed' ? 'text-orange-400' :
+                      entry.type === 'error' ? 'text-red-500' :
+                      'text-white'
+                    }`}>
+                      {entry.description}
             </div>
           </div>
-        )}
-
-        {/* Custom Action Button */}
-        {isCurrentUserTurn() && (
-          <div className="mb-6 text-center">
-            <button
-              onClick={() => setShowCustomActionInput(true)}
-              className="fantasy-button bg-indigo-600 hover:bg-indigo-700"
-            >
-              🎭 Describe Custom Action
-            </button>
+                ))
+              )}
           </div>
-        )}
-      </div>
-
-      {/* Dice Roll Display Modal */}
-      {showDiceRoll && (
-        <DiceRollDisplay
-          diceResult={currentDiceResult}
-          onClose={handleDiceRollClose}
-        />
-      )}
-
-      {/* Action Validation Display Modal */}
-      {showActionValidation && (
-        <ActionValidationDisplay
-          validation={currentValidation}
-          onClose={handleActionValidationClose}
-          onProceed={handleActionProceed}
-          onRevise={handleActionRevise}
-        />
-      )}
+              </div>
+              </div>
+              </div>
     </div>
   );
 } 
