@@ -1,13 +1,15 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { onAuthChange } from '../firebase/auth';
-import { createParty, getUserParties, joinParty, getPartyByInviteCode, disbandParty, getUserProfiles } from '../firebase/database';
+import { createParty, getUserParties, joinParty, getPartyByInviteCode, disbandParty, getUserProfiles, getPublicParties } from '../firebase/database';
 
 export default function PartyManagement() {
   const navigate = useNavigate();
   const [user, setUser] = useState(null);
   const [parties, setParties] = useState([]);
+  const [publicParties, setPublicParties] = useState([]);
   const [partyMemberProfiles, setPartyMemberProfiles] = useState({});
+  const [publicPartyMemberProfiles, setPublicPartyMemberProfiles] = useState({});
   const [loading, setLoading] = useState(false);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [joinCode, setJoinCode] = useState('');
@@ -27,6 +29,7 @@ export default function PartyManagement() {
       }
       setUser(user);
       loadUserParties(user.uid);
+      loadPublicParties();
     });
     return () => unsubscribe();
   }, [navigate]);
@@ -40,6 +43,22 @@ export default function PartyManagement() {
       await loadPartyMemberProfiles(userParties);
     } catch (error) {
       console.error('Error loading parties:', error.message);
+    }
+  };
+
+  const loadPublicParties = async () => {
+    try {
+      const publicPartiesData = await getPublicParties();
+      // Filter out parties the user is already a member of
+      const filteredPublicParties = publicPartiesData.filter(party => 
+        !party.members?.includes(user?.uid)
+      );
+      setPublicParties(filteredPublicParties);
+      
+      // Load user profiles for public party members
+      await loadPublicPartyMemberProfiles(filteredPublicParties);
+    } catch (error) {
+      console.error('Error loading public parties:', error.message);
     }
   };
 
@@ -81,6 +100,44 @@ export default function PartyManagement() {
     }
   };
 
+  const loadPublicPartyMemberProfiles = async (parties) => {
+    try {
+      // Collect all unique user IDs from all public parties
+      const allUserIds = new Set();
+      parties.forEach(party => {
+        if (party.members && Array.isArray(party.members)) {
+          party.members.forEach(memberId => allUserIds.add(memberId));
+        }
+      });
+
+      if (allUserIds.size === 0) return;
+
+      // Get all user profiles
+      const profiles = await getUserProfiles(Array.from(allUserIds));
+      
+      // Create a map of userId to profile
+      const profileMap = {};
+      profiles.forEach(profile => {
+        profileMap[profile.userId] = profile;
+      });
+
+      // Create a map of partyId to member profiles
+      const partyProfiles = {};
+      parties.forEach(party => {
+        if (party.members && Array.isArray(party.members)) {
+          partyProfiles[party.id] = party.members.map(memberId => ({
+            userId: memberId,
+            profile: profileMap[memberId] || null
+          }));
+        }
+      });
+
+      setPublicPartyMemberProfiles(partyProfiles);
+    } catch (error) {
+      console.error('Error loading public party member profiles:', error);
+    }
+  };
+
   const handleCreateParty = async (e) => {
     e.preventDefault();
     
@@ -103,6 +160,7 @@ export default function PartyManagement() {
       
       // Reload parties after creation
       await loadUserParties(user.uid);
+      await loadPublicParties(); // Refresh public parties list
       
       console.log('Party created successfully!');
     } catch (error) {
@@ -134,7 +192,27 @@ export default function PartyManagement() {
       await joinParty(party.id, user.uid);
       setJoinCode('');
       await loadUserParties(user.uid);
+      await loadPublicParties(); // Refresh public parties list
       console.log('Successfully joined party!');
+    } catch (error) {
+      console.error(error.message || 'Error joining party. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleJoinPublicParty = async (partyId) => {
+    if (!user) {
+      console.error('You must be logged in to join a party');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await joinParty(partyId, user.uid);
+      await loadUserParties(user.uid);
+      await loadPublicParties(); // Refresh public parties list
+      console.log('Successfully joined public party!');
     } catch (error) {
       console.error(error.message || 'Error joining party. Please try again.');
     } finally {
@@ -156,6 +234,7 @@ export default function PartyManagement() {
     try {
       await disbandParty(partyId, user.uid);
       await loadUserParties(user.uid);
+      await loadPublicParties(); // Refresh public parties list
       console.log('Party disbanded successfully');
     } catch (error) {
       console.error('Error disbanding party:', error.message);
@@ -342,21 +421,126 @@ export default function PartyManagement() {
                   )}
 
                   <div className="flex space-x-2">
-                    <button
-                      onClick={() => navigate(`/campaign-story/${party.id}`)}
-                      className="fantasy-button"
-                    >
-                      Campaign
-                    </button>
-                    {party.dmId === user.uid && (
+                    {party.members?.includes(user?.uid) ? (
+                      <>
+                        <button
+                          onClick={() => navigate(`/campaign-story/${party.id}`)}
+                          className="fantasy-button"
+                        >
+                          Campaign
+                        </button>
+                        {party.dmId === user.uid && (
+                          <button
+                            onClick={() => handleDisbandParty(party.id, party.name)}
+                            className="fantasy-button bg-red-600 hover:bg-red-700"
+                            disabled={loading}
+                          >
+                            Disband
+                          </button>
+                        )}
+                      </>
+                    ) : (
                       <button
-                        onClick={() => handleDisbandParty(party.id, party.name)}
-                        className="fantasy-button bg-red-600 hover:bg-red-700"
+                        onClick={() => handleJoinPublicParty(party.id)}
+                        className="fantasy-button bg-green-600 hover:bg-green-700"
                         disabled={loading}
                       >
-                        Disband
+                        Join Party
                       </button>
                     )}
+                  </div>
+                </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Public Parties */}
+        <div className="mb-8">
+          <h2 className="text-2xl font-bold text-gray-100 mb-4">Public Parties</h2>
+          {publicParties.length === 0 ? (
+            <div className="text-center py-8 text-gray-300">
+              <p>No public parties available.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {publicParties.map(party => {
+                const memberProfiles = publicPartyMemberProfiles[party.id] || [];
+                
+                return (
+                <div key={party.id} className="fantasy-card bg-amber-900/20 border-amber-600">
+                  <div className="flex justify-between items-start mb-4">
+                    <h3 className="text-xl font-bold text-gray-100">{party.name}</h3>
+                    <span className="text-sm text-gray-300">
+                      {party.members?.length || 1}/{party.maxPlayers} players
+                    </span>
+                  </div>
+                  
+                    {party.description && (
+                      <div className="mb-4">
+                        <span className="text-sm font-semibold text-gray-200">Theme: </span>
+                        <span className="text-gray-300">{party.description}</span>
+                      </div>
+                    )}
+                    
+                    {/* Party Members */}
+                    <div className="mb-4">
+                      <h4 className="text-sm font-semibold text-gray-200 mb-2">Party Members:</h4>
+                      <div className="space-y-1">
+                        {memberProfiles.map((member, index) => {
+                          const username = member.profile?.username || `User ${index + 1}`;
+                          const isDM = member.userId === party.dmId;
+                          
+                          return (
+                            <div key={member.userId} className="flex items-center justify-between text-sm">
+                              <div className="flex items-center space-x-2">
+                                <span className="text-gray-300">{username}</span>
+                                {isDM && (
+                                  <span className="bg-amber-500 text-white text-xs px-2 py-1 rounded-full font-semibold">
+                                    DM
+                                  </span>
+                                )}
+                              </div>
+                              {member.userId === user?.uid && (
+                                <span className="text-blue-400 text-xs font-medium">(You)</span>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  
+                  {party.dmId === user.uid && (
+                    <div className="mb-4">
+                      <label className="block text-sm font-medium text-gray-200 mb-2">
+                        Invite Code
+                      </label>
+                      <div className="flex items-center space-x-2">
+                        <input
+                          type="text"
+                          value={party.inviteCode}
+                          readOnly
+                          className="fantasy-input bg-gray-700"
+                        />
+                        <button
+                          onClick={() => copyInviteCode(party.inviteCode)}
+                          className="fantasy-button text-sm"
+                        >
+                          Copy
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex space-x-2">
+                    <button
+                      onClick={() => handleJoinPublicParty(party.id)}
+                      className="fantasy-button bg-green-600 hover:bg-green-700"
+                      disabled={loading}
+                    >
+                      Join Party
+                    </button>
                   </div>
                 </div>
                 );

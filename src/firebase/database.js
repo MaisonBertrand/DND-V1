@@ -245,6 +245,31 @@ export const getUserParties = async (userId) => {
   }
 };
 
+export const getPublicParties = async () => {
+  try {
+    const q = query(
+      collection(db, 'parties'),
+      where('isPublic', '==', true),
+      orderBy('createdAt', 'desc')
+    );
+    
+    const querySnapshot = await getDocs(q);
+    
+    const parties = querySnapshot.docs.map(doc => {
+      const data = doc.data();
+      return {
+        id: doc.id,
+        ...data
+      };
+    });
+    
+    return parties;
+  } catch (error) {
+    console.error('Error getting public parties:', error);
+    throw error;
+  }
+};
+
 export const joinParty = async (partyId, userId) => {
   try {
     const partyRef = doc(db, 'parties', partyId);
