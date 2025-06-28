@@ -1087,8 +1087,8 @@ Party: ${characterContext}`;
     const metadata = story.campaignMetadata;
     
     return (
-      <div className="bg-purple-100 border border-purple-200 rounded-lg p-4 mb-6">
-        <h3 className="font-bold text-purple-800 mb-2">📖 Campaign Progress</h3>
+      <div className="bg-purple-900/20 border border-purple-600 rounded-lg p-4 mb-6">
+        <h3 className="font-bold text-purple-200 mb-2">📖 Campaign Progress</h3>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
           <div>
             <span className="font-semibold">Session:</span> {metadata.sessionNumber}
@@ -1104,7 +1104,7 @@ Party: ${characterContext}`;
           </div>
         </div>
         {metadata.mainGoal && (
-          <div className="mt-2 text-purple-700">
+          <div className="mt-2 text-purple-200">
             <span className="font-semibold">Main Goal:</span> {metadata.mainGoal}
           </div>
         )}
@@ -1117,7 +1117,7 @@ Party: ${characterContext}`;
       <div className="fantasy-container py-8">
         <div className="fantasy-card">
           <div className="text-center py-8">
-            <div className="text-stone-600">Loading...</div>
+            <div className="text-gray-400">Loading...</div>
           </div>
         </div>
       </div>
@@ -1129,7 +1129,7 @@ Party: ${characterContext}`;
       <div className="fantasy-container py-8">
         <div className="fantasy-card">
           <div className="text-center py-8">
-            <div className="text-stone-600">Loading campaign story...</div>
+            <div className="text-gray-400">Loading campaign story...</div>
           </div>
         </div>
       </div>
@@ -1141,22 +1141,22 @@ Party: ${characterContext}`;
       <div className="fantasy-card">
         <div className="flex justify-between items-center mb-6">
           <h1 className="fantasy-title mb-0">Campaign Story</h1>
-          <button onClick={() => navigate('/dashboard')} className="fantasy-button bg-stone-600 hover:bg-stone-700">
+          <button onClick={() => navigate('/dashboard')} className="fantasy-button bg-gray-600 hover:bg-gray-700">
             Back to Dashboard
           </button>
         </div>
 
         {error && (
-          <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg mb-6">
+          <div className="bg-red-900/20 border border-red-600 text-red-200 px-4 py-3 rounded-lg mb-6">
             {error}
           </div>
         )}
 
         {/* Combat Starting Notification */}
         {isCombatStarting && (
-          <div className="bg-orange-100 border border-orange-400 text-orange-700 px-4 py-3 rounded-lg mb-6">
+          <div className="bg-orange-900/20 border border-orange-600 text-orange-200 px-4 py-3 rounded-lg mb-6">
             <div className="flex items-center justify-center space-x-2">
-              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-orange-600"></div>
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-orange-500"></div>
               <span className="font-semibold">⚔️ Combat is being initiated! Redirecting to battle arena...</span>
             </div>
           </div>
@@ -1164,7 +1164,7 @@ Party: ${characterContext}`;
 
         {/* Story Paused for Combat */}
         {story?.status === 'paused' && story?.currentCombat && (
-          <div className="bg-blue-100 border border-blue-400 text-blue-700 px-4 py-3 rounded-lg mb-6">
+          <div className="bg-blue-900/20 border border-blue-600 text-blue-200 px-4 py-3 rounded-lg mb-6">
             <div className="flex items-center justify-center space-x-2">
               <span className="font-semibold">⚔️ Story is paused for combat. Please wait for the battle to conclude.</span>
             </div>
@@ -1175,32 +1175,32 @@ Party: ${characterContext}`;
         {story?.status === 'ready_up' && (
           <div className="space-y-6">
             <div className="text-center">
-              <h2 className="text-xl font-bold text-stone-800 mb-4">Ready Up</h2>
-              <p className="text-stone-600 mb-4">
+              <h2 className="text-xl font-bold text-gray-100 mb-4">Ready Up</h2>
+              <p className="text-gray-300 mb-4">
                 All players must ready up before the story begins
               </p>
               
               {/* Progress indicator */}
               <div className="mb-6">
                 <div className="flex justify-center items-center space-x-4 mb-2">
-                  <div className="text-lg font-semibold text-amber-700">
+                  <div className="text-lg font-semibold text-amber-400">
                     {getReadyCount()}/{getTotalPlayers()} Players Ready
                   </div>
-                  <div className="text-sm text-stone-500">
+                  <div className="text-sm text-gray-400">
                     ({Math.round((getReadyCount() / getTotalPlayers()) * 100)}%)
                   </div>
                 </div>
-                <div className="w-full bg-stone-200 rounded-full h-2 max-w-md mx-auto">
+                <div className="w-full bg-gray-700 rounded-full h-2 max-w-md mx-auto">
                   <div 
-                    className="bg-amber-600 h-2 rounded-full transition-all duration-300"
+                    className="bg-amber-500 h-2 rounded-full transition-all duration-300"
                     style={{ width: `${(getReadyCount() / getTotalPlayers()) * 100}%` }}
                   ></div>
                 </div>
               </div>
               
               {partyCharacters.length === 0 && (
-                <div className="bg-blue-100 border border-blue-200 rounded-lg p-4 mb-4">
-                  <p className="text-blue-800">
+                <div className="bg-blue-900/20 border border-blue-600 rounded-lg p-4 mb-4">
+                  <p className="text-blue-200">
                     <strong>No characters created yet!</strong> Players should create their characters first. 
                     You can still ready up and start the story, but characters will need to be created before the adventure begins.
                   </p>
@@ -1217,19 +1217,19 @@ Party: ${characterContext}`;
                   
                   return (
                     <div key={character.id} className={`fantasy-card transition-all duration-200 ${
-                      isReady ? 'bg-green-50 border-green-200' : 'bg-amber-50'
+                      isReady ? 'bg-green-900/20 border-green-600' : 'bg-amber-900/20 border-amber-600'
                     }`}>
                     <div className="text-center">
-                      <div className="w-16 h-16 bg-stone-300 rounded-full mx-auto mb-2 flex items-center justify-center">
-                        <span className="text-xs text-stone-600">IMG</span>
+                      <div className="w-16 h-16 bg-gray-600 rounded-full mx-auto mb-2 flex items-center justify-center">
+                        <span className="text-xs text-gray-300">IMG</span>
                       </div>
-                      <h3 className="font-bold text-stone-800">{character.name}</h3>
-                      <p className="text-sm text-stone-600">
+                      <h3 className="font-bold text-gray-100">{character.name}</h3>
+                      <p className="text-sm text-gray-300">
                         Level {character.level} {character.race} {character.class}
                       </p>
                         {isCurrentUser && (
                           <>
-                            <span className="text-blue-600 text-xs font-medium">(You)</span>
+                            <span className="text-blue-400 text-xs font-medium">(You)</span>
                       <div className="mt-2">
                               <button
                                 className="fantasy-button bg-emerald-600 hover:bg-emerald-700 text-xs px-3 py-1 mt-2"
@@ -1242,13 +1242,13 @@ Party: ${characterContext}`;
                         )}
                         <div className="mt-2">
                           {isReady ? (
-                            <div className="flex items-center justify-center space-x-1 text-green-600 font-semibold">
+                            <div className="flex items-center justify-center space-x-1 text-green-400 font-semibold">
                               <span>✓</span>
                               <span>Ready</span>
                             </div>
                           ) : (
-                            <div className="flex items-center justify-center space-x-1 text-stone-500">
-                              <div className="w-3 h-3 border-2 border-stone-300 border-t-stone-600 rounded-full animate-spin"></div>
+                            <div className="flex items-center justify-center space-x-1 text-gray-400">
+                              <div className="w-3 h-3 border-2 border-gray-500 border-t-gray-300 rounded-full animate-spin"></div>
                               <span>Waiting...</span>
                             </div>
                         )}
@@ -1267,28 +1267,28 @@ Party: ${characterContext}`;
                   
                   return (
                     <div key={memberId} className={`fantasy-card transition-all duration-200 ${
-                      isReady ? 'bg-green-50 border-green-200' : 'bg-amber-50'
+                      isReady ? 'bg-green-900/20 border-green-600' : 'bg-amber-900/20 border-amber-600'
                     }`}>
                       <div className="text-center">
-                        <div className="w-16 h-16 bg-stone-300 rounded-full mx-auto mb-2 flex items-center justify-center">
-                          <span className="text-xs text-stone-600">IMG</span>
+                        <div className="w-16 h-16 bg-gray-600 rounded-full mx-auto mb-2 flex items-center justify-center">
+                          <span className="text-xs text-gray-300">IMG</span>
                         </div>
-                        <h3 className="font-bold text-stone-800">{displayName}</h3>
-                        <p className="text-sm text-stone-600">
+                        <h3 className="font-bold text-gray-100">{displayName}</h3>
+                        <p className="text-sm text-gray-300">
                           No character created yet
                         </p>
                         {isCurrentUser && (
-                          <span className="text-blue-600 text-xs font-medium">(You)</span>
+                          <span className="text-blue-400 text-xs font-medium">(You)</span>
                         )}
                         <div className="mt-2">
                           {isReady ? (
-                            <div className="flex items-center justify-center space-x-1 text-green-600 font-semibold">
+                            <div className="flex items-center justify-center space-x-1 text-green-400 font-semibold">
                               <span>✓</span>
                               <span>Ready</span>
                             </div>
                           ) : (
-                            <div className="flex items-center justify-center space-x-1 text-stone-500">
-                              <div className="w-3 h-3 border-2 border-stone-300 border-t-stone-600 rounded-full animate-spin"></div>
+                            <div className="flex items-center justify-center space-x-1 text-gray-400">
+                              <div className="w-3 h-3 border-2 border-gray-500 border-t-gray-300 rounded-full animate-spin"></div>
                               <span>Waiting...</span>
                             </div>
                           )}
@@ -1312,14 +1312,14 @@ Party: ${characterContext}`;
                   }
                 </button>
               ) : (
-                <div className="text-green-600 font-semibold">You are ready!</div>
+                <div className="text-green-400 font-semibold">You are ready!</div>
               )}
               
               {allPlayersReady && (
                 <button
                   onClick={handleStartStory}
                   disabled={loading || isGeneratingPlots || story?.status === 'voting'}
-                  className="fantasy-button bg-amber-700 hover:bg-amber-800 ml-4"
+                  className="fantasy-button bg-amber-600 hover:bg-amber-700 ml-4"
                 >
                   {loading || isGeneratingPlots ? 'Generating Story...' : 'Start Story Generation'}
                 </button>
@@ -1331,16 +1331,16 @@ Party: ${characterContext}`;
         {/* Voting Phase */}
         {story?.status === 'voting' && (
           <div className="space-y-6">
-            <h2 className="text-xl font-bold text-stone-800">Choose Your Adventure</h2>
+            <h2 className="text-xl font-bold text-gray-100">Choose Your Adventure</h2>
 
             {/* Plot Selection Interface for DM */}
             {party && party.dmId === user?.uid ? (
               <div className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   {getPlotData().map((plot) => (
-                    <div key={plot.number} className="fantasy-card bg-amber-50">
-                      <h3 className="font-bold text-stone-800 mb-2 text-lg">{plot.title}</h3>
-                      <p className="text-stone-600 text-sm mb-4">
+                    <div key={plot.number} className="fantasy-card bg-amber-900/20 border-amber-600">
+                      <h3 className="font-bold text-gray-100 mb-2 text-lg">{plot.title}</h3>
+                      <p className="text-gray-300 text-sm mb-4">
                         {plot.summary}
                       </p>
                       <button
@@ -1355,18 +1355,18 @@ Party: ${characterContext}`;
                 </div>
               </div>
             ) : (
-              <div className="bg-blue-100 border border-blue-200 rounded-lg p-4">
-                <h3 className="font-bold text-blue-800 mb-2">⏳ Waiting for Dungeon Master</h3>
-                <p className="text-blue-700">
+              <div className="bg-blue-900/20 border border-blue-600 rounded-lg p-4">
+                <h3 className="font-bold text-blue-200 mb-2">⏳ Waiting for Dungeon Master</h3>
+                <p className="text-blue-200">
                   The campaign creator is choosing which plot to pursue. Please wait while they make their decision.
                 </p>
                 
                 {/* Show plot options to non-DM players */}
                 <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
                   {getPlotData().map((plot) => (
-                    <div key={plot.number} className="bg-stone-50 border border-stone-200 rounded-lg p-3">
-                      <h4 className="font-bold text-stone-800 mb-2">{plot.title}</h4>
-                      <p className="text-stone-600 text-sm">
+                    <div key={plot.number} className="bg-gray-700 border border-gray-600 rounded-lg p-3">
+                      <h4 className="font-bold text-gray-100 mb-2">{plot.title}</h4>
+                      <p className="text-gray-300 text-sm">
                         {plot.summary}
                       </p>
                     </div>
@@ -1380,13 +1380,13 @@ Party: ${characterContext}`;
         {/* Storytelling Phase */}
         {(story?.status === 'storytelling' || story?.status === 'paused') && (
           <div className="space-y-6">
-            <h2 className="text-xl font-bold text-stone-800">Your Adventure</h2>
+            <h2 className="text-xl font-bold text-gray-100">Your Adventure</h2>
             
             {/* Story Phase Indicator - Only show to DM */}
             {party?.dmId === user?.uid && (
-              <div className="bg-purple-100 border border-purple-200 rounded-lg p-4">
-                <h3 className="font-bold text-purple-800 mb-2">📖 Story Phase: {currentPhase}</h3>
-                <p className="text-purple-700 text-sm">
+              <div className="bg-purple-900/20 border border-purple-600 rounded-lg p-4">
+                <h3 className="font-bold text-purple-200 mb-2">📖 Story Phase: {currentPhase}</h3>
+                <p className="text-purple-200 text-sm">
                   {currentPhase === 'Investigation' && 'Explore, discover clues, and gather information about the situation.'}
                   {currentPhase === 'Conflict' && 'Face challenges, threats, and make difficult choices.'}
                   {currentPhase === 'Resolution' && 'Conclude the story arc and see the consequences of your actions.'}
@@ -1396,38 +1396,38 @@ Party: ${characterContext}`;
             
             {/* Discovered Objectives - Only show to DM */}
             {party?.dmId === user?.uid && objectives.length > 0 && (
-              <div className="bg-emerald-100 border border-emerald-200 rounded-lg p-4">
-                <h3 className="font-bold text-emerald-800 mb-3">🎯 Discovered Objectives</h3>
+              <div className="bg-emerald-900/20 border border-emerald-600 rounded-lg p-4">
+                <h3 className="font-bold text-emerald-200 mb-3">🎯 Discovered Objectives</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                   {getDiscoveredObjectives(objectives).map((objective) => (
-                    <div key={objective.id} className="bg-white border border-emerald-300 rounded-lg p-3">
+                    <div key={objective.id} className="bg-gray-700 border border-emerald-500 rounded-lg p-3">
                       <div className="flex items-center justify-between mb-2">
-                        <h4 className="font-semibold text-emerald-800 text-sm">{objective.title}</h4>
+                        <h4 className="font-semibold text-emerald-200 text-sm">{objective.title}</h4>
                         <span className={`text-xs px-2 py-1 rounded-full ${
                           objective.state === OBJECTIVE_STATES.COMPLETED 
-                            ? 'bg-green-100 text-green-800' 
+                            ? 'bg-green-900 text-green-200' 
                             : objective.state === OBJECTIVE_STATES.IN_PROGRESS
-                            ? 'bg-blue-100 text-blue-800'
-                            : 'bg-yellow-100 text-yellow-800'
+                            ? 'bg-blue-900 text-blue-200'
+                            : 'bg-yellow-900 text-yellow-200'
                         }`}>
                           {objective.state === OBJECTIVE_STATES.COMPLETED ? '✓ Complete' :
                            objective.state === OBJECTIVE_STATES.IN_PROGRESS ? '⟳ In Progress' :
                            '🔍 Discovered'}
                         </span>
                       </div>
-                      <p className="text-emerald-700 text-xs">{objective.description}</p>
+                      <p className="text-emerald-200 text-xs">{objective.description}</p>
                     </div>
                   ))}
                 </div>
                 
                 {/* Objective Hints */}
                 {objectiveHints.length > 0 && (
-                  <div className="mt-4 pt-4 border-t border-emerald-300">
+                  <div className="mt-4 pt-4 border-t border-emerald-500">
                     <div className="flex items-center justify-between mb-2">
-                      <h4 className="font-semibold text-emerald-800 text-sm">💡 Subtle Hints</h4>
+                      <h4 className="font-semibold text-emerald-200 text-sm">💡 Subtle Hints</h4>
                       <button
                         onClick={() => setShowObjectiveHints(!showObjectiveHints)}
-                        className="text-emerald-600 hover:text-emerald-800 text-xs"
+                        className="text-emerald-300 hover:text-emerald-100 text-xs"
                       >
                         {showObjectiveHints ? 'Hide' : 'Show'} Hints
                       </button>
@@ -1435,7 +1435,7 @@ Party: ${characterContext}`;
                     {showObjectiveHints && (
                       <div className="space-y-2">
                         {objectiveHints.map((hint, index) => (
-                          <div key={index} className="text-emerald-700 text-xs italic">
+                          <div key={index} className="text-emerald-200 text-xs italic">
                             {hint}
                           </div>
                         ))}
@@ -1447,34 +1447,34 @@ Party: ${characterContext}`;
             )}
             
             {/* Turn-taking guidance */}
-            <div className="bg-blue-100 border border-blue-200 rounded-lg p-4">
-              <h3 className="font-bold text-blue-800 mb-2">🎭 Storytelling Guidelines</h3>
-              <p className="text-blue-700 text-sm">
+            <div className="bg-blue-900/20 border border-blue-600 rounded-lg p-4">
+              <h3 className="font-bold text-blue-200 mb-2">🎭 Storytelling Guidelines</h3>
+              <p className="text-blue-200 text-sm">
                 <strong>Turn-taking:</strong> Respond to the story or let someone else speak. Only one person can respond at a time.
               </p>
             </div>
             
             {/* Story Messages */}
-            <div className="bg-stone-50 border border-stone-200 rounded-lg p-4 max-h-96 overflow-y-auto">
+            <div className="bg-gray-700 border border-gray-600 rounded-lg p-4 max-h-96 overflow-y-auto">
               {story.storyMessages
                 .filter(message => message.type !== 'plot_selection') // Filter out plot selection messages
                 .map(message => (
                 <div key={message.id} className="mb-4">
                   {message.role === 'assistant' ? (
-                    <div className="bg-blue-100 border border-blue-200 rounded-lg p-3">
-                      <div className="font-semibold text-blue-800 mb-1">Game Master</div>
+                    <div className="bg-blue-900/20 border border-blue-600 rounded-lg p-3">
+                      <div className="font-semibold text-blue-200 mb-1">Game Master</div>
                       <div 
-                        className="text-blue-900 whitespace-pre-wrap"
+                        className="text-blue-100 whitespace-pre-wrap"
                         dangerouslySetInnerHTML={{ __html: highlightKeywords(message.content) }}
                       />
                     </div>
                   ) : (
-                    <div className="bg-green-100 border border-green-200 rounded-lg p-3">
-                      <div className="font-semibold text-green-800 mb-1">
+                    <div className="bg-green-900/20 border border-green-600 rounded-lg p-3">
+                      <div className="font-semibold text-green-200 mb-1">
                         {message.playerName}
                       </div>
                       <div 
-                        className="text-green-900"
+                        className="text-green-100"
                         dangerouslySetInnerHTML={{ __html: highlightKeywords(message.content) }}
                       />
                     </div>
@@ -1488,17 +1488,17 @@ Party: ${characterContext}`;
               <div className="space-y-4">
                 {/* Current Speaker Response - Only show to the user whose character is selected */}
                 {story.currentSpeaker.userId === user?.uid ? (
-                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
-                    <h3 className="font-bold text-amber-800 mb-3">How will you respond?</h3>
+                  <div className="bg-amber-900/20 border border-amber-600 rounded-lg p-4">
+                    <h3 className="font-bold text-amber-200 mb-3">How will you respond?</h3>
                     <div className="flex items-center space-x-3 mb-4">
-                      <div className="w-10 h-10 bg-amber-200 rounded-full flex items-center justify-center">
-                        <span className="text-amber-800 font-bold">
+                      <div className="w-10 h-10 bg-amber-600 rounded-full flex items-center justify-center">
+                        <span className="text-amber-100 font-bold">
                           {story.currentSpeaker.name.charAt(0)}
                         </span>
                       </div>
                       <div>
-                        <div className="font-medium text-amber-800">{story.currentSpeaker.name}</div>
-                        <div className="text-sm text-amber-700">
+                        <div className="font-medium text-amber-200">{story.currentSpeaker.name}</div>
+                        <div className="text-sm text-amber-300">
                           {story.currentSpeaker.race} {story.currentSpeaker.class}
                         </div>
                       </div>
@@ -1523,22 +1523,22 @@ Party: ${characterContext}`;
                     </div>
                   </div>
                 ) : (
-                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                    <h3 className="font-bold text-blue-800 mb-3">Waiting for {story.currentSpeaker.name} to respond</h3>
+                  <div className="bg-blue-900/20 border border-blue-600 rounded-lg p-4">
+                    <h3 className="font-bold text-blue-200 mb-3">Waiting for {story.currentSpeaker.name} to respond</h3>
                     <div className="flex items-center space-x-3">
-                      <div className="w-10 h-10 bg-blue-200 rounded-full flex items-center justify-center">
-                        <span className="text-blue-800 font-bold">
+                      <div className="w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center">
+                        <span className="text-blue-100 font-bold">
                           {story.currentSpeaker.name.charAt(0)}
                         </span>
                       </div>
                       <div>
-                        <div className="font-medium text-blue-800">{story.currentSpeaker.name}</div>
-                        <div className="text-sm text-blue-700">
+                        <div className="font-medium text-blue-200">{story.currentSpeaker.name}</div>
+                        <div className="text-sm text-blue-300">
                           {story.currentSpeaker.race} {story.currentSpeaker.class}
                         </div>
                       </div>
                     </div>
-                    <p className="text-blue-700 mt-2">
+                    <p className="text-blue-200 mt-2">
                       {story.currentSpeaker.name} is currently speaking. Please wait for their response.
                     </p>
                   </div>
@@ -1546,8 +1546,8 @@ Party: ${characterContext}`;
 
                 {/* Let someone else speak - Show to current speaker and controller */}
                 {(story?.currentSpeaker?.userId === user?.uid || story?.currentController === user?.uid) && (
-                  <div className="bg-stone-50 border border-stone-200 rounded-lg p-4">
-                    <h4 className="font-bold text-stone-800 mb-3 text-center">Let someone else speak</h4>
+                  <div className="bg-gray-700 border border-gray-600 rounded-lg p-4">
+                    <h4 className="font-bold text-gray-100 mb-3 text-center">Let someone else speak</h4>
                     <div className="flex justify-center">
                       <div className="grid grid-cols-2 md:grid-cols-3 gap-4 w-full max-w-4xl">
                         {getSortedCharacters().map(character => {
@@ -1563,14 +1563,14 @@ Party: ${characterContext}`;
                           disabled={character.id === story?.currentSpeaker?.id}
                               className={`p-4 rounded-lg border-2 transition-colors text-center ${
                             character.id === story?.currentSpeaker?.id
-                              ? 'border-stone-300 bg-stone-100 text-stone-500 cursor-not-allowed'
-                              : 'border-stone-200 bg-white hover:border-stone-300 text-stone-700'
+                              ? 'border-gray-500 bg-gray-600 text-gray-400 cursor-not-allowed'
+                              : 'border-gray-600 bg-gray-700 hover:border-gray-500 text-gray-200'
                           }`}
                         >
                               <div className="font-medium mb-1">
                                 <span>{character.name}</span>
                                 {isCurrentUser && (
-                                  <span className="text-blue-600 text-xs font-medium ml-1">(you)</span>
+                                  <span className="text-blue-400 text-xs font-medium ml-1">(you)</span>
                                 )}
                               </div>
                           <div className="text-sm opacity-75">
@@ -1587,8 +1587,8 @@ Party: ${characterContext}`;
             ) : (
               // Show character selection when no one is speaking
               (party?.dmId === user?.uid || story?.currentController === user?.uid) ? (
-                <div className="bg-stone-50 border border-stone-200 rounded-lg p-4">
-                  <h3 className="font-bold text-stone-800 mb-3 text-center">
+                <div className="bg-gray-700 border border-gray-600 rounded-lg p-4">
+                  <h3 className="font-bold text-gray-100 mb-3 text-center">
                     Choose who speaks
                   </h3>
                   <div className="flex justify-center">
@@ -1603,12 +1603,12 @@ Party: ${characterContext}`;
                           await setCurrentSpeaker(story.id, character);
                           await setCurrentController(story.id, character.userId);
                         }}
-                            className="p-4 rounded-lg border-2 border-stone-200 bg-white hover:border-stone-300 text-stone-700 transition-colors text-center"
+                            className="p-4 rounded-lg border-2 border-gray-600 bg-gray-700 hover:border-gray-500 text-gray-200 transition-colors text-center"
                           >
                             <div className="font-medium mb-1">
                               <span>{character.name}</span>
                               {isCurrentUser && (
-                                <span className="text-blue-600 text-xs font-medium ml-1">(you)</span>
+                                <span className="text-blue-400 text-xs font-medium ml-1">(you)</span>
                               )}
                             </div>
                         <div className="text-sm opacity-75">
@@ -1621,11 +1621,11 @@ Party: ${characterContext}`;
                   </div>
                 </div>
               ) : (
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                  <h3 className="font-bold text-blue-800 mb-3">
+                <div className="bg-blue-900/20 border border-blue-600 rounded-lg p-4">
+                  <h3 className="font-bold text-blue-200 mb-3">
                     {story.storyMessages.length > 0 ? 'Waiting for next speaker' : 'Waiting for the story to begin'}
                   </h3>
-                  <p className="text-blue-700">
+                  <p className="text-blue-200">
                     {story.storyMessages.length > 0 
                       ? 'The Dungeon Master is choosing who will speak next. Please wait.'
                       : 'The Dungeon Master is choosing who will speak first. Please wait.'

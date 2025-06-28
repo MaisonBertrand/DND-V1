@@ -57,14 +57,14 @@ export default function Login() {
         <h1 className="fantasy-title text-center">Login</h1>
         
         {message && (
-          <div className="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded-lg mb-4">
+          <div className="bg-green-900/20 border border-green-600 text-green-200 px-4 py-3 rounded-lg mb-4">
             {message}
           </div>
         )}
         
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-stone-700 mb-2">
+            <label className="block text-sm font-medium text-gray-200 mb-2">
               Email
             </label>
             <input
@@ -77,7 +77,7 @@ export default function Login() {
           </div>
           
           <div>
-            <label className="block text-sm font-medium text-stone-700 mb-2">
+            <label className="block text-sm font-medium text-gray-200 mb-2">
               Password
             </label>
             <input
@@ -90,7 +90,7 @@ export default function Login() {
           </div>
           
           {error && (
-            <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg">
+            <div className="bg-red-900/20 border border-red-600 text-red-200 px-4 py-3 rounded-lg">
               {error}
             </div>
           )}
@@ -105,11 +105,11 @@ export default function Login() {
         </form>
         
         <div className="mt-6 text-center">
-          <p className="text-stone-600">
+          <p className="text-gray-300">
             Don't have an account?{' '}
             <button
               onClick={() => navigate('/register')}
-              className="text-amber-700 hover:text-amber-800 font-medium"
+              className="text-amber-400 hover:text-amber-300 font-medium"
             >
               Register here
             </button>

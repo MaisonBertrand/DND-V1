@@ -15,13 +15,13 @@ export default function HeroSection() {
             <Link to="/register" className="fantasy-button text-lg px-8 py-3">
               Start Your Journey
             </Link>
-            <Link to="/login" className="fantasy-button text-lg px-8 py-3 bg-stone-600 hover:bg-stone-700">
+            <Link to="/login" className="fantasy-button text-lg px-8 py-3 bg-gray-600 hover:bg-gray-700">
               Return to Campaign
             </Link>
           </div>
         </div>
       </div>
-      <div className="absolute inset-0 bg-stone-200/10 pattern-grid-lg"></div>
+      <div className="absolute inset-0 bg-gray-700/10 pattern-grid-lg"></div>
     </div>
   );
 } 

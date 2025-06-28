@@ -78,31 +78,31 @@ export default function Dashboard() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-100 flex items-center justify-center">
+      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600">Loading...</p>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-amber-500 mx-auto"></div>
+          <p className="mt-4 text-gray-300">Loading...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-100">
+    <div className="min-h-screen bg-gray-900">
       <div className="container mx-auto px-4 py-8">
         {/* Header */}
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-800">Dashboard</h1>
-          <p className="text-gray-600 mt-2">
+          <h1 className="text-3xl font-bold text-gray-100">Dashboard</h1>
+          <p className="text-gray-300 mt-2">
             Welcome back, {user?.displayName || user?.email}! Manage your campaigns and test the system.
           </p>
         </div>
 
         {/* Quick Actions */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
-          <div className="bg-white p-6 rounded-lg shadow-md">
-            <h3 className="text-lg font-semibold text-gray-800 mb-2">Test Environment</h3>
-            <p className="text-gray-600 mb-4">
+          <div className="bg-gray-800 p-6 rounded-lg shadow-md border border-gray-700">
+            <h3 className="text-lg font-semibold text-gray-100 mb-2">Test Environment</h3>
+            <p className="text-gray-300 mb-4">
               Test action validation, dice rolling, and combat detection in a controlled environment.
             </p>
             <button
@@ -113,9 +113,9 @@ export default function Dashboard() {
             </button>
           </div>
 
-          <div className="bg-white p-6 rounded-lg shadow-md">
-            <h3 className="text-lg font-semibold text-gray-800 mb-2">Create New Campaign</h3>
-            <p className="text-gray-600 mb-4">
+          <div className="bg-gray-800 p-6 rounded-lg shadow-md border border-gray-700">
+            <h3 className="text-lg font-semibold text-gray-100 mb-2">Create New Campaign</h3>
+            <p className="text-gray-300 mb-4">
               Start a new campaign with your party.
             </p>
             <button
@@ -126,9 +126,9 @@ export default function Dashboard() {
             </button>
           </div>
 
-          <div className="bg-white p-6 rounded-lg shadow-md">
-            <h3 className="text-lg font-semibold text-gray-800 mb-2">Character Creation</h3>
-            <p className="text-gray-600 mb-4">
+          <div className="bg-gray-800 p-6 rounded-lg shadow-md border border-gray-700">
+            <h3 className="text-lg font-semibold text-gray-100 mb-2">Character Creation</h3>
+            <p className="text-gray-300 mb-4">
               Create new characters for your campaigns.
             </p>
             <button
@@ -141,14 +141,14 @@ export default function Dashboard() {
         </div>
 
         {/* Campaign List */}
-        <div className="bg-white rounded-lg shadow-md">
-          <div className="p-6 border-b border-gray-200">
-            <h2 className="text-xl font-semibold text-gray-800">Your Campaigns</h2>
+        <div className="bg-gray-800 rounded-lg shadow-md border border-gray-700">
+          <div className="p-6 border-b border-gray-700">
+            <h2 className="text-xl font-semibold text-gray-100">Your Campaigns</h2>
           </div>
           
           {parties.length === 0 ? (
             <div className="p-6 text-center">
-              <p className="text-gray-600 mb-4">You haven't created any campaigns yet.</p>
+              <p className="text-gray-300 mb-4">You haven't created any campaigns yet.</p>
               <button
                 onClick={() => navigate('/campaign-management')}
                 className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
@@ -157,14 +157,14 @@ export default function Dashboard() {
               </button>
             </div>
           ) : (
-            <div className="divide-y divide-gray-200">
+            <div className="divide-y divide-gray-700">
               {parties.map((party) => (
                 <div key={party.id} className="p-6">
                   <div className="flex items-center justify-between">
                     <div className="flex-1">
-                      <h3 className="text-lg font-semibold text-gray-800">{party.name}</h3>
-                      <p className="text-gray-600 mt-1">{party.description}</p>
-                      <div className="flex items-center mt-2 space-x-4 text-sm text-gray-500">
+                      <h3 className="text-lg font-semibold text-gray-100">{party.name}</h3>
+                      <p className="text-gray-300 mt-1">{party.description}</p>
+                      <div className="flex items-center mt-2 space-x-4 text-sm text-gray-400">
                         <span>{party.members?.length || 0} members</span>
                         <span>Theme: {party.theme}</span>
                         <span>Created: {new Date(party.createdAt).toLocaleDateString()}</span>

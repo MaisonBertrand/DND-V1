@@ -39,7 +39,6 @@ export default function Combat() {
   const [partyMembersReady, setPartyMembersReady] = useState(new Set());
   const [battleLog, setBattleLog] = useState([]);
   const [combatReady, setCombatReady] = useState(false);
-  const [turnComplete, setTurnComplete] = useState(false);
   
   // Check if this is a test combat session
   const isTestCombat = location.state?.isTestCombat;
@@ -176,7 +175,7 @@ export default function Combat() {
       console.log('Test session created:', {
         partyMembers: testSession.partyMembers.length,
         enemies: testSession.enemies.length,
-        enemies: testSession.enemies
+        enemyList: testSession.enemies
       });
 
       // Check if we have enemies
@@ -393,7 +392,7 @@ export default function Combat() {
         description: 'Combat is ready to begin!'
       });
       
-    } catch (error) {
+      } catch (error) {
       console.error('Error starting combat:', error);
     } finally {
       setProcessingTurn(false);
@@ -414,7 +413,7 @@ export default function Combat() {
       if (isTestCombat) {
         setCombatSession(updatedSession);
         updateAvailableActions(updatedSession);
-      } else {
+    } else {
         await updateCombatSession(partyId, updatedSession);
       }
       
@@ -578,8 +577,10 @@ export default function Combat() {
           return;
         }
 
-        // Set turn complete and wait for confirmation
-        setTurnComplete(true);
+        // Automatically advance to next turn after a short delay
+        setTimeout(() => {
+          advanceTurn();
+        }, 1000);
         
       } else {
         console.error('Action execution failed:', result.error);
@@ -593,33 +594,22 @@ export default function Combat() {
     }
   };
 
-  const confirmTurnComplete = async () => {
-    setTurnComplete(false);
-    setEnemyTurnComplete(false);
-    setPartyMembersReady(new Set());
-    
-    // Advance to next turn
-    setTimeout(() => {
-      advanceTurn();
-    }, 500);
-  };
-
   const processEnemyTurn = async () => {
     if (!combatSession || combatSession.combatState !== 'active') {
       console.error('Combat not active');
       return;
     }
-
+    
     const currentCombatant = getCurrentCombatant();
     if (!currentCombatant || !currentCombatant.id.startsWith('enemy_')) {
       console.error('Not an enemy turn');
       return;
     }
-
+    
     console.log('Processing enemy turn for:', currentCombatant.name);
 
     try {
-      setProcessingTurn(true);
+    setProcessingTurn(true);
       setIsEnemyTurn(true);
 
       // Record enemy turn start in battle log
@@ -793,9 +783,9 @@ export default function Combat() {
           } else {
             await endCombat();
           }
-          return;
-        }
-
+      return;
+    }
+    
         // Check if all players are dead
         const remainingPlayers = updatedSession.combatants.filter(c => 
           !c.id.startsWith('enemy_') && c.hp > 0
@@ -810,15 +800,16 @@ export default function Combat() {
                 combatResult: 'defeat' 
               } 
             });
-          } else {
+    } else {
             await endCombat();
           }
           return;
         }
 
-        // Set enemy turn complete and wait for party confirmation
-        setEnemyTurnComplete(true);
-        setPartyMembersReady(new Set());
+        // Automatically advance to next turn after a short delay
+        setTimeout(() => {
+          advanceTurn();
+        }, 1000);
 
       } else {
         console.error('Enemy action execution failed:', result.error);
@@ -1148,11 +1139,11 @@ export default function Combat() {
         <div className="fantasy-card">
           <div className="text-center py-8">
             <div className="text-4xl mb-4">⚔️</div>
-            <h2 className="text-2xl font-bold text-stone-800 mb-4">Loading Combat...</h2>
-            <p className="text-stone-600 mb-6">
+            <h2 className="text-2xl font-bold text-gray-100 mb-4">Loading Combat...</h2>
+            <p className="text-gray-300 mb-6">
               Preparing the battlefield and gathering combatants...
             </p>
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-amber-600 mx-auto"></div>
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-amber-500 mx-auto"></div>
           </div>
         </div>
       </div>
@@ -1164,7 +1155,7 @@ export default function Combat() {
       <div className="fantasy-container py-8">
         <div className="fantasy-card">
           <div className="text-center py-8">
-            <div className="text-stone-600">No active combat session found.</div>
+            <div className="text-gray-400">No active combat session found.</div>
           </div>
         </div>
       </div>
@@ -1178,11 +1169,11 @@ export default function Combat() {
         <div className="fantasy-card">
           <div className="text-center py-8">
             <div className="text-4xl mb-4">🕊️</div>
-            <h2 className="text-2xl font-bold text-stone-800 mb-4">No Enemies to Fight</h2>
-            <p className="text-stone-600 mb-6">
+            <h2 className="text-2xl font-bold text-gray-100 mb-4">No Enemies to Fight</h2>
+            <p className="text-gray-300 mb-6">
               There are no enemies present in this area. Combat cannot begin.
             </p>
-            <p className="text-stone-500 text-sm">
+            <p className="text-gray-400 text-sm">
               The combat session will end automatically.
             </p>
           </div>
@@ -1237,15 +1228,14 @@ export default function Combat() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white p-4">
-    <div className="fantasy-container py-8">
-      <div className="fantasy-card">
+    <div className="min-h-screen bg-gray-900 text-gray-100 p-4">
+      <div className="fantasy-container py-4">
         {/* Combat Header */}
         <div className="flex justify-between items-center mb-6">
           <h1 className="fantasy-title mb-0">⚔️ Combat Arena</h1>
           <div className="flex space-x-2">
             {combatSession.combatState === 'preparation' && (
-              <button onClick={startCombat} className="bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-2 px-4 rounded-lg shadow-lg">
+              <button onClick={startCombat} className="bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-2 px-4 rounded-lg shadow-lg">
                 Start Combat
               </button>
             )}
@@ -1257,373 +1247,396 @@ export default function Combat() {
           </div>
         </div>
 
-        {/* Story Context */}
-        {combatSession.storyContext && (
-          <div className="mb-6 p-4 bg-stone-50 border border-stone-200 rounded-lg">
-            <h3 className="font-bold text-stone-800 mb-2">Story Context</h3>
-            <p className="text-stone-700 italic">{combatSession.storyContext}</p>
-          </div>
-        )}
+        {/* Main Combat Grid Layout */}
+        <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">
+          {/* Left Column - Combat Info */}
+          <div className="xl:col-span-1 space-y-6">
+            {/* Story Context */}
+            {combatSession.storyContext && (
+              <div className="fantasy-card">
+                <h3 className="font-bold text-gray-100 mb-2">Story Context</h3>
+                <p className="text-gray-300 italic text-sm">{combatSession.storyContext}</p>
+              </div>
+            )}
 
-        {/* Environmental Features */}
-        {environmentalFeatures.length > 0 && (
-          <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-            <h3 className="font-bold text-blue-800 mb-2">🌍 Environmental Features</h3>
-            <div className="flex flex-wrap gap-2">
-              {environmentalFeatures.map((feature, index) => (
-                <span key={index} className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm">
-                  {feature}
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Initiative Order */}
-        {combatSession.combatState === 'active' && (
-          <div className="mb-6">
-            <h3 className="font-bold text-stone-800 mb-3">🎯 Turn Order</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                {combatSession.combatants.map((combatant) => (
-                <div
-                  key={combatant.id}
-                  className={`p-3 rounded-lg border-2 transition-colors ${
-                      combatant.id === combatSession.combatants[combatSession.currentTurn]?.id
-                      ? 'border-amber-500 bg-amber-50'
-                      : 'border-stone-200 bg-white'
-                  }`}
-                >
-                  <div className="flex justify-between items-center">
-                    <div>
-                      <div className="font-medium text-stone-800">
-                        {combatant.name}
-                          {combatant.id === combatSession.combatants[combatSession.currentTurn]?.id && (
-                          <span className="ml-2 text-amber-600">← Current Turn</span>
-                        )}
-                      </div>
-                      <div className="text-sm text-stone-600">
-                        HP: {combatant.hp}/{combatant.maxHp} | AC: {combatant.ac}
-                      </div>
-                      {combatant.statusEffects && combatant.statusEffects.length > 0 && (
-                        <div className="text-xs text-red-600 mt-1">
-                          {combatant.statusEffects.map(effect => effect.type).join(', ')}
-                        </div>
-                      )}
-                    </div>
-                    <div className="text-sm text-stone-500">
-                      Initiative: {combatant.initiative}
-                    </div>
-                  </div>
+            {/* Environmental Features */}
+            {environmentalFeatures.length > 0 && (
+              <div className="fantasy-card">
+                <h3 className="font-bold text-blue-300 mb-2">🌍 Environmental Features</h3>
+                <div className="flex flex-wrap gap-2">
+                  {environmentalFeatures.map((feature, index) => (
+                    <span key={index} className="px-3 py-1 bg-blue-900 text-blue-200 rounded-full text-sm">
+                      {feature}
+                    </span>
+                  ))}
                 </div>
-              ))}
-            </div>
-          </div>
-        )}
+              </div>
+            )}
 
-          {/* Damage Animation */}
-          {showDamageAnimation && damageAnimation && (
-            <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
-              <div className={`animate-bounce text-6xl font-bold px-6 py-4 rounded-lg shadow-lg ${
-                damageAnimation.type === 'healing' 
-                  ? 'text-green-600 bg-green-100' 
-                  : 'text-red-600 bg-red-100'
-              }`}>
-                {damageAnimation.type === 'healing' ? '+' : '-'}{damageAnimation.damage}
+            {/* Team Up Opportunities */}
+            {teamUpOpportunities.length > 0 && (
+              <div className="fantasy-card">
+                <h3 className="font-bold text-purple-300 mb-2">🤝 Team Up Opportunities</h3>
+                <div className="space-y-2">
+                  {teamUpOpportunities.map((opportunity, index) => (
+                    <div key={index} className="text-purple-200 text-sm">
+                      <strong>{opportunity.classes.join(' + ')}:</strong> {opportunity.description}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Battle Log */}
+            <div className="fantasy-card h-96">
+              <h3 className="text-lg font-semibold mb-4 text-yellow-400">Battle Log</h3>
+              <div className="space-y-2 h-80 overflow-y-auto">
+                {battleLog.length === 0 ? (
+                  <p className="text-gray-400 text-sm">No actions recorded yet...</p>
+                ) : (
+                  battleLog.map((entry) => (
+                    <div key={entry.id} className="text-sm border-l-2 border-gray-600 pl-3 py-1">
+                      <div className="flex justify-between items-start mb-1">
+                        <span className="text-gray-400 text-xs">{entry.timestamp}</span>
+                        <span className="text-blue-400 text-xs">R{entry.round} T{entry.turn}</span>
+                      </div>
+                      <div className={`${
+                        entry.type === 'damage' ? 'text-red-400' :
+                        entry.type === 'healing' ? 'text-green-400' :
+                        entry.type === 'death' ? 'text-red-500 font-semibold' :
+                        entry.type === 'status_effect' ? 'text-purple-400' :
+                        entry.type === 'action_failed' ? 'text-orange-400' :
+                        entry.type === 'error' ? 'text-red-500' :
+                        'text-gray-200'
+                      }`}>
+                        {entry.description}
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
-          )}
+          </div>
 
-        {/* Current Turn Actions */}
-        {combatSession.combatState === 'active' && currentCombatant && (
-          <div className="mb-6">
-            <h3 className="font-bold text-stone-800 mb-3">
-              🎲 {currentCombatant.name}'s Turn
-            </h3>
-            
-            {isCurrentUserTurn() ? (
-              <div className="space-y-4">
-                {/* Available Actions */}
-                <div>
-                  <h4 className="font-semibold text-stone-700 mb-2">Available Actions:</h4>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                    {availableActions.map((action, index) => (
-                      <button
-                        key={index}
-                        onClick={() => setSelectedAction(action)}
-                        className={`p-3 rounded-lg border-2 transition-colors text-left ${
-                          selectedAction?.type === action.type
-                            ? 'border-amber-500 bg-amber-50'
-                            : 'border-stone-200 bg-white hover:border-stone-300'
-                        }`}
-                      >
-                        <div className="font-medium text-stone-800">{action.name}</div>
-                        <div className="text-sm text-stone-600">{action.description}</div>
-                        <div className="text-xs text-stone-500 mt-1">
-                          Priority: {action.priority}
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Target Selection */}
-                {selectedAction && (
-                  <div>
-                    <h4 className="font-semibold text-stone-700 mb-2">Select Target:</h4>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                      {combatSession.enemies.map(enemy => (
-                        <button
-                          key={enemy.id}
-                          onClick={() => setSelectedTarget(enemy)}
-                          className={`p-3 rounded-lg border-2 transition-colors ${
-                            selectedTarget?.id === enemy.id
-                              ? 'border-red-500 bg-red-50'
-                              : 'border-stone-200 bg-white hover:border-stone-300'
-                          }`}
-                        >
-                          <div className="font-medium text-stone-800">{enemy.name}</div>
-                          <div className="text-sm text-stone-600">
-                            HP: {enemy.hp}/{enemy.maxHp} | AC: {enemy.ac}
-                          </div>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Execute Action */}
-                {selectedAction && selectedTarget && (
-                  <div className="text-center">
-                    <button
-                      onClick={() => executeAction(selectedAction.type, selectedTarget.id)}
-                      disabled={processingTurn}
-                      className="fantasy-button bg-amber-600 hover:bg-amber-700"
+          {/* Center Column - Main Combat Area */}
+          <div className="xl:col-span-2 space-y-6">
+            {/* Initiative Order */}
+            {combatSession.combatState === 'active' && (
+              <div className="fantasy-card">
+                <h3 className="font-bold text-gray-100 mb-3">🎯 Turn Order</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {combatSession.combatants.map((combatant) => (
+                    <div
+                      key={combatant.id}
+                      className={`p-3 rounded-lg border-2 transition-colors ${
+                        combatant.id === combatSession.combatants[combatSession.currentTurn]?.id
+                          ? 'border-amber-500 bg-amber-900/20'
+                          : 'border-gray-600 bg-gray-700'
+                      }`}
                     >
-                      {processingTurn ? 'Executing...' : `Execute ${selectedAction.name}`}
-                    </button>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                <h4 className="font-bold text-blue-800 mb-2">
-                  Waiting for {currentCombatant.name} to act
-                </h4>
-                <p className="text-blue-700">
-                  {currentCombatant.userId === user?.uid 
-                    ? 'It\'s your turn! Please select an action.'
-                    : 'Please wait for the current player to make their move.'
-                  }
-                </p>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Action Results */}
-        {actionMessage && (
-          <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg">
-            <h4 className="font-bold text-green-800 mb-2">Action Result</h4>
-            <p className="text-green-700">{actionMessage}</p>
-            {narrativeDescription && (
-              <div className="mt-2 p-3 bg-white border border-green-300 rounded">
-                <p className="text-stone-700 italic">{narrativeDescription}</p>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Enemy Turn Animation */}
-        {isEnemyTurn && (
-            <div className="mb-6 p-6 bg-red-50 border-2 border-red-300 rounded-lg animate-pulse">
-              <div className="text-center">
-                <h4 className="font-bold text-red-800 mb-3 text-xl">🦹 Enemy Turn</h4>
-            {enemyTurnMessage && (
-                  <div className="text-red-700 font-bold text-lg mb-3 bg-white p-3 rounded border border-red-200">
-                {enemyTurnMessage}
-              </div>
-            )}
-            {enemyTurnNarrative && (
-                  <div className="mt-3 p-4 bg-white border border-red-300 rounded">
-                <p className="text-stone-700 italic">{enemyTurnNarrative}</p>
-              </div>
-            )}
-                <div className="mt-4 flex items-center justify-center">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-red-600"></div>
-                  <span className="ml-3 text-red-600 font-medium">Enemy is acting...</span>
+                      <div className="flex justify-between items-center">
+                        <div>
+                          <div className="font-medium text-gray-100">
+                            {combatant.name}
+                            {combatant.id === combatSession.combatants[combatSession.currentTurn]?.id && (
+                              <span className="ml-2 text-amber-400">← Current Turn</span>
+                            )}
+                          </div>
+                          <div className="text-sm text-gray-300">
+                            HP: {combatant.hp}/{combatant.maxHp} | AC: {combatant.ac}
+                          </div>
+                          {combatant.statusEffects && combatant.statusEffects.length > 0 && (
+                            <div className="text-xs text-red-400 mt-1">
+                              {combatant.statusEffects.map(effect => effect.type).join(', ')}
+                            </div>
+                          )}
+                        </div>
+                        <div className="text-sm text-gray-400">
+                          Initiative: {combatant.initiative}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
-            </div>
-          )}
+            )}
 
-          {/* Proceed After Enemy Turn */}
-          {enemyTurnComplete && (
-            <div className="mb-6 p-6 bg-blue-50 border-2 border-blue-300 rounded-lg">
-              <div className="text-center">
-                <h4 className="font-bold text-blue-800 mb-3 text-xl">✅ Enemy Turn Complete</h4>
-                <p className="text-blue-700 mb-4">
-                  {isTestCombat 
-                    ? "The enemy has finished their turn. Click 'Confirm' to proceed to the next turn."
-                    : "The enemy has finished their turn. All party members must click 'Confirm' to proceed."
-                  }
-                </p>
+            {/* Current Turn Actions */}
+            {combatSession.combatState === 'active' && currentCombatant && (
+              <div className="fantasy-card">
+                <h3 className="font-bold text-gray-100 mb-3">
+                  🎲 {currentCombatant.name}'s Turn
+                </h3>
                 
-                {!isTestCombat && (
-                  <div className="mb-4 p-3 bg-white border border-blue-300 rounded">
-                    <p className="text-sm text-blue-600">
-                      <strong>Ready to continue:</strong> {partyMembersReady.size} / {combatSession?.partyMembers?.filter(m => m.hp > 0).length || 0} party members
-                    </p>
-                    {partyMembersReady.size > 0 && (
-                      <div className="mt-2 text-xs text-blue-500">
-                        Waiting for: {combatSession?.partyMembers
-                          ?.filter(m => m.hp > 0 && !partyMembersReady.has(m.userId))
-                          ?.map(m => m.name)
-                          ?.join(', ') || 'None'}
+                {isCurrentUserTurn() ? (
+                  <div className="space-y-4">
+                    {/* Available Actions */}
+                    <div>
+                      <h4 className="font-semibold text-gray-200 mb-2">Available Actions:</h4>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        {availableActions.map((action, index) => (
+                          <button
+                            key={index}
+                            onClick={() => setSelectedAction(action)}
+                            className={`p-3 rounded-lg border-2 transition-colors text-left ${
+                              selectedAction?.type === action.type
+                                ? 'border-amber-500 bg-amber-900/20'
+                                : 'border-gray-600 bg-gray-700 hover:border-gray-500'
+                            }`}
+                          >
+                            <div className="font-medium text-gray-100">{action.name}</div>
+                            <div className="text-sm text-gray-300">{action.description}</div>
+                            <div className="text-xs text-gray-400 mt-1">
+                              Priority: {action.priority}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Target Selection */}
+                    {selectedAction && (
+                      <div>
+                        <h4 className="font-semibold text-gray-200 mb-2">Select Target:</h4>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          {combatSession.enemies.map(enemy => (
+                            <button
+                              key={enemy.id}
+                              onClick={() => setSelectedTarget(enemy)}
+                              className={`p-3 rounded-lg border-2 transition-colors ${
+                                selectedTarget?.id === enemy.id
+                                  ? 'border-red-500 bg-red-900/20'
+                                  : 'border-gray-600 bg-gray-700 hover:border-gray-500'
+                              }`}
+                            >
+                              <div className="font-medium text-gray-100">{enemy.name}</div>
+                              <div className="text-sm text-gray-300">
+                                HP: {enemy.hp}/{enemy.maxHp} | AC: {enemy.ac}
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Execute Action */}
+                    {selectedAction && selectedTarget && (
+                      <div className="text-center">
+                        <button
+                          onClick={() => executeAction(selectedAction.type, selectedTarget.id)}
+                          disabled={processingTurn}
+                          className="fantasy-button bg-amber-600 hover:bg-amber-700"
+                        >
+                          {processingTurn ? 'Executing...' : `Execute ${selectedAction.name}`}
+                        </button>
                       </div>
                     )}
                   </div>
+                ) : (
+                  <div className="bg-blue-900/20 border border-blue-700 rounded-lg p-4">
+                    <h4 className="font-bold text-blue-300 mb-2">
+                      Waiting for {currentCombatant.name} to act
+                    </h4>
+                    <p className="text-blue-200">
+                      {currentCombatant.userId === user?.uid 
+                        ? 'It\'s your turn! Please select an action.'
+                        : 'Please wait for the current player to make their move.'
+                      }
+                    </p>
+                  </div>
                 )}
-                
-                <div className="flex flex-col sm:flex-row gap-3 justify-center items-center">
-                  <button
-                    onClick={handleProceedAfterEnemyTurn}
-                    disabled={!isTestCombat && partyMembersReady.has(user?.uid)}
-                    className={`fantasy-button px-8 py-3 text-lg font-semibold ${
-                      !isTestCombat && partyMembersReady.has(user?.uid)
-                        ? 'bg-green-600 cursor-not-allowed'
-                        : 'bg-blue-600 hover:bg-blue-700 shadow-lg'
-                    }`}
-                  >
-                    {!isTestCombat && partyMembersReady.has(user?.uid) 
-                      ? '✓ Ready' 
-                      : 'Confirm'
-                    }
-                  </button>
-                  
-                  {isTestCombat && (
-                    <button
-                      onClick={() => {
-                        setEnemyTurnComplete(false);
-                        setPartyMembersReady(new Set());
-                        advanceTurn();
-                      }}
-                      className="fantasy-button px-6 py-3 bg-gray-600 hover:bg-gray-700 text-white"
-                    >
-                      Skip Confirmation
-                    </button>
+              </div>
+            )}
+
+            {/* Action Results */}
+            {actionMessage && (
+              <div className="fantasy-card bg-green-900/20 border-green-700">
+                <h4 className="font-bold text-green-300 mb-2">Action Result</h4>
+                <p className="text-green-200">{actionMessage}</p>
+                {narrativeDescription && (
+                  <div className="mt-2 p-3 bg-gray-700 border border-green-600 rounded">
+                    <p className="text-gray-200 italic">{narrativeDescription}</p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Enemy Turn Animation */}
+            {isEnemyTurn && (
+              <div className="fantasy-card bg-red-900/20 border-red-700 animate-pulse">
+                <div className="text-center">
+                  <h4 className="font-bold text-red-300 mb-3 text-xl">🦹 Enemy Turn</h4>
+                  {enemyTurnMessage && (
+                    <div className="text-red-200 font-bold text-lg mb-3 bg-gray-700 p-3 rounded border border-red-600">
+                      {enemyTurnMessage}
+                    </div>
                   )}
+                  {enemyTurnNarrative && (
+                    <div className="mt-3 p-4 bg-gray-700 border border-red-600 rounded">
+                      <p className="text-gray-200 italic">{enemyTurnNarrative}</p>
+                    </div>
+                  )}
+                  <div className="mt-4 flex items-center justify-center">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-red-500"></div>
+                    <span className="ml-3 text-red-300 font-medium">Enemy is acting...</span>
+                  </div>
                 </div>
-                
-                <div className="mt-4 p-3 bg-yellow-50 border border-yellow-300 rounded">
-                  <p className="text-sm text-yellow-700">
-                    <strong>Note:</strong> Review the battle log and enemy actions before continuing to the next turn.
+              </div>
+            )}
+
+            {/* Proceed After Enemy Turn */}
+            {enemyTurnComplete && (
+              <div className="fantasy-card bg-blue-900/20 border-blue-700">
+                <div className="text-center">
+                  <h4 className="font-bold text-blue-300 mb-3 text-xl">✅ Enemy Turn Complete</h4>
+                  <p className="text-blue-200 mb-4">
+                    {isTestCombat 
+                      ? "The enemy has finished their turn. Click 'Confirm' to proceed to the next turn."
+                      : "The enemy has finished their turn. All party members must click 'Confirm' to proceed."
+                    }
                   </p>
+                  
+                  {!isTestCombat && (
+                    <div className="mb-4 p-3 bg-gray-700 border border-blue-600 rounded">
+                      <p className="text-sm text-blue-200">
+                        <strong>Ready to continue:</strong> {partyMembersReady.size} / {combatSession?.partyMembers?.filter(m => m.hp > 0).length || 0} party members
+                      </p>
+                      {partyMembersReady.size > 0 && (
+                        <div className="mt-2 text-xs text-blue-300">
+                          Waiting for: {combatSession?.partyMembers
+                            ?.filter(m => m.hp > 0 && !partyMembersReady.has(m.userId))
+                            ?.map(m => m.name)
+                            ?.join(', ') || 'None'}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="flex flex-col sm:flex-row gap-3 justify-center items-center">
+                    <button
+                      onClick={handleProceedAfterEnemyTurn}
+                      disabled={!isTestCombat && partyMembersReady.has(user?.uid)}
+                      className={`fantasy-button px-8 py-3 text-lg font-semibold ${
+                        !isTestCombat && partyMembersReady.has(user?.uid)
+                          ? 'bg-green-700 cursor-not-allowed'
+                          : 'bg-blue-600 hover:bg-blue-700 shadow-lg'
+                      }`}
+                    >
+                      {!isTestCombat && partyMembersReady.has(user?.uid) 
+                        ? '✓ Ready' 
+                        : 'Confirm'
+                      }
+                    </button>
+                    
+                    {isTestCombat && (
+                      <button
+                        onClick={() => {
+                          setEnemyTurnComplete(false);
+                          setPartyMembersReady(new Set());
+                          advanceTurn();
+                        }}
+                        className="fantasy-button px-6 py-3 bg-gray-600 hover:bg-gray-700 text-white"
+                      >
+                        Skip Confirmation
+                      </button>
+                    )}
+                  </div>
+                  
+                  <div className="mt-4 p-3 bg-yellow-900/20 border border-yellow-600 rounded">
+                    <p className="text-sm text-yellow-200">
+                      <strong>Note:</strong> Review the battle log and enemy actions before continuing to the next turn.
+                    </p>
+                  </div>
                 </div>
               </div>
-            </div>
-          )}
+            )}
 
-        {/* Processing Turn Indicator */}
-        {processingTurn && !isEnemyTurn && (
-          <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-lg">
-            <div className="flex items-center justify-center">
-              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-amber-600"></div>
-              <span className="ml-2 text-amber-600 font-medium">Processing turn...</span>
-            </div>
-          </div>
-        )}
-
-        {/* Team Up Opportunities */}
-        {teamUpOpportunities.length > 0 && (
-          <div className="mb-6 p-4 bg-purple-50 border border-purple-200 rounded-lg">
-            <h3 className="font-bold text-purple-800 mb-2">🤝 Team Up Opportunities</h3>
-            <div className="space-y-2">
-              {teamUpOpportunities.map((opportunity, index) => (
-                <div key={index} className="text-purple-700">
-                  <strong>{opportunity.classes.join(' + ')}:</strong> {opportunity.description}
+            {/* Processing Turn Indicator */}
+            {processingTurn && !isEnemyTurn && (
+              <div className="fantasy-card bg-amber-900/20 border-amber-700">
+                <div className="flex items-center justify-center">
+                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-amber-500"></div>
+                  <span className="ml-2 text-amber-300 font-medium">Processing turn...</span>
                 </div>
-              ))}
-            </div>
-          </div>
-        )}
+              </div>
+            )}
 
-        {/* Fight! Confirmation */}
-        {combatSession?.combatState === 'ready' && !combatReady && (
-          <div className="mb-6 p-8 bg-red-50 border-2 border-red-300 rounded-lg">
-            <div className="text-center">
-              <h4 className="font-bold text-red-800 mb-4 text-2xl">⚔️ Combat Ready!</h4>
-              <p className="text-red-700 mb-6 text-lg">
-                All combatants are in position. Click 'Fight!' to begin the battle.
-              </p>
-              <button
-                onClick={beginCombat}
-                disabled={processingTurn}
-                className="fantasy-button px-12 py-4 text-xl font-bold bg-red-600 hover:bg-red-700 shadow-lg"
-              >
-                {processingTurn ? 'Preparing...' : 'Fight!'}
-              </button>
-            </div>
+            {/* Fight! Confirmation */}
+            {combatSession?.combatState === 'ready' && !combatReady && (
+              <div className="fantasy-card bg-red-900/20 border-red-700">
+                <div className="text-center">
+                  <h4 className="font-bold text-red-300 mb-4 text-2xl">⚔️ Combat Ready!</h4>
+                  <p className="text-red-200 mb-6 text-lg">
+                    All combatants are in position. Click 'Fight!' to begin the battle.
+                  </p>
+                  <button
+                    onClick={beginCombat}
+                    disabled={processingTurn}
+                    className="fantasy-button px-12 py-4 text-xl font-bold bg-red-600 hover:bg-red-700 shadow-lg"
+                  >
+                    {processingTurn ? 'Preparing...' : 'Fight!'}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
-        )}
 
-        {/* Player Turn Complete Confirmation */}
-        {turnComplete && (
-          <div className="mb-6 p-6 bg-green-50 border-2 border-green-300 rounded-lg">
-            <div className="text-center">
-              <h4 className="font-bold text-green-800 mb-3 text-xl">✅ Turn Complete</h4>
-              <p className="text-green-700 mb-4">
-                Your action has been executed. Click 'Confirm' to proceed to the next turn.
-              </p>
-              <button
-                onClick={confirmTurnComplete}
-                className="fantasy-button px-8 py-3 text-lg font-semibold bg-green-600 hover:bg-green-700 shadow-lg"
-              >
-                Confirm
-              </button>
-            </div>
+          {/* Right Column - Additional Info */}
+          <div className="xl:col-span-1 space-y-6">
+            {/* Damage Animation */}
+            {showDamageAnimation && damageAnimation && (
+              <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
+                <div className={`animate-bounce text-6xl font-bold px-6 py-4 rounded-lg shadow-lg ${
+                  damageAnimation.type === 'healing' 
+                    ? 'text-green-400 bg-green-900/80' 
+                    : 'text-red-400 bg-red-900/80'
+                }`}>
+                  {damageAnimation.type === 'healing' ? '+' : '-'}{damageAnimation.damage}
+                </div>
+              </div>
+            )}
+
+            {/* Player Death Screen */}
+            {playerDied && deadPlayer && (
+              <div className="fantasy-card bg-red-900/20 border-red-700">
+                <div className="text-center py-8">
+                  <div className="text-6xl mb-4">💀</div>
+                  <h1 className="text-3xl font-bold text-red-300 mb-4">Character Death</h1>
+                  <div className="text-xl text-red-200 mb-6">
+                    {deadPlayer.name} has fallen in battle...
+                  </div>
+                  <div className="bg-gray-700 p-6 rounded-lg border border-red-600 mb-6">
+                    <h2 className="text-lg font-semibold text-gray-100 mb-2">Fallen Hero</h2>
+                    <p className="text-gray-300 mb-2">
+                      <strong>Name:</strong> {deadPlayer.name}
+                    </p>
+                    <p className="text-gray-300 mb-2">
+                      <strong>Class:</strong> {deadPlayer.class}
+                    </p>
+                    <p className="text-gray-300 mb-2">
+                      <strong>Level:</strong> {deadPlayer.level}
+                    </p>
+                    <p className="text-gray-300">
+                      <strong>Final HP:</strong> {deadPlayer.hp}/{deadPlayer.maxHp}
+                    </p>
+                  </div>
+                  <div className="space-y-3">
+                    <p className="text-gray-300">
+                      Your character has been defeated. You must create a new character to continue.
+                    </p>
+                    <button
+                      onClick={handlePlayerDeath}
+                      className="fantasy-button bg-red-600 hover:bg-red-700"
+                    >
+                      Create New Character
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
-        )}
-              </div>
-            </div>
-      
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left column - Combat info and actions */}
-        <div className="lg:col-span-2 space-y-6">
-          {/* ... existing combat content ... */}
-            </div>
-            
-        {/* Right column - Battle Log */}
-        <div className="lg:col-span-1">
-          <div className="bg-gray-800 rounded-lg p-4 h-96 overflow-y-auto">
-            <h3 className="text-lg font-semibold mb-4 text-yellow-400">Battle Log</h3>
-            <div className="space-y-2">
-              {battleLog.length === 0 ? (
-                <p className="text-gray-400 text-sm">No actions recorded yet...</p>
-              ) : (
-                battleLog.map((entry) => (
-                  <div key={entry.id} className="text-sm border-l-2 pl-3 py-1">
-                    <div className="flex justify-between items-start mb-1">
-                      <span className="text-gray-400 text-xs">{entry.timestamp}</span>
-                      <span className="text-blue-400 text-xs">R{entry.round} T{entry.turn}</span>
-              </div>
-                    <div className={`${
-                      entry.type === 'damage' ? 'text-red-400' :
-                      entry.type === 'healing' ? 'text-green-400' :
-                      entry.type === 'death' ? 'text-red-600 font-semibold' :
-                      entry.type === 'status_effect' ? 'text-purple-400' :
-                      entry.type === 'action_failed' ? 'text-orange-400' :
-                      entry.type === 'error' ? 'text-red-500' :
-                      'text-white'
-                    }`}>
-                      {entry.description}
-            </div>
-          </div>
-                ))
-              )}
-          </div>
-              </div>
-              </div>
-              </div>
+        </div>
+      </div>
     </div>
   );
 } 

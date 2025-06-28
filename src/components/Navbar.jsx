@@ -37,10 +37,10 @@ export default function Navbar() {
   const displayName = userProfile?.username || user?.email;
 
   return (
-    <nav className="bg-stone-800 text-white shadow-lg">
+    <nav className="bg-gray-900 text-gray-100 shadow-lg border-b border-gray-700">
       <div className="fantasy-container">
         <div className="flex justify-between items-center">
-          <Link to="/" className="text-2xl font-bold font-['Cinzel']">
+          <Link to="/" className="text-2xl font-bold font-['Cinzel'] text-amber-400">
             DND-V1
           </Link>
           <div className="flex items-center space-x-4">
@@ -61,21 +61,21 @@ export default function Navbar() {
                 <div className="relative">
                   <button
                     onClick={() => setShowProfileDropdown(!showProfileDropdown)}
-                    className="fantasy-button bg-stone-700 hover:bg-stone-600"
+                    className="fantasy-button bg-gray-700 hover:bg-gray-600"
                   >
                     {displayName}
                   </button>
                   
                   {showProfileDropdown && (
-                    <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-stone-200 z-50">
+                    <div className="absolute right-0 mt-2 w-48 bg-gray-800 rounded-lg shadow-lg border border-gray-600 z-50">
                       <div className="py-2">
-                        <div className="px-4 py-2 text-sm text-stone-700 border-b border-stone-200">
+                        <div className="px-4 py-2 text-sm text-gray-200 border-b border-gray-600">
                           <div className="font-medium">{displayName}</div>
-                          <div className="text-xs text-stone-500">{user.email}</div>
+                          <div className="text-xs text-gray-400">{user.email}</div>
                         </div>
                         <button
                           onClick={handleLogout}
-                          className="w-full text-left px-4 py-2 text-sm text-stone-700 hover:bg-stone-100"
+                          className="w-full text-left px-4 py-2 text-sm text-gray-200 hover:bg-gray-700"
                         >
                           Logout
                         </button>
