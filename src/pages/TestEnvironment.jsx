@@ -881,37 +881,37 @@ export default function TestEnvironment() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-100">
-      <div className="container mx-auto px-4 py-8">
+    <div className="min-h-screen bg-gray-900">
+      <div className="fantasy-container">
         {/* Header */}
-        <div className="mb-8">
-          <div className="flex items-center justify-between">
-            <h1 className="text-3xl font-bold text-gray-800">Test Environment</h1>
+        <div className="mb-6 sm:mb-8">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <h1 className="text-2xl sm:text-3xl font-bold text-gray-100">Test Environment</h1>
             <button
               onClick={handleBackToDashboard}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+              className="fantasy-button bg-blue-600 hover:bg-blue-700"
             >
               Back to Dashboard
             </button>
           </div>
-          <p className="text-gray-600 mt-2">
+          <p className="text-gray-300 mt-2 text-sm sm:text-base">
             Test action validation, dice rolling, and combat detection in a controlled environment.
           </p>
         </div>
 
         {/* Test Interface */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 sm:gap-8">
           {/* Input Section */}
           <div className="space-y-6">
             {/* Character Class Selection */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
+              <label className="block text-sm font-medium text-gray-200 mb-2">
                 Character Class
               </label>
               <select
                 value={selectedClass}
                 onChange={(e) => setSelectedClass(e.target.value)}
-                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="fantasy-input"
               >
                 <option value="Fighter">⚔️ Fighter</option>
                 <option value="Wizard">🔮 Wizard</option>
@@ -922,19 +922,19 @@ export default function TestEnvironment() {
               </select>
               
               {/* Character Stats Display */}
-              <div className="mt-3 p-3 bg-white border border-gray-300 rounded-lg">
-                <h4 className="font-semibold text-gray-800 mb-2">{testCharacter.name}</h4>
+              <div className="mt-3 p-3 bg-gray-700 border border-gray-600 rounded-lg">
+                <h4 className="font-semibold text-gray-100 mb-2">{testCharacter.name}</h4>
                 <div className="grid grid-cols-2 gap-2 text-sm">
-                  <div><strong>HP:</strong> {testCharacter.hp}/{testCharacter.maxHp}</div>
-                  <div><strong>AC:</strong> {testCharacter.ac}</div>
-                  <div><strong>STR:</strong> {testCharacter.strength}</div>
-                  <div><strong>DEX:</strong> {testCharacter.dexterity}</div>
-                  <div><strong>CON:</strong> {testCharacter.constitution}</div>
-                  <div><strong>INT:</strong> {testCharacter.intelligence}</div>
-                  <div><strong>WIS:</strong> {testCharacter.wisdom}</div>
-                  <div><strong>CHA:</strong> {testCharacter.charisma}</div>
+                  <div><strong className="text-gray-200">HP:</strong> <span className="text-gray-300">{testCharacter.hp}/{testCharacter.maxHp}</span></div>
+                  <div><strong className="text-gray-200">AC:</strong> <span className="text-gray-300">{testCharacter.ac}</span></div>
+                  <div><strong className="text-gray-200">STR:</strong> <span className="text-gray-300">{testCharacter.strength}</span></div>
+                  <div><strong className="text-gray-200">DEX:</strong> <span className="text-gray-300">{testCharacter.dexterity}</span></div>
+                  <div><strong className="text-gray-200">CON:</strong> <span className="text-gray-300">{testCharacter.constitution}</span></div>
+                  <div><strong className="text-gray-200">INT:</strong> <span className="text-gray-300">{testCharacter.intelligence}</span></div>
+                  <div><strong className="text-gray-200">WIS:</strong> <span className="text-gray-300">{testCharacter.wisdom}</span></div>
+                  <div><strong className="text-gray-200">CHA:</strong> <span className="text-gray-300">{testCharacter.charisma}</span></div>
                 </div>
-                <div className="mt-2 text-xs text-gray-600">
+                <div className="mt-2 text-xs text-gray-400">
                   <strong>Equipment:</strong> {testCharacter.equipment.weapon.name}, {testCharacter.equipment.armor.name}
                 </div>
               </div>
@@ -942,7 +942,7 @@ export default function TestEnvironment() {
 
             {/* Test Scenarios */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
+              <label className="block text-sm font-medium text-gray-200 mb-2">
                 Quick Test Scenarios
               </label>
               <div className="space-y-2">
@@ -950,10 +950,10 @@ export default function TestEnvironment() {
                   <button
                     key={index}
                     onClick={() => loadTestScenario(scenario)}
-                    className="w-full p-3 text-left bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                    className="w-full p-3 text-left bg-gray-700 border border-gray-600 rounded-lg hover:bg-gray-600 transition-colors"
                   >
-                    <div className="font-medium text-gray-800">{scenario.name}</div>
-                    <div className="text-sm text-gray-600 mt-1">
+                    <div className="font-medium text-gray-100">{scenario.name}</div>
+                    <div className="text-sm text-gray-300 mt-1">
                       {scenario.storyContext.substring(0, 80)}...
                     </div>
                   </button>
@@ -962,33 +962,33 @@ export default function TestEnvironment() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
+              <label className="block text-sm font-medium text-gray-200 mb-2">
                 Story Context
               </label>
               <textarea
                 value={storyContext}
                 onChange={(e) => setStoryContext(e.target.value)}
                 placeholder="Describe the environment, NPCs, and circumstances. For example: 'In a dark, misty swamp, a Drowned Priest emerges from the water, chanting dark spells. The air is thick with malevolence.'"
-                className="w-full h-32 p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+                className="fantasy-input h-32 resize-none"
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
+              <label className="block text-sm font-medium text-gray-200 mb-2">
                 Character Action
               </label>
               <textarea
                 value={testInput}
                 onChange={(e) => setTestInput(e.target.value)}
                 placeholder="Describe any action your character would take. The system will analyze it for skill checks, combat actions, or story interactions."
-                className="w-full h-24 p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+                className="fantasy-input h-24 resize-none"
               />
             </div>
 
             <button
               onClick={handleTestMessage}
               disabled={!testInput.trim()}
-              className="w-full px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+              className="w-full fantasy-button bg-green-600 hover:bg-green-700 disabled:bg-gray-600 disabled:cursor-not-allowed"
             >
               Test Action
             </button>
@@ -997,12 +997,12 @@ export default function TestEnvironment() {
           {/* Results Section */}
           <div className="space-y-6">
             {testResult && (
-              <div className="bg-white p-6 rounded-lg shadow-md">
+              <div className="fantasy-card">
                 <div className="flex items-center mb-4">
                   {testResult.type === 'combat' && (
                     <span className="text-2xl mr-2">⚔️</span>
                   )}
-                  <h3 className="text-lg font-semibold text-gray-800">
+                  <h3 className="text-lg font-semibold text-gray-100">
                     {testResult.type === 'combat' ? 'Combat Detected' : 
                      testResult.type === 'story' ? 'Story Response' : 
                      testResult.type === 'invalid' ? 'Invalid Action' : 'Test Result'}
@@ -1010,19 +1010,19 @@ export default function TestEnvironment() {
                 </div>
                 
                 <div className="prose max-w-none">
-                  <p className="text-gray-700 mb-4">{testResult.message}</p>
+                  <p className="text-gray-300 mb-4">{testResult.message}</p>
                   
                   {testResult.type === 'combat' && (
-                    <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-                      <h4 className="text-lg font-bold text-red-800">Combat Initiated!</h4>
-                      <p className="text-red-700 mb-2">
+                    <div className="bg-red-900/20 border border-red-600 rounded-lg p-4">
+                      <h4 className="text-lg font-bold text-red-400">Combat Initiated!</h4>
+                      <p className="text-red-300 mb-2">
                         Enemy Type: {testResult.enemyType}
                       </p>
                       <div className="space-y-2">
                         {testResult.enemies.map((enemy, index) => (
-                          <div key={index} className="flex justify-between items-center bg-white p-2 rounded">
-                            <span className="font-medium">{enemy.name}</span>
-                            <span className="text-sm text-gray-600">
+                          <div key={index} className="flex justify-between items-center bg-gray-700 p-2 rounded">
+                            <span className="font-medium text-gray-100">{enemy.name}</span>
+                            <span className="text-sm text-gray-300">
                               HP: {enemy.hp} | AC: {enemy.ac} | Level: {enemy.level}
                             </span>
                           </div>
@@ -1037,7 +1037,7 @@ export default function TestEnvironment() {
                             storyContext: testResult.storyContext
                           }
                         })}
-                        className="mt-3 px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
+                        className="mt-3 fantasy-button bg-red-600 hover:bg-red-700"
                       >
                         Enter Combat
                       </button>
@@ -1046,12 +1046,12 @@ export default function TestEnvironment() {
                   
                   {testResult.context && (
                     <div className="mt-4 space-y-2">
-                      <h5 className="font-semibold text-gray-800">Context Analysis:</h5>
+                      <h5 className="font-semibold text-gray-100">Context Analysis:</h5>
                       {testResult.context.environmentalFeatures.length > 0 && (
-                        <p><strong>Environment:</strong> {testResult.context.environmentalFeatures.join(', ')}</p>
+                        <p className="text-gray-300"><strong>Environment:</strong> {testResult.context.environmentalFeatures.join(', ')}</p>
                       )}
                       {testResult.context.npcs.length > 0 && (
-                        <p><strong>NPCs:</strong> {testResult.context.npcs.map(npc => `${npc.name} (${npc.role})`).join(', ')}</p>
+                        <p className="text-gray-300"><strong>NPCs:</strong> {testResult.context.npcs.map(npc => `${npc.name} (${npc.role})`).join(', ')}</p>
                       )}
                     </div>
                   )}

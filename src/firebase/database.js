@@ -12,7 +12,23 @@ import {
   onSnapshot,
   serverTimestamp 
 } from 'firebase/firestore';
-import { db } from './config';
+import { db, handleFirestoreError } from './config';
+
+// Helper function to handle Firestore errors
+const handleDatabaseError = (error, operation) => {
+  console.error(`Error in ${operation}:`, error);
+  
+  // Handle specific error types
+  if (error.code === 'unavailable' || error.code === 'deadline-exceeded') {
+    throw new Error('Network connection issue. Please check your internet connection and try again.');
+  } else if (error.code === 'permission-denied') {
+    throw new Error('Access denied. Please check your permissions.');
+  } else if (error.code === 'not-found') {
+    throw new Error('The requested data was not found.');
+  } else {
+    throw new Error(`Database error: ${error.message}`);
+  }
+};
 
 // User Profile Management
 export const createUserProfile = async (userId, userData) => {
@@ -26,8 +42,7 @@ export const createUserProfile = async (userId, userData) => {
     const docRef = await addDoc(collection(db, 'userProfiles'), profile);
     return { id: docRef.id, ...profile };
   } catch (error) {
-    console.error('Error creating user profile:', error);
-    throw error;
+    handleDatabaseError(error, 'createUserProfile');
   }
 };
 
@@ -46,8 +61,7 @@ export const getUserProfile = async (userId) => {
     const doc = querySnapshot.docs[0];
     return { id: doc.id, ...doc.data() };
   } catch (error) {
-    console.error('Error getting user profile:', error);
-    throw error;
+    handleDatabaseError(error, 'getUserProfile');
   }
 };
 
@@ -80,8 +94,7 @@ export const getUserProfiles = async (userIds) => {
     
     return profiles;
   } catch (error) {
-    console.error('Error getting user profiles:', error);
-    throw error;
+    handleDatabaseError(error, 'getUserProfiles');
   }
 };
 
@@ -98,8 +111,7 @@ export const updateUserProfile = async (userId, updates) => {
       updatedAt: serverTimestamp()
     });
   } catch (error) {
-    console.error('Error updating user profile:', error);
-    throw error;
+    handleDatabaseError(error, 'updateUserProfile');
   }
 };
 
@@ -112,8 +124,7 @@ export const checkUsernameAvailability = async (username) => {
     const querySnapshot = await getDocs(q);
     return querySnapshot.empty; // true if username is available
   } catch (error) {
-    console.error('Error checking username availability:', error);
-    throw error;
+    handleDatabaseError(error, 'checkUsernameAvailability');
   }
 };
 
@@ -130,8 +141,7 @@ export const saveCharacter = async (userId, partyId, characterData) => {
     const docRef = await addDoc(collection(db, 'characters'), character);
     return { id: docRef.id, ...character };
   } catch (error) {
-    console.error('Error saving character:', error);
-    throw error;
+    handleDatabaseError(error, 'saveCharacter');
   }
 };
 
@@ -148,8 +158,7 @@ export const getUserCharacters = async (userId) => {
       ...doc.data()
     }));
   } catch (error) {
-    console.error('Error getting user characters:', error);
-    throw error;
+    handleDatabaseError(error, 'getUserCharacters');
   }
 };
 
@@ -169,8 +178,7 @@ export const getCharacterByUserAndParty = async (userId, partyId) => {
     const doc = querySnapshot.docs[0];
     return { id: doc.id, ...doc.data() };
   } catch (error) {
-    console.error('Error getting character by user and party:', error);
-    throw error;
+    handleDatabaseError(error, 'getCharacterByUserAndParty');
   }
 };
 
@@ -186,8 +194,7 @@ export const getPartyCharacters = async (partyId) => {
       ...doc.data()
     }));
   } catch (error) {
-    console.error('Error getting party characters:', error);
-    throw error;
+    handleDatabaseError(error, 'getPartyCharacters');
   }
 };
 
@@ -199,8 +206,7 @@ export const updateCharacter = async (characterId, updates) => {
       updatedAt: serverTimestamp()
     });
   } catch (error) {
-    console.error('Error updating character:', error);
-    throw error;
+    handleDatabaseError(error, 'updateCharacter');
   }
 };
 
@@ -217,8 +223,7 @@ export const createParty = async (dmId, partyData) => {
     const docRef = await addDoc(collection(db, 'parties'), party);
     return { id: docRef.id, ...party };
   } catch (error) {
-    console.error('Error creating party:', error);
-    throw error;
+    handleDatabaseError(error, 'createParty');
   }
 };
 
@@ -241,7 +246,7 @@ export const getUserParties = async (userId) => {
     
     return parties;
   } catch (error) {
-    throw error;
+    handleDatabaseError(error, 'getUserParties');
   }
 };
 
@@ -265,8 +270,7 @@ export const getPublicParties = async () => {
     
     return parties;
   } catch (error) {
-    console.error('Error getting public parties:', error);
-    throw error;
+    handleDatabaseError(error, 'getPublicParties');
   }
 };
 
@@ -289,8 +293,7 @@ export const joinParty = async (partyId, userId) => {
       updatedAt: serverTimestamp()
     });
   } catch (error) {
-    console.error('Error joining party:', error);
-    throw error;
+    handleDatabaseError(error, 'joinParty');
   }
 };
 
@@ -332,8 +335,7 @@ export const disbandParty = async (partyId, dmId) => {
     await Promise.all(storyDeletePromises);
     
   } catch (error) {
-    console.error('Error disbanding party:', error);
-    throw error;
+    handleDatabaseError(error, 'disbandParty');
   }
 };
 
@@ -352,8 +354,7 @@ export const getPartyByInviteCode = async (inviteCode) => {
     const doc = querySnapshot.docs[0];
     return { id: doc.id, ...doc.data() };
   } catch (error) {
-    console.error('Error getting party by invite code:', error);
-    throw error;
+    handleDatabaseError(error, 'getPartyByInviteCode');
   }
 };
 
@@ -368,8 +369,7 @@ export const getPartyById = async (partyId) => {
     
     return { id: partyDoc.id, ...partyDoc.data() };
   } catch (error) {
-    console.error('Error getting party by ID:', error);
-    throw error;
+    handleDatabaseError(error, 'getPartyById');
   }
 };
 
@@ -385,8 +385,7 @@ export const saveCampaign = async (partyId, campaignData) => {
     const docRef = await addDoc(collection(db, 'campaigns'), campaign);
     return { id: docRef.id, ...campaign };
   } catch (error) {
-    console.error('Error saving campaign:', error);
-    throw error;
+    handleDatabaseError(error, 'saveCampaign');
   }
 };
 
@@ -405,8 +404,7 @@ export const getCampaignByParty = async (partyId) => {
     const doc = querySnapshot.docs[0];
     return { id: doc.id, ...doc.data() };
   } catch (error) {
-    console.error('Error getting campaign:', error);
-    throw error;
+    handleDatabaseError(error, 'getCampaignByParty');
   }
 };
 
@@ -418,8 +416,7 @@ export const updateCampaign = async (campaignId, updates) => {
       updatedAt: serverTimestamp()
     });
   } catch (error) {
-    console.error('Error updating campaign:', error);
-    throw error;
+    handleDatabaseError(error, 'updateCampaign');
   }
 };
 
@@ -436,8 +433,7 @@ export const saveCombat = async (partyId, combatData) => {
     const docRef = await addDoc(collection(db, 'combats'), combat);
     return { id: docRef.id, ...combat };
   } catch (error) {
-    console.error('Error saving combat:', error);
-    throw error;
+    handleDatabaseError(error, 'saveCombat');
   }
 };
 
@@ -458,8 +454,7 @@ export const getActiveCombat = async (partyId) => {
     const doc = querySnapshot.docs[0];
     return { id: doc.id, ...doc.data() };
   } catch (error) {
-    console.error('Error getting active combat:', error);
-    throw error;
+    handleDatabaseError(error, 'getActiveCombat');
   }
 };
 
@@ -471,8 +466,7 @@ export const updateCombat = async (combatId, updates) => {
       updatedAt: serverTimestamp()
     });
   } catch (error) {
-    console.error('Error updating combat:', error);
-    throw error;
+    handleDatabaseError(error, 'updateCombat');
   }
 };
 
@@ -535,8 +529,7 @@ export const createCampaignStory = async (partyId) => {
     const docRef = await addDoc(collection(db, 'campaignStories'), story);
     return { id: docRef.id, ...story };
   } catch (error) {
-    console.error('Error creating campaign story:', error);
-    throw error;
+    handleDatabaseError(error, 'createCampaignStory');
   }
 };
 
@@ -555,8 +548,7 @@ export const getCampaignStory = async (partyId) => {
     const doc = querySnapshot.docs[0];
     return { id: doc.id, ...doc.data() };
   } catch (error) {
-    console.error('Error getting campaign story:', error);
-    throw error;
+    handleDatabaseError(error, 'getCampaignStory');
   }
 };
 
@@ -568,8 +560,7 @@ export const updateCampaignStory = async (storyId, updates) => {
       lastUpdated: serverTimestamp()
     });
   } catch (error) {
-    console.error('Error updating campaign story:', error);
-    throw error;
+    handleDatabaseError(error, 'updateCampaignStory');
   }
 };
 
@@ -592,8 +583,7 @@ export const addStoryMessage = async (storyId, message) => {
     
     return newMessage;
   } catch (error) {
-    console.error('Error adding story message:', error);
-    throw error;
+    handleDatabaseError(error, 'addStoryMessage');
   }
 };
 
@@ -611,8 +601,7 @@ export const setPlayerReady = async (storyId, userId) => {
       });
     }
   } catch (error) {
-    console.error('Error setting player ready:', error);
-    throw error;
+    handleDatabaseError(error, 'setPlayerReady');
   }
 };
 
@@ -627,8 +616,7 @@ export const subscribeToCampaignStory = (storyId, callback) => {
       }
     });
   } catch (error) {
-    console.error('Error subscribing to campaign story:', error);
-    throw error;
+    handleDatabaseError(error, 'subscribeToCampaignStory');
   }
 };
 
@@ -640,8 +628,7 @@ export const setCurrentSpeaker = async (storyId, speakerData) => {
       lastUpdated: serverTimestamp()
     });
   } catch (error) {
-    console.error('Error setting current speaker:', error);
-    throw error;
+    handleDatabaseError(error, 'setCurrentSpeaker');
   }
 };
 
@@ -653,8 +640,7 @@ export const setCurrentController = async (storyId, controllerId) => {
       lastUpdated: serverTimestamp()
     });
   } catch (error) {
-    console.error('Error setting current controller:', error);
-    throw error;
+    handleDatabaseError(error, 'setCurrentController');
   }
 };
 
@@ -675,8 +661,7 @@ export const createCombatSession = async (partyId, combatData) => {
     const docRef = await addDoc(collection(db, 'combatSessions'), combat);
     return { id: docRef.id, ...combat };
   } catch (error) {
-    console.error('Error creating combat session:', error);
-    throw error;
+    handleDatabaseError(error, 'createCombatSession');
   }
 };
 
@@ -696,8 +681,7 @@ export const getCombatSession = async (partyId) => {
     const doc = querySnapshot.docs[0];
     return { id: doc.id, ...doc.data() };
   } catch (error) {
-    console.error('Error getting combat session:', error);
-    throw error;
+    handleDatabaseError(error, 'getCombatSession');
   }
 };
 
@@ -709,8 +693,7 @@ export const updateCombatSession = async (combatId, updates) => {
       updatedAt: serverTimestamp()
     });
   } catch (error) {
-    console.error('Error updating combat session:', error);
-    throw error;
+    handleDatabaseError(error, 'updateCombatSession');
   }
 };
 
@@ -730,8 +713,7 @@ export const subscribeToCombatSession = (partyId, callback) => {
       }
     });
   } catch (error) {
-    console.error('Error subscribing to combat session:', error);
-    throw error;
+    handleDatabaseError(error, 'subscribeToCombatSession');
   }
 };
 
@@ -774,13 +756,7 @@ export const saveCharacterPreset = async (userId, presetData) => {
     console.log('Profile updated successfully');
     return preset;
   } catch (error) {
-    console.error('Error saving character preset:', error);
-    console.error('Error details:', {
-      message: error.message,
-      code: error.code,
-      stack: error.stack
-    });
-    throw error;
+    handleDatabaseError(error, 'saveCharacterPreset');
   }
 };
 
@@ -793,8 +769,7 @@ export const getUserCharacterPresets = async (userId) => {
     
     return profile.characterPresets || [];
   } catch (error) {
-    console.error('Error getting user character presets:', error);
-    throw error;
+    handleDatabaseError(error, 'getUserCharacterPresets');
   }
 };
 
@@ -814,8 +789,7 @@ export const deleteCharacterPreset = async (userId, presetId) => {
       updatedAt: serverTimestamp()
     });
   } catch (error) {
-    console.error('Error deleting character preset:', error);
-    throw error;
+    handleDatabaseError(error, 'deleteCharacterPreset');
   }
 };
 
@@ -839,8 +813,7 @@ export const updateCampaignMetadata = async (storyId, updates) => {
     
     return updatedMetadata;
   } catch (error) {
-    console.error('Error updating campaign metadata:', error);
-    throw error;
+    handleDatabaseError(error, 'updateCampaignMetadata');
   }
 };
 
@@ -864,8 +837,7 @@ export const saveCampaignSession = async (storyId, sessionData) => {
     
     return newSession;
   } catch (error) {
-    console.error('Error saving campaign session:', error);
-    throw error;
+    handleDatabaseError(error, 'saveCampaignSession');
   }
 };
 
@@ -891,8 +863,7 @@ export const addCampaignNote = async (storyId, note) => {
     
     return newNote;
   } catch (error) {
-    console.error('Error adding campaign note:', error);
-    throw error;
+    handleDatabaseError(error, 'addCampaignNote');
   }
 };
 
@@ -904,8 +875,7 @@ export const updateCampaignGoal = async (storyId, goal) => {
       lastUpdated: serverTimestamp()
     });
   } catch (error) {
-    console.error('Error updating campaign goal:', error);
-    throw error;
+    handleDatabaseError(error, 'updateCampaignGoal');
   }
 };
 
@@ -923,8 +893,7 @@ export const saveStoryState = async (storyId, storyState) => {
     
     return storyState;
   } catch (error) {
-    console.error('Error saving story state:', error);
-    throw error;
+    handleDatabaseError(error, 'saveStoryState');
   }
 };
 
@@ -936,8 +905,7 @@ export const getStoryState = async (storyId) => {
     
     return storyData.storyState || null;
   } catch (error) {
-    console.error('Error getting story state:', error);
-    throw error;
+    handleDatabaseError(error, 'getStoryState');
   }
 };
 
@@ -961,8 +929,7 @@ export const updateStoryState = async (storyId, updates) => {
     
     return updatedState;
   } catch (error) {
-    console.error('Error updating story state:', error);
-    throw error;
+    handleDatabaseError(error, 'updateStoryState');
   }
 };
 
@@ -989,8 +956,7 @@ export const createEnhancedCombatSession = async (partyId, combatData) => {
     const docRef = await addDoc(collection(db, 'combatSessions'), combat);
     return { id: docRef.id, ...combat };
   } catch (error) {
-    console.error('Error creating enhanced combat session:', error);
-    throw error;
+    handleDatabaseError(error, 'createEnhancedCombatSession');
   }
 };
 
@@ -1002,8 +968,7 @@ export const updateCombatSessionWithNarrative = async (combatId, updates) => {
       updatedAt: serverTimestamp()
     });
   } catch (error) {
-    console.error('Error updating combat session with narrative:', error);
-    throw error;
+    handleDatabaseError(error, 'updateCombatSessionWithNarrative');
   }
 };
 
@@ -1039,8 +1004,7 @@ export const addStoryMessageWithMetadata = async (storyId, message, storyState =
     
     return newMessage;
   } catch (error) {
-    console.error('Error adding story message with metadata:', error);
-    throw error;
+    handleDatabaseError(error, 'addStoryMessageWithMetadata');
   }
 };
 
@@ -1060,7 +1024,6 @@ export const getStoryConsistencyData = async (storyId) => {
       plotThreads: storyData.storyState?.activePlotThreads || []
     };
   } catch (error) {
-    console.error('Error getting story consistency data:', error);
-    throw error;
+    handleDatabaseError(error, 'getStoryConsistencyData');
   }
 }; 

@@ -3,12 +3,15 @@ import { useEffect, useState } from 'react';
 import { onAuthChange, logoutUser } from '../firebase/auth';
 import { getUserProfile } from '../firebase/database';
 import { useNavigate } from 'react-router-dom';
+import { db } from '../firebase/config';
+import { collection, query, limit, getDocs } from 'firebase/firestore';
 
 export default function Navbar() {
   const [user, setUser] = useState(null);
   const [userProfile, setUserProfile] = useState(null);
   const [showProfileDropdown, setShowProfileDropdown] = useState(false);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState('connected');
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -26,6 +29,34 @@ export default function Navbar() {
       }
     });
     return () => unsubscribe();
+  }, [navigate]);
+
+  // Monitor Firestore connection status
+  useEffect(() => {
+    const checkConnection = async () => {
+      try {
+        // Try a simple read operation to test connection
+        const testQuery = query(collection(db, '_test'), limit(1));
+        await getDocs(testQuery);
+        setConnectionStatus('connected');
+      } catch (error) {
+        console.warn('Firestore connection issue detected:', error);
+        setConnectionStatus('disconnected');
+        
+        // Try to reconnect after a delay
+        setTimeout(() => {
+          setConnectionStatus('reconnecting');
+          checkConnection();
+        }, 5000);
+      }
+    };
+
+    checkConnection();
+    
+    // Check connection every 30 seconds
+    const interval = setInterval(checkConnection, 30000);
+    
+    return () => clearInterval(interval);
   }, []);
 
   const handleLogout = async () => {
@@ -46,6 +77,20 @@ export default function Navbar() {
           <Link to="/" className="text-xl sm:text-2xl font-bold font-['Cinzel'] text-amber-400">
             DND-V1
           </Link>
+          
+          {/* Connection Status Indicator */}
+          <div className="flex items-center space-x-2 mr-4">
+            <div className={`w-2 h-2 rounded-full ${
+              connectionStatus === 'connected' ? 'bg-green-500' :
+              connectionStatus === 'reconnecting' ? 'bg-yellow-500' :
+              'bg-red-500'
+            }`}></div>
+            <span className="text-xs text-gray-400 hidden sm:inline">
+              {connectionStatus === 'connected' ? 'Connected' :
+               connectionStatus === 'reconnecting' ? 'Reconnecting...' :
+               'Disconnected'}
+            </span>
+          </div>
           
           {/* Desktop Menu */}
           <div className="hidden md:flex items-center space-x-4">
