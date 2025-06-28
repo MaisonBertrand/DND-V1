@@ -184,11 +184,11 @@ export default function PartyManagement() {
 
         {/* Create Party Form */}
         {showCreateForm && (
-          <div className="fantasy-card bg-amber-50 mb-6">
-            <h2 className="text-xl font-bold text-stone-800 mb-4">Create New Party</h2>
+          <div className="fantasy-card bg-amber-900/20 border-amber-600 mb-6">
+            <h2 className="text-xl font-bold text-gray-100 mb-4">Create New Party</h2>
             <form onSubmit={handleCreateParty} className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-stone-700 mb-2">
+                <label className="block text-sm font-medium text-gray-200 mb-2">
                   Party Name
                 </label>
                 <input
@@ -201,7 +201,7 @@ export default function PartyManagement() {
               </div>
               
               <div>
-                <label className="block text-sm font-medium text-stone-700 mb-2">
+                <label className="block text-sm font-medium text-gray-200 mb-2">
                   Theme
                 </label>
                 <textarea
@@ -215,7 +215,7 @@ export default function PartyManagement() {
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-stone-700 mb-2">
+                  <label className="block text-sm font-medium text-gray-200 mb-2">
                     Max Players
                   </label>
                   <input
@@ -236,7 +236,7 @@ export default function PartyManagement() {
                     onChange={(e) => setNewParty(prev => ({ ...prev, isPublic: e.target.checked }))}
                     className="mr-2"
                   />
-                  <label htmlFor="isPublic" className="text-sm font-medium text-stone-700">
+                  <label htmlFor="isPublic" className="text-sm font-medium text-gray-200">
                     Public Party (visible to all users)
                   </label>
                 </div>
@@ -253,7 +253,7 @@ export default function PartyManagement() {
                 <button
                   type="button"
                   onClick={() => setShowCreateForm(false)}
-                  className="fantasy-button bg-stone-600 hover:bg-stone-700"
+                  className="fantasy-button bg-gray-600 hover:bg-gray-700"
                   disabled={loading}
                 >
                   Cancel
@@ -265,9 +265,9 @@ export default function PartyManagement() {
 
         {/* My Parties */}
         <div className="mb-8">
-          <h2 className="text-2xl font-bold text-stone-800 mb-4">My Parties</h2>
+          <h2 className="text-2xl font-bold text-gray-100 mb-4">My Parties</h2>
           {parties.length === 0 ? (
-            <div className="text-center py-8 text-stone-600">
+            <div className="text-center py-8 text-gray-300">
               <p>You haven't joined any parties yet.</p>
               <p>Click "Create New Party" to get started!</p>
             </div>
@@ -277,24 +277,24 @@ export default function PartyManagement() {
                 const memberProfiles = partyMemberProfiles[party.id] || [];
                 
                 return (
-                <div key={party.id} className="fantasy-card bg-amber-50">
+                <div key={party.id} className="fantasy-card bg-amber-900/20 border-amber-600">
                   <div className="flex justify-between items-start mb-4">
-                    <h3 className="text-xl font-bold text-stone-800">{party.name}</h3>
-                    <span className="text-sm text-stone-600">
+                    <h3 className="text-xl font-bold text-gray-100">{party.name}</h3>
+                    <span className="text-sm text-gray-300">
                       {party.members?.length || 1}/{party.maxPlayers} players
                     </span>
                   </div>
                   
                     {party.description && (
                       <div className="mb-4">
-                        <span className="text-sm font-semibold text-stone-700">Theme: </span>
-                        <span className="text-stone-600">{party.description}</span>
+                        <span className="text-sm font-semibold text-gray-200">Theme: </span>
+                        <span className="text-gray-300">{party.description}</span>
                       </div>
                     )}
                     
                     {/* Party Members */}
                     <div className="mb-4">
-                      <h4 className="text-sm font-semibold text-stone-700 mb-2">Party Members:</h4>
+                      <h4 className="text-sm font-semibold text-gray-200 mb-2">Party Members:</h4>
                       <div className="space-y-1">
                         {memberProfiles.map((member, index) => {
                           const username = member.profile?.username || `User ${index + 1}`;
@@ -303,7 +303,7 @@ export default function PartyManagement() {
                           return (
                             <div key={member.userId} className="flex items-center justify-between text-sm">
                               <div className="flex items-center space-x-2">
-                                <span className="text-stone-600">{username}</span>
+                                <span className="text-gray-300">{username}</span>
                                 {isDM && (
                                   <span className="bg-amber-500 text-white text-xs px-2 py-1 rounded-full font-semibold">
                                     DM
@@ -311,7 +311,7 @@ export default function PartyManagement() {
                                 )}
                               </div>
                               {member.userId === user?.uid && (
-                                <span className="text-blue-600 text-xs font-medium">(You)</span>
+                                <span className="text-blue-400 text-xs font-medium">(You)</span>
                               )}
                             </div>
                           );
@@ -321,7 +321,7 @@ export default function PartyManagement() {
                   
                   {party.dmId === user.uid && (
                     <div className="mb-4">
-                      <label className="block text-sm font-medium text-stone-700 mb-2">
+                      <label className="block text-sm font-medium text-gray-200 mb-2">
                         Invite Code
                       </label>
                       <div className="flex items-center space-x-2">
@@ -329,7 +329,7 @@ export default function PartyManagement() {
                           type="text"
                           value={party.inviteCode}
                           readOnly
-                          className="fantasy-input bg-stone-100"
+                          className="fantasy-input bg-gray-700"
                         />
                         <button
                           onClick={() => copyInviteCode(party.inviteCode)}
@@ -367,8 +367,8 @@ export default function PartyManagement() {
 
         {/* Join Party */}
         <div>
-          <h2 className="text-2xl font-bold text-stone-800 mb-4">Join a Party</h2>
-          <div className="fantasy-card bg-amber-50">
+          <h2 className="text-2xl font-bold text-gray-100 mb-4">Join a Party</h2>
+          <div className="fantasy-card bg-amber-900/20 border-amber-600">
             <div className="flex items-center space-x-4">
               <input
                 type="text"

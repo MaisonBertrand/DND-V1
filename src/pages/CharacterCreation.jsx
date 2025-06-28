@@ -650,13 +650,13 @@ export default function CharacterCreation() {
     <div className="fantasy-container py-8">
       <div className="fantasy-card">
         <h1 className="fantasy-title text-center">Create Your Character</h1>
-        <p className="text-center text-stone-600 mb-6">
+        <p className="text-center text-gray-300 mb-6">
           Create your character to join the campaign. Once created, you'll be automatically ready to start the adventure!
         </p>
         
         {/* Character Preset Management */}
-        <div className="mb-8 p-4 bg-stone-50 rounded-lg border border-stone-200">
-          <h3 className="text-lg font-semibold text-stone-800 mb-4">Character Presets</h3>
+        <div className="mb-8 p-4 bg-gray-700 rounded-lg border border-gray-600">
+          <h3 className="text-lg font-semibold text-gray-100 mb-4">Character Presets</h3>
           <div className="flex flex-wrap gap-3 mb-4">
             <button
               type="button"
@@ -675,7 +675,7 @@ export default function CharacterCreation() {
             </button>
           </div>
           {characterPresets.length > 0 && (
-            <p className="text-sm text-stone-600">
+            <p className="text-sm text-gray-300">
               Save your current character configuration as a preset to easily recreate it for other parties.
             </p>
           )}
@@ -685,7 +685,7 @@ export default function CharacterCreation() {
           {/* Basic Information */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
-              <label className="block text-sm font-medium text-stone-700 mb-2">
+              <label className="block text-sm font-medium text-gray-200 mb-2">
                 Character Name
               </label>
               <input
@@ -698,7 +698,7 @@ export default function CharacterCreation() {
             </div>
             
             <div>
-              <label className="block text-sm font-medium text-stone-700 mb-2">
+              <label className="block text-sm font-medium text-gray-200 mb-2">
                 Race
               </label>
               <select
@@ -715,7 +715,7 @@ export default function CharacterCreation() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-stone-700 mb-2">
+              <label className="block text-sm font-medium text-gray-200 mb-2">
                 Class
               </label>
               <select
@@ -732,7 +732,7 @@ export default function CharacterCreation() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-stone-700 mb-2">
+              <label className="block text-sm font-medium text-gray-200 mb-2">
                 Background
               </label>
               <select
@@ -749,7 +749,7 @@ export default function CharacterCreation() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-stone-700 mb-2">
+              <label className="block text-sm font-medium text-gray-200 mb-2">
                 Alignment
               </label>
               <select
@@ -768,11 +768,11 @@ export default function CharacterCreation() {
 
           {/* Ability Scores */}
           <div>
-            <h2 className="text-2xl font-bold text-stone-800 mb-4">Ability Scores</h2>
+            <h2 className="text-2xl font-bold text-gray-100 mb-4">Ability Scores</h2>
             
             {/* Ability Score Generation Method */}
             <div className="mb-6">
-              <label className="block text-sm font-medium text-stone-700 mb-2">
+              <label className="block text-sm font-medium text-gray-200 mb-2">
                 Ability Score Generation Method
               </label>
               <div className="flex space-x-4 mb-4">
@@ -785,7 +785,7 @@ export default function CharacterCreation() {
                     onChange={(e) => setAbilityScoreMethod(e.target.value)}
                     className="mr-2"
                   />
-                  Standard Array (15, 14, 13, 12, 10, 8)
+                  <span className="text-gray-200">Standard Array (15, 14, 13, 12, 10, 8)</span>
                 </label>
                 <label className="flex items-center">
                   <input
@@ -796,7 +796,7 @@ export default function CharacterCreation() {
                     onChange={(e) => setAbilityScoreMethod(e.target.value)}
                     className="mr-2"
                   />
-                  Roll 4d6, Drop Lowest
+                  <span className="text-gray-200">Roll 4d6, Drop Lowest</span>
                 </label>
               </div>
               
@@ -804,7 +804,7 @@ export default function CharacterCreation() {
                 <button
                   type="button"
                   onClick={applyStandardArray}
-                  className="fantasy-button bg-stone-600 hover:bg-stone-700"
+                  className="fantasy-button bg-gray-600 hover:bg-gray-700"
                 >
                   Apply Standard Array
                 </button>
@@ -816,29 +816,29 @@ export default function CharacterCreation() {
                     type="button"
                     onClick={rollAllAbilityScores}
                     disabled={hasRolled}
-                    className={`fantasy-button ${hasRolled ? 'bg-stone-400 cursor-not-allowed' : 'bg-stone-600 hover:bg-stone-700'}`}
+                    className={`fantasy-button ${hasRolled ? 'bg-gray-500 cursor-not-allowed' : 'bg-gray-600 hover:bg-gray-700'}`}
                   >
                     {hasRolled ? 'Scores Already Rolled' : 'Roll Ability Scores'}
                   </button>
                   {hasRolled && (
-                    <p className="text-sm text-stone-600">
+                    <p className="text-sm text-gray-300">
                       You can only roll once, but you can reassign scores as many times as you like.
                     </p>
                   )}
                   {rolledScores.length > 0 && (
-                    <div className="bg-stone-50 border border-stone-200 rounded-lg p-4">
-                      <h3 className="font-semibold text-stone-800 mb-2">Rolled Scores</h3>
+                    <div className="bg-gray-700 border border-gray-600 rounded-lg p-4">
+                      <h3 className="font-semibold text-gray-100 mb-2">Rolled Scores</h3>
                       <div className="flex flex-wrap gap-2 mb-4">
                         {unassignedScores.map((score, index) => (
                           <span
                             key={`${score}-${index}`}
-                            className="bg-amber-100 border border-amber-300 text-amber-800 px-3 py-1 rounded-full text-sm font-medium"
+                            className="bg-amber-900 text-amber-200 border border-amber-600 px-3 py-1 rounded-full text-sm font-medium"
                           >
                             {score}
                           </span>
                         ))}
                       </div>
-                      <p className="text-sm text-stone-600">
+                      <p className="text-sm text-gray-300">
                         Click on an ability score below to assign your rolled scores. You can reassign them as many times as you want.
                       </p>
                     </div>
@@ -854,19 +854,19 @@ export default function CharacterCreation() {
                 const currentValue = character[ability];
                 
                 return (
-                  <div key={ability} className="border border-stone-200 rounded-lg p-4">
-                    <label className="block text-sm font-medium text-stone-700 mb-2 capitalize">
+                  <div key={ability} className="border border-gray-600 rounded-lg p-4">
+                    <label className="block text-sm font-medium text-gray-200 mb-2 capitalize">
                       {ability}
                     </label>
                     
                     {assignedScore ? (
                       // Show assigned score
                       <div className="space-y-2">
-                        <div className="text-lg font-bold text-amber-700">{assignedScore}</div>
+                        <div className="text-lg font-bold text-amber-400">{assignedScore}</div>
                         <button
                           type="button"
                           onClick={() => unassignScore(ability)}
-                          className="text-xs text-red-600 hover:text-red-800"
+                          className="text-xs text-red-400 hover:text-red-300"
                         >
                           Unassign
                         </button>
@@ -890,7 +890,7 @@ export default function CharacterCreation() {
                                 key={`${score}-${index}`}
                                 type="button"
                                 onClick={() => assignScoreToAbility(score, ability)}
-                                className="bg-amber-100 hover:bg-amber-200 border border-amber-300 text-amber-800 px-2 py-1 rounded text-xs font-medium"
+                                className="bg-amber-900 hover:bg-amber-800 border border-amber-600 text-amber-200 px-2 py-1 rounded text-xs font-medium"
                               >
                                 {score}
                               </button>
@@ -900,7 +900,7 @@ export default function CharacterCreation() {
                       </div>
                     )}
                     
-                    <div className="text-xs text-stone-500 mt-1">
+                    <div className="text-xs text-gray-400 mt-1">
                       Modifier: {Math.floor((currentValue - 10) / 2)}
                     </div>
                   </div>
@@ -911,7 +911,7 @@ export default function CharacterCreation() {
 
           {/* Physical Description */}
           <div>
-            <h2 className="text-2xl font-bold text-stone-800 mb-4">Physical Description</h2>
+            <h2 className="text-2xl font-bold text-gray-100 mb-4">Physical Description</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <input
                 type="text"
@@ -960,10 +960,10 @@ export default function CharacterCreation() {
 
           {/* Character Personality */}
           <div>
-            <h2 className="text-2xl font-bold text-stone-800 mb-4">Personality</h2>
+            <h2 className="text-2xl font-bold text-gray-100 mb-4">Personality</h2>
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-stone-700 mb-2">
+                <label className="block text-sm font-medium text-gray-200 mb-2">
                   Personality Traits
                 </label>
                 <textarea
@@ -975,7 +975,7 @@ export default function CharacterCreation() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-stone-700 mb-2">
+                <label className="block text-sm font-medium text-gray-200 mb-2">
                   Ideals
                 </label>
                 <textarea
@@ -987,7 +987,7 @@ export default function CharacterCreation() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-stone-700 mb-2">
+                <label className="block text-sm font-medium text-gray-200 mb-2">
                   Bonds
                 </label>
                 <textarea
@@ -999,7 +999,7 @@ export default function CharacterCreation() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-stone-700 mb-2">
+                <label className="block text-sm font-medium text-gray-200 mb-2">
                   Flaws
                 </label>
                 <textarea
@@ -1015,7 +1015,7 @@ export default function CharacterCreation() {
 
           {/* Backstory */}
           <div>
-            <h2 className="text-2xl font-bold text-stone-800 mb-4">Backstory</h2>
+            <h2 className="text-2xl font-bold text-gray-100 mb-4">Backstory</h2>
             <textarea
               value={character.backstory}
               onChange={(e) => handleInputChange('backstory', e.target.value)}
@@ -1027,16 +1027,16 @@ export default function CharacterCreation() {
 
           {/* Equipment */}
           <div>
-            <h2 className="text-2xl font-bold text-stone-800 mb-4">Starting Equipment</h2>
+            <h2 className="text-2xl font-bold text-gray-100 mb-4">Starting Equipment</h2>
             
             {/* Weapon Selection */}
             {character.class && weaponOptions[character.class] && (
               <div className="mb-6">
-                <h3 className="text-lg font-semibold text-stone-800 mb-3">Choose Your Weapons</h3>
+                <h3 className="text-lg font-semibold text-gray-100 mb-3">Choose Your Weapons</h3>
                 <div className="space-y-4">
                   {Object.entries(weaponOptions[character.class]).map(([category, weapons]) => (
                     <div key={category}>
-                      <label className="block text-sm font-medium text-stone-700 mb-2">
+                      <label className="block text-sm font-medium text-gray-200 mb-2">
                         {category}
                       </label>
                       <select
@@ -1061,11 +1061,11 @@ export default function CharacterCreation() {
             {/* Spell Selection */}
             {character.class && spellOptions[character.class] && (
               <div className="mb-6">
-                <h3 className="text-lg font-semibold text-stone-800 mb-3">Choose Your Cantrips</h3>
-                <p className="text-sm text-stone-600 mb-3">
+                <h3 className="text-lg font-semibold text-gray-100 mb-3">Choose Your Cantrips</h3>
+                <p className="text-sm text-gray-300 mb-3">
                   Select your starting cantrips (0-level spells). You can choose up to {spellLimits[character.class]?.cantrips || 0} cantrips.
                 </p>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-64 overflow-y-auto border border-stone-200 rounded-lg p-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-64 overflow-y-auto border border-gray-600 rounded-lg p-4">
                   {spellOptions[character.class].map(spell => {
                     const isSelected = spellChoices.includes(spell.name);
                     const isDisabled = !isSelected && spellChoices.length >= (spellLimits[character.class]?.cantrips || 0);
@@ -1073,7 +1073,7 @@ export default function CharacterCreation() {
                     return (
                       <div 
                         key={spell.name} 
-                        className={`border rounded-lg p-3 ${isSelected ? 'border-amber-500 bg-amber-50' : 'border-stone-200'} ${isDisabled ? 'opacity-50' : 'hover:border-stone-300'}`}
+                        className={`border rounded-lg p-3 ${isSelected ? 'border-amber-500 bg-amber-900/20' : 'border-gray-600'} ${isDisabled ? 'opacity-50' : 'hover:border-gray-500'}`}
                       >
                         <label className={`flex items-start space-x-3 cursor-pointer ${isDisabled ? 'cursor-not-allowed' : ''}`}>
                           <input
@@ -1090,8 +1090,8 @@ export default function CharacterCreation() {
                             className="rounded mt-1"
                           />
                           <div className="flex-1">
-                            <div className="font-medium text-stone-800">{spell.name}</div>
-                            <div className="text-sm text-stone-600 mt-1">{spell.description}</div>
+                            <div className="font-medium text-gray-100">{spell.name}</div>
+                            <div className="text-sm text-gray-300 mt-1">{spell.description}</div>
                           </div>
                         </label>
                       </div>
@@ -1099,11 +1099,11 @@ export default function CharacterCreation() {
                   })}
                 </div>
                 <div className="flex justify-between items-center mt-3">
-                  <p className="text-sm text-stone-500">
+                  <p className="text-sm text-gray-400">
                     Selected: {spellChoices.length} / {spellLimits[character.class]?.cantrips || 0} cantrips
                   </p>
                   {spellChoices.length >= (spellLimits[character.class]?.cantrips || 0) && (
-                    <p className="text-sm text-green-600 font-medium">
+                    <p className="text-sm text-green-400 font-medium">
                       ✓ Cantrip selection complete
                     </p>
                   )}
@@ -1113,25 +1113,25 @@ export default function CharacterCreation() {
 
             {/* Equipment Display */}
             {character.class ? (
-              <div className="bg-stone-50 border border-stone-200 rounded-lg p-4">
-                <h3 className="font-semibold text-stone-800 mb-3">
+              <div className="bg-gray-700 border border-gray-600 rounded-lg p-4">
+                <h3 className="font-semibold text-gray-100 mb-3">
                   {character.class} Starting Equipment
                 </h3>
                 <ul className="space-y-1">
                   {getStartingEquipment(character.class).map((item, index) => (
-                    <li key={index} className="text-stone-700 flex items-start">
-                      <span className="text-stone-500 mr-2">•</span>
+                    <li key={index} className="text-gray-200 flex items-start">
+                      <span className="text-gray-400 mr-2">•</span>
                       {item}
                     </li>
                   ))}
                 </ul>
-                <p className="text-sm text-stone-600 mt-3">
+                <p className="text-sm text-gray-300 mt-3">
                   This equipment will be automatically assigned to your character.
                 </p>
               </div>
             ) : (
-              <div className="bg-stone-50 border border-stone-200 rounded-lg p-4">
-                <p className="text-stone-600">
+              <div className="bg-gray-700 border border-gray-600 rounded-lg p-4">
+                <p className="text-gray-300">
                   Select a class to see your starting equipment.
                 </p>
               </div>
@@ -1140,10 +1140,10 @@ export default function CharacterCreation() {
 
           {/* Character Portrait */}
           <div>
-            <h2 className="text-2xl font-bold text-stone-800 mb-4">Character Portrait</h2>
+            <h2 className="text-2xl font-bold text-gray-100 mb-4">Character Portrait</h2>
             <div className="flex items-center space-x-4">
-              <div className="w-32 h-32 bg-stone-200 rounded-lg flex items-center justify-center">
-                <span className="text-stone-500">Portrait Placeholder</span>
+              <div className="w-32 h-32 bg-gray-600 rounded-lg flex items-center justify-center">
+                <span className="text-gray-400">Portrait Placeholder</span>
               </div>
               <button
                 type="button"
@@ -1160,7 +1160,7 @@ export default function CharacterCreation() {
             <button
               type="button"
               onClick={() => navigate(`/campaign-story/${partyId}`)}
-              className="fantasy-button bg-stone-600 hover:bg-stone-700"
+              className="fantasy-button bg-gray-600 hover:bg-gray-700"
               disabled={loading}
             >
               Back to Campaign
@@ -1183,7 +1183,7 @@ export default function CharacterCreation() {
             <h3 className="fantasy-title text-center mb-4">Save Character Preset</h3>
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-stone-700 mb-2">
+                <label className="block text-sm font-medium text-gray-200 mb-2">
                   Preset Name
                 </label>
                 <input
@@ -1203,7 +1203,7 @@ export default function CharacterCreation() {
                     setShowPresetModal(false);
                     setPresetName('');
                   }}
-                  className="fantasy-button bg-stone-600 hover:bg-stone-700 flex-1"
+                  className="fantasy-button bg-gray-600 hover:bg-gray-700 flex-1"
                 >
                   Cancel
                 </button>
@@ -1227,8 +1227,8 @@ export default function CharacterCreation() {
             <h3 className="fantasy-title text-center mb-4">Load Character Preset</h3>
             {characterPresets.length === 0 ? (
               <div className="text-center py-8">
-                <p className="text-stone-600 mb-4">No character presets found.</p>
-                <p className="text-sm text-stone-500">
+                <p className="text-gray-300 mb-4">No character presets found.</p>
+                <p className="text-sm text-gray-400">
                   Create a character and save it as a preset to see it here.
                 </p>
                 <button
@@ -1243,18 +1243,18 @@ export default function CharacterCreation() {
               <div className="space-y-4">
                 <div className="grid gap-4">
                   {characterPresets.map((preset) => (
-                    <div key={preset.id} className="border border-stone-200 rounded-lg p-4 hover:border-stone-300">
+                    <div key={preset.id} className="border border-gray-600 rounded-lg p-4 hover:border-gray-500">
                       <div className="flex justify-between items-start mb-3">
                         <div>
-                          <h4 className="font-semibold text-stone-800">{preset.name}</h4>
-                          <p className="text-sm text-stone-600">
+                          <h4 className="font-semibold text-gray-100">{preset.name}</h4>
+                          <p className="text-sm text-gray-300">
                             {preset.data.race} {preset.data.class} • Level {preset.data.level}
                           </p>
                           {preset.data.background && (
-                            <p className="text-sm text-stone-500">{preset.data.background}</p>
+                            <p className="text-sm text-gray-400">{preset.data.background}</p>
                           )}
                           {preset.createdAt && (
-                            <p className="text-xs text-stone-400 mt-1">
+                            <p className="text-xs text-gray-500 mt-1">
                               Created: {new Date(preset.createdAt.toDate()).toLocaleDateString()}
                             </p>
                           )}
@@ -1262,7 +1262,7 @@ export default function CharacterCreation() {
                         <button
                           type="button"
                           onClick={() => deletePreset(preset.id)}
-                          className="text-red-600 hover:text-red-800 text-sm"
+                          className="text-red-400 hover:text-red-300 text-sm"
                           title="Delete preset"
                         >
                           🗑️
@@ -1284,7 +1284,7 @@ export default function CharacterCreation() {
                   <button
                     type="button"
                     onClick={() => setShowLoadPresetModal(false)}
-                    className="fantasy-button bg-stone-600 hover:bg-stone-700"
+                    className="fantasy-button bg-gray-600 hover:bg-gray-700"
                   >
                     Cancel
                   </button>
