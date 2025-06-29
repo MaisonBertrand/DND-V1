@@ -13,7 +13,7 @@ import {
 import { combatService } from '../services/combat';
 
 export default function Combat() {
-  const { partyId } = useParams();
+  const { sessionId } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
   const [user, setUser] = useState(null);
@@ -60,15 +60,15 @@ export default function Combat() {
     if (isTestCombat && testData) {
       // Initialize test combat session
       initializeTestCombat();
-    } else if (partyId) {
+    } else if (sessionId) {
       // Load regular combat session
       loadCombatData();
     }
-  }, [isTestCombat, testData, partyId]);
+  }, [isTestCombat, testData, sessionId]);
 
   useEffect(() => {
-    if (partyId && !isTestCombat) {
-      const unsubscribe = subscribeToCombatSession(partyId, (session) => {
+    if (sessionId && !isTestCombat) {
+      const unsubscribe = subscribeToCombatSession(sessionId, (session) => {
         setCombatSession(session);
         setLoading(false);
         
@@ -103,7 +103,7 @@ export default function Combat() {
       });
       return () => unsubscribe();
     }
-  }, [partyId, lastProcessedTurn, processingTurn, isEnemyTurn, isTestCombat]);
+  }, [sessionId, lastProcessedTurn, processingTurn, isEnemyTurn, isTestCombat]);
 
   // Auto-process enemy turns in test combat
   useEffect(() => {
@@ -233,18 +233,18 @@ export default function Combat() {
   };
 
   const loadCombatData = async () => {
-    if (!partyId) {
+    if (!sessionId) {
       return;
     }
     
     try {
       setLoading(true);
-      const session = await getCombatSession(partyId);
+      const session = await getCombatSession(sessionId);
       
       if (!session) {
         // No active combat session, redirect back to story
         try {
-          navigate(`/campaign/${partyId}`);
+          navigate(`/campaign/${session.partyId || sessionId}`);
         } catch (error) {
           console.error('Navigation error in loadCombatData:', error);
           navigate('/dashboard');
@@ -252,6 +252,8 @@ export default function Combat() {
         return;
       }
       
+      // Use partyId from the session for character operations
+      const partyId = session.partyId;
       const characters = await getPartyCharacters(partyId);
       
       // Update character stats if needed (HP/AC calculation)
@@ -313,7 +315,7 @@ export default function Combat() {
         };
         
         // Update the session in the database
-        await updateCombatSession(partyId, activeSession);
+        await updateCombatSession(sessionId, activeSession);
         
         // Set the active session locally
         setCombatSession(activeSession);
@@ -431,7 +433,7 @@ export default function Combat() {
         setCombatSession(updatedSession);
         updateAvailableActions(updatedSession);
       } else {
-        await updateCombatSession(partyId, updatedSession);
+        await updateCombatSession(sessionId, updatedSession);
       }
       
       // Add combat start entry to battle log
@@ -462,7 +464,7 @@ export default function Combat() {
         setCombatSession(updatedSession);
         updateAvailableActions(updatedSession);
     } else {
-        await updateCombatSession(partyId, updatedSession);
+        await updateCombatSession(sessionId, updatedSession);
       }
       
       // Add combat begin entry to battle log
@@ -516,7 +518,7 @@ export default function Combat() {
       if (isTestCombat) {
         setCombatSession(updatedSession);
       } else {
-        await updateCombatSession(partyId, updatedSession);
+        await updateCombatSession(sessionId, updatedSession);
       }
 
       // Add to battle log
@@ -915,7 +917,7 @@ export default function Combat() {
       if (isTestCombat) {
         setCombatSession(updatedSession);
       } else {
-        await updateCombatSession(partyId, updatedSession);
+        await updateCombatSession(sessionId, updatedSession);
       }
     } else {
       const updatedSession = {
@@ -926,14 +928,14 @@ export default function Combat() {
       if (isTestCombat) {
         setCombatSession(updatedSession);
       } else {
-        await updateCombatSession(partyId, updatedSession);
+        await updateCombatSession(sessionId, updatedSession);
       }
     }
 
     console.log('Turn advanced to:', nextTurn, 'combatant:', combatSession.combatants[nextTurn]?.name);
 
     // Update available actions for the new current combatant
-    const newSession = isTestCombat ? combatSession : await getCombatSession(partyId);
+    const newSession = isTestCombat ? combatSession : await getCombatSession(sessionId);
     if (newSession) {
       updateAvailableActions(newSession);
     }
@@ -958,20 +960,20 @@ export default function Combat() {
       // For test combat, navigate back to test environment
       navigate('/test-environment');
     } else {
-    await updateCombatSessionWithNarrative(combatSession.id, {
+    await updateCombatSessionWithNarrative(sessionId, {
       status: 'ended',
       combatState: 'ended',
       summary: summary
     });
     
       // For regular combat, return story to active state
-      await updateCampaignStory(partyId, {
+      await updateCampaignStory(sessionId, {
         status: 'storytelling',
         currentCombat: null
       });
       
       // Navigate back to campaign story
-      navigate(`/campaign/${partyId}`);
+      navigate(`/campaign/${sessionId}`);
     }
   };
 
@@ -995,7 +997,7 @@ export default function Combat() {
           combatants: updatedCombatants
         }));
       } else {
-      await updateCombatSessionWithNarrative(combatSession.id, {
+      await updateCombatSessionWithNarrative(sessionId, {
         enemies: updatedEnemies,
         combatants: updatedCombatants
       });
@@ -1022,7 +1024,7 @@ export default function Combat() {
           combatants: updatedCombatants
         }));
       } else {
-      await updateCombatSessionWithNarrative(combatSession.id, {
+      await updateCombatSessionWithNarrative(sessionId, {
         partyMembers: updatedPartyMembers,
         combatants: updatedCombatants
       });
@@ -1120,7 +1122,8 @@ export default function Combat() {
       // For test combat, navigate to dashboard
       navigate('/dashboard');
     } else {
-      // For regular combat, navigate to character creation
+      // For regular combat, navigate to character creation using partyId
+      const partyId = combatSession?.partyId;
       navigate(`/character-creation/${partyId}`);
     }
   };

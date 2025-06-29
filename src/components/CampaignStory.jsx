@@ -298,11 +298,12 @@ export default function CampaignStory() {
               console.log('✅ Final combat session object:', basicCombatSession);
               
               // Store the basic session in the database
-              createCombatSession(partyId, basicCombatSession).then(() => {
+              createCombatSession(partyId, basicCombatSession).then((createdSession) => {
                 console.log('⚔️ Basic combat session created, navigating to Combat page...');
                 setCombatLoading(false);
                 setHasNavigatedToCombat(true);
-                navigate(`/combat/${partyId}`);
+                // Use the Firestore session ID for navigation
+                navigate(`/combat/${createdSession.id}`);
               }).catch(error => {
                 console.error('❌ Failed to create combat session:', error);
                 setCombatLoading(false);
