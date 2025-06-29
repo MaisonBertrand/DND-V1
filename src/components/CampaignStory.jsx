@@ -362,6 +362,8 @@ export default function CampaignStory() {
             
             console.log('⚔️ Comparing local vs database enemy HP:');
             let hasLocalDamage = false;
+            let hasLocalTurnChange = false;
+            
             localEnemies.forEach(localEnemy => {
               const dbEnemy = dbEnemies.find(e => e.id === localEnemy.id);
               if (dbEnemy && localEnemy.hp !== dbEnemy.hp) {
@@ -374,9 +376,15 @@ export default function CampaignStory() {
               }
             });
             
-            // If we have local damage that hasn't been saved to DB yet, don't override
-            if (hasLocalDamage) {
-              console.log('🛡️ Skipping database update to preserve local damage changes');
+            // Check if local turn is ahead of database turn
+            if (combatSession.currentTurn !== updatedCombatSession.currentTurn) {
+              console.log(`⚠️ Turn mismatch: Local=${combatSession.currentTurn}, DB=${updatedCombatSession.currentTurn}`);
+              hasLocalTurnChange = true;
+            }
+            
+            // If we have local damage or turn changes that haven't been saved to DB yet, don't override
+            if (hasLocalDamage || hasLocalTurnChange) {
+              console.log('🛡️ Skipping database update to preserve local changes');
               return;
             }
           }
@@ -525,15 +533,22 @@ export default function CampaignStory() {
                 enemies: updatedSession.combatants.filter(c => c.id.startsWith('enemy_')).map(c => ({ name: c.name, hp: c.hp }))
               });
               
-              await updateCombatSession(combatSessionId, {
-                currentTurn: updatedSession.currentTurn,
-                round: updatedSession.round,
-                combatState: updatedSession.combatState,
-                partyMembers: updatedSession.combatants.filter(c => !c.id.startsWith('enemy_')),
-                enemies: updatedSession.combatants.filter(c => c.id.startsWith('enemy_'))
-              });
-              
-              console.log('💾 Combat session updated in database successfully');
+              // Add a small delay to ensure local state is properly set
+              setTimeout(async () => {
+                try {
+                  await updateCombatSession(combatSessionId, {
+                    currentTurn: updatedSession.currentTurn,
+                    round: updatedSession.round,
+                    combatState: updatedSession.combatState,
+                    partyMembers: updatedSession.combatants.filter(c => !c.id.startsWith('enemy_')),
+                    enemies: updatedSession.combatants.filter(c => c.id.startsWith('enemy_'))
+                  });
+                  
+                  console.log('💾 Combat session updated in database successfully');
+                } catch (error) {
+                  console.error('❌ Error updating combat session in database:', error);
+                }
+              }, 100);
             } else {
               console.log('⚠️ No combatSessionId available for database update');
             }
@@ -1544,7 +1559,7 @@ What would you like to do?`;
       console.log('⚔️ Result healing value:', result.results?.healing);
       
       // Get the updated session from the result
-      const updatedSession = result.combatSession;
+      const updatedSession = result.updatedSession;
       
       // Apply damage to target if damage was dealt
       if (result.results && result.results.damage > 0) {
@@ -1602,9 +1617,16 @@ What would you like to do?`;
       // Log the updated combat session for debugging
       console.log('⚔️ Updated combat session:', updatedSession);
       console.log('⚔️ Combatants after action:', updatedSession.combatants.map(c => `${c.name}: ${c.hp}/${c.maxHp}`));
+      console.log('⚔️ Next turn index:', updatedSession.currentTurn);
+      console.log('⚔️ Next combatant:', updatedSession.combatants[updatedSession.currentTurn]?.name);
       
       // Update combat session
       setCombatSession(updatedSession);
+      
+      // Update current combatant based on the new turn
+      const nextCombatant = updatedSession.combatants[updatedSession.currentTurn];
+      setCurrentCombatant(nextCombatant);
+      console.log('🔄 Turn advanced to:', nextCombatant?.name);
       
       // Update combat session in database for real-time synchronization
       if (combatSessionId) {
@@ -1616,22 +1638,25 @@ What would you like to do?`;
           enemies: updatedSession.combatants.filter(c => c.id.startsWith('enemy_')).map(c => ({ name: c.name, hp: c.hp }))
         });
         
-        await updateCombatSession(combatSessionId, {
-          currentTurn: updatedSession.currentTurn,
-          round: updatedSession.round,
-          combatState: updatedSession.combatState,
-          partyMembers: updatedSession.combatants.filter(c => !c.id.startsWith('enemy_')),
-          enemies: updatedSession.combatants.filter(c => c.id.startsWith('enemy_'))
-        });
-        
-        console.log('💾 Combat session updated in database successfully');
+        // Add a small delay to ensure local state is properly set
+        setTimeout(async () => {
+          try {
+            await updateCombatSession(combatSessionId, {
+              currentTurn: updatedSession.currentTurn,
+              round: updatedSession.round,
+              combatState: updatedSession.combatState,
+              partyMembers: updatedSession.combatants.filter(c => !c.id.startsWith('enemy_')),
+              enemies: updatedSession.combatants.filter(c => c.id.startsWith('enemy_'))
+            });
+            
+            console.log('💾 Combat session updated in database successfully');
+          } catch (error) {
+            console.error('❌ Error updating combat session in database:', error);
+          }
+        }, 100);
       } else {
         console.log('⚠️ No combatSessionId available for database update');
       }
-      
-      // Update current combatant based on the new turn
-      const nextCombatant = updatedSession.combatants[updatedSession.currentTurn];
-      setCurrentCombatant(nextCombatant);
       
       // Clear selected action
       setSelectedAction(null);

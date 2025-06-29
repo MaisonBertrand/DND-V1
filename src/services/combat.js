@@ -360,7 +360,26 @@ export class CombatService {
     const statusEffects = this.checkStatusEffectApplication(combatant, actionType, target, results);
     
     // Advance turn counter
-    const nextTurnIndex = (combatSession.currentTurn + 1) % combatSession.combatants.length;
+    let nextTurnIndex = (combatSession.currentTurn + 1) % combatSession.combatants.length;
+    let attempts = 0;
+    const maxAttempts = combatSession.combatants.length;
+    
+    // Find the next alive combatant
+    while (attempts < maxAttempts) {
+      const nextCombatant = combatSession.combatants[nextTurnIndex];
+      if (nextCombatant && nextCombatant.hp > 0) {
+        break; // Found an alive combatant
+      }
+      nextTurnIndex = (nextTurnIndex + 1) % combatSession.combatants.length;
+      attempts++;
+    }
+    
+    // If no alive combatants found, keep the current turn
+    if (attempts >= maxAttempts) {
+      console.log('⚠️ No alive combatants found, keeping current turn');
+      nextTurnIndex = combatSession.currentTurn;
+    }
+    
     const updatedSession = {
       ...combatSession,
       currentTurn: nextTurnIndex
@@ -371,8 +390,19 @@ export class CombatService {
       updatedSession.round = updatedSession.round + 1;
     }
     
+    console.log('🔄 Turn progression in executeAction:', {
+      currentTurn: combatSession.currentTurn,
+      nextTurnIndex: nextTurnIndex,
+      totalCombatants: combatSession.combatants.length,
+      nextCombatant: combatSession.combatants[nextTurnIndex]?.name,
+      nextCombatantHp: combatSession.combatants[nextTurnIndex]?.hp,
+      round: updatedSession.round,
+      attempts: attempts
+    });
+    
     console.log('⚔️ executeAction returning result with damage:', results.damage);
     console.log('⚔️ Target HP after executeAction:', target.hp);
+    console.log('⚔️ Updated session currentTurn:', updatedSession.currentTurn);
     
     return {
       success: true,
