@@ -316,8 +316,20 @@ export class CombatService {
 
   // Execute a combat action with narrative description
   async executeAction(combatSession, combatantId, actionType, targetId, additionalData = {}) {
+    console.log('⚔️ executeAction called with:', {
+      combatantId,
+      actionType,
+      targetId,
+      additionalData
+    });
+    
     const combatant = combatSession.combatants.find(c => c.id === combatantId);
     const target = combatSession.combatants.find(c => c.id === targetId);
+    
+    console.log('⚔️ Found combatant and target:', {
+      combatant: combatant ? { name: combatant.name, hp: combatant.hp, maxHp: combatant.maxHp } : null,
+      target: target ? { name: target.name, hp: target.hp, maxHp: target.maxHp } : null
+    });
     
     if (!combatant || !target) {
       throw new Error('Invalid combatant or target');
@@ -336,6 +348,7 @@ export class CombatService {
     
     // Calculate action results
     const results = this.calculateActionResults(combatant, actionType, target, additionalData);
+    console.log('⚔️ Action results calculated:', results);
     
     // Apply effects
     this.applyActionEffects(combatSession, combatant, target, results);
@@ -357,6 +370,9 @@ export class CombatService {
     if (nextTurnIndex === 0) {
       updatedSession.round = updatedSession.round + 1;
     }
+    
+    console.log('⚔️ executeAction returning result with damage:', results.damage);
+    console.log('⚔️ Target HP after executeAction:', target.hp);
     
     return {
       success: true,
@@ -513,9 +529,23 @@ export class CombatService {
 
   // Calculate attack damage with enhanced enemy scaling
   calculateAttackDamage(combatant, target, additionalData) {
+    console.log('🎯 calculateAttackDamage called for:', {
+      combatant: combatant.name,
+      target: target.name,
+      combatantClass: combatant.class,
+      additionalData
+    });
+    
     const baseDamage = Math.floor(Math.random() * 8) + 1;
-    const strengthMod = Math.floor((combatant.strength - 10) / 2);
+    const strengthMod = Math.floor(((combatant.strength || 10) - 10) / 2);
     const weaponBonus = additionalData.weaponBonus || 0;
+    
+    console.log('🎯 Base damage calculation:', {
+      baseDamage,
+      strengthMod,
+      weaponBonus,
+      combatantStrength: combatant.strength || 10
+    });
     
     // Enhanced scaling for enemies based on level and attributes
     let levelScaling = 1;
@@ -526,7 +556,7 @@ export class CombatService {
       
       // Use the specified attribute for damage calculation
       const attribute = additionalData.attribute || 'strength';
-      attributeMod = Math.floor((combatant[attribute] - 10) / 2);
+      attributeMod = Math.floor(((combatant[attribute] || 10) - 10) / 2);
       
       // Item bonuses for enemies
       const itemBonus = this.calculateEnemyItemBonus(combatant);
@@ -563,10 +593,12 @@ export class CombatService {
         totalDamage: Math.max(1, Math.floor(totalDamage))
       });
       
-      return Math.max(1, Math.floor(totalDamage));
+      const finalDamage = Math.max(1, Math.floor(totalDamage));
+      console.log(`🎯 Enemy ${combatant.name} final damage: ${finalDamage}`);
+      return finalDamage;
     } else {
       // Enhanced player damage calculation
-      const dexterityMod = Math.floor((combatant.dexterity - 10) / 2);
+      const dexterityMod = Math.floor(((combatant.dexterity || 10) - 10) / 2);
       const levelBonus = Math.floor((combatant.level - 1) * 0.5); // +0.5 damage per level
       
       let totalDamage = baseDamage + strengthMod + dexterityMod + weaponBonus + levelBonus;
@@ -576,7 +608,17 @@ export class CombatService {
         totalDamage *= 2;
       }
       
-      return Math.max(1, Math.floor(totalDamage));
+      const finalDamage = Math.max(1, Math.floor(totalDamage));
+      console.log(`🎯 Player ${combatant.name} damage calculation:`, {
+        baseDamage,
+        strengthMod,
+        dexterityMod,
+        weaponBonus,
+        levelBonus,
+        totalDamage: finalDamage
+      });
+      
+      return finalDamage;
     }
   }
 
@@ -684,14 +726,25 @@ export class CombatService {
 
   // Apply action effects
   applyActionEffects(combatSession, combatant, target, results) {
+    console.log('🔧 applyActionEffects called with:', {
+      combatant: combatant.name,
+      target: target.name,
+      results: results,
+      targetHpBefore: target.hp
+    });
+    
     // Apply damage
     if (results.damage > 0) {
+      const oldHp = target.hp;
       target.hp = Math.max(0, target.hp - results.damage);
+      console.log(`🔧 Damage applied in applyActionEffects: ${combatant.name} deals ${results.damage} damage to ${target.name}. HP: ${oldHp} → ${target.hp}`);
     }
     
     // Apply healing
     if (results.healing > 0) {
+      const oldHp = target.hp;
       target.hp = Math.min(target.maxHp, target.hp + results.healing);
+      console.log(`🔧 Healing applied in applyActionEffects: ${combatant.name} heals ${target.name} for ${results.healing} HP. HP: ${oldHp} → ${target.hp}`);
     }
     
     // Apply status effects
@@ -706,8 +759,11 @@ export class CombatService {
           duration: effect.duration,
           appliedBy: combatant.id
         });
+        console.log(`🔧 Status effect applied: ${effect.type} to ${target.name}`);
       }
     });
+    
+    console.log(`🔧 Final target HP after applyActionEffects: ${target.name} = ${target.hp}`);
   }
 
   // Update cooldowns

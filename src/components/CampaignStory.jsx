@@ -25,6 +25,7 @@ import { ActionValidationService } from '../services/actionValidation';
 import { CombatService } from '../services/combat';
 import ActionValidationDisplay from './ActionValidationDisplay';
 import DiceRollDisplay from './DiceRollDisplay';
+import { onSnapshot } from 'firebase/firestore';
 
 export default function CampaignStory() {
   const { user, loading: authLoading } = useAuth();
@@ -145,31 +146,42 @@ export default function CampaignStory() {
             finalPhaseStatus: phaseStatus
           });
           
-          if ((phaseStatus && String(phaseStatus).toLowerCase() === 'conflict') || 
-              (hasCombatKeywords && storyContent.toLowerCase().includes('attack') && !hasNavigatedToCombat)) {
-            console.log('⚔️ Conflict phase detected, preparing combat session...');
-            setHasNavigatedToCombat(true);
+          if (updatedStory.storyMetadata && String(updatedStory.storyMetadata.phaseStatus).toLowerCase() === 'conflict' && !hasNavigatedToCombat && !combatLoading) {
+            // Conflict phase detected, prepare combat session
             setCombatLoading(true);
             
             // Wait for all players to be ready before creating combat session
             const members = party?.members || [];
-            if (updatedStory.readyPlayers?.length === members.length && members.length > 0) {
-              console.log('🎉 All players ready, creating combat session...');
+            
+            // For combat, we need to ensure all players are ready
+            // Check if all players are ready (either from initial ready-up or combat ready-up)
+            const allPlayersReadyForCombat = updatedStory.readyPlayers?.length === members.length && members.length > 0;
+            
+            if (allPlayersReadyForCombat) {
+              // Ensure we have character data for all party members
+              const allCharactersLoaded = partyCharacters.length === members.length;
               
-              // Create a basic combat session before navigating
-              console.log('🔍 Debugging party members before combat session creation:', partyMembers);
-              console.log('🔍 Debugging party characters before combat session creation:', partyCharacters);
+              console.log('Combat session creation check:', {
+                readyPlayers: updatedStory.readyPlayers?.length,
+                totalMembers: members.length,
+                partyCharactersLoaded: partyCharacters.length,
+                allCharactersLoaded,
+                partyCharacters: partyCharacters.map(c => ({ id: c.id, name: c.name, userId: c.userId }))
+              });
+              
+              if (!allCharactersLoaded) {
+                // Wait for character data to load
+                console.log('Waiting for character data to load...');
+                return;
+              }
               
               // Use partyCharacters (actual character objects) instead of partyMembers (user IDs)
               const charactersToUse = partyCharacters.length > 0 ? partyCharacters : partyMembers;
               
               // Deep clean and validate party members data
               const validatedPartyMembers = charactersToUse.map((member, index) => {
-                console.log(`🔍 Validating member ${index}:`, member);
-                
                 // If member is a string (user ID), create a basic character object
                 if (typeof member === 'string') {
-                  console.log(`⚠️ Member ${index} is a user ID string, creating basic character object`);
                   const basicCharacter = {
                     id: `member_${index}`,
                     name: `Player ${index + 1}`,
@@ -182,7 +194,6 @@ export default function CampaignStory() {
                     maxHp: 10,
                     ac: 10
                   };
-                  console.log(`✅ Created basic character for user ID:`, basicCharacter);
                   return basicCharacter;
                 }
                 
@@ -218,94 +229,83 @@ export default function CampaignStory() {
                   )
                 };
                 
-                console.log(`✅ Cleaned member ${index}:`, cleanMember);
                 return cleanMember;
               });
               
-              console.log('✅ Final validated party members:', validatedPartyMembers);
+              // Verify we have all party members
+              if (validatedPartyMembers.length !== members.length) {
+                console.warn('Party member count mismatch:', validatedPartyMembers.length, 'vs', members.length);
+                return;
+              }
               
               // Extract enemies from story content
               let extractedEnemies = [];
               
-              // Debug: Log the story metadata
-              console.log('🔍 Story metadata:', updatedStory.storyMetadata);
-              console.log('🔍 Story metadata enemy details:', updatedStory.storyMetadata?.enemyDetails);
-              
               // First, try to get enemies from story metadata
               if (updatedStory.storyMetadata?.enemyDetails && updatedStory.storyMetadata.enemyDetails.length > 0) {
-                console.log('🔍 Found enemy details in story metadata:', updatedStory.storyMetadata.enemyDetails);
                 extractedEnemies = convertEnemyDetailsToCombatEnemies(updatedStory.storyMetadata.enemyDetails);
-                console.log('⚔️ Extracted enemies from story metadata:', extractedEnemies);
               }
               
               // If no enemies found in metadata, try parsing the story content
               if (extractedEnemies.length === 0 && updatedStory.currentContent) {
-                console.log('🔍 No enemies in metadata, trying to parse story content...');
                 const parsedResponse = parseStructuredResponse(updatedStory.currentContent);
                 if (parsedResponse.enemyDetails && parsedResponse.enemyDetails.length > 0) {
                   extractedEnemies = convertEnemyDetailsToCombatEnemies(parsedResponse.enemyDetails);
-                  console.log('⚔️ Extracted enemies from story content:', extractedEnemies);
                 }
               }
               
               // If still no enemies found, use fallback enemies
               if (extractedEnemies.length === 0) {
-                console.log('⚠️ No enemies found in story or metadata, using fallback enemies');
                 extractedEnemies = [
                   {
                     id: 'enemy_0',
-                    name: 'Gnoll Tribesmen',
-                    hp: 12,
-                    maxHp: 12,
-                    ac: 15,
+                    name: 'Dire Wolf',
+                    hp: 15,
+                    maxHp: 15,
+                    ac: 14,
                     level: 1,
-                    class: 'humanoid',
-                    race: 'gnoll',
+                    class: 'beast',
+                    race: 'wolf',
                     initiative: Math.floor(Math.random() * 20) + 1,
-                    strength: 14,
-                    dexterity: 12,
-                    constitution: 12,
-                    intelligence: 8,
-                    wisdom: 8,
+                    strength: 16,
+                    dexterity: 14,
+                    constitution: 13,
+                    intelligence: 3,
+                    wisdom: 12,
                     charisma: 6,
                     statusEffects: [],
                     cooldowns: {},
                     lastAction: null,
                     turnCount: 0,
-                    basicAttack: 'Spiked Club (1d6 + 2 bludgeoning damage)',
-                    specialAbility: 'Pack Tactics (The Gnoll has advantage on an attack roll against a creature if at least one of the gnoll\'s allies is within 5 feet of the creature and the ally isn\'t incapacitated.)'
+                    basicAttack: 'Bite (1d6 + 3 piercing damage)',
+                    specialAbility: 'Pack Tactics (The wolf has advantage on attack rolls against a creature if at least one of the wolf\'s allies is within 5 feet of the creature and the ally isn\'t incapacitated.)'
                   }
                 ];
               }
-              
-              console.log('⚔️ Final enemies for combat session:', extractedEnemies);
               
               // Create a basic combat session with the party members and enemies
               const basicCombatSession = {
                 partyId,
                 partyMembers: validatedPartyMembers,
-                enemies: extractedEnemies, // Use the extracted enemies
+                enemies: extractedEnemies,
                 storyContext: updatedStory.currentContent || 'Combat encounter',
                 combatState: 'initialized',
                 currentTurn: 0,
                 round: 1,
-                initiative: [], // Add empty initiative array to prevent Firebase error
-                environmentalFeatures: [],
-                teamUpOpportunities: [],
-                narrativeElements: []
+                initiative: [],
+                environmentalFeatures: updatedStory.storyMetadata?.environmentalFeatures || [],
+                teamUpOpportunities: updatedStory.storyMetadata?.teamUpOpportunities || [],
+                narrativeElements: updatedStory.storyMetadata?.narrativeElements || []
               };
-              
-              console.log('✅ Final combat session object:', basicCombatSession);
               
               // Store the basic session in the database
               createCombatSession(partyId, basicCombatSession).then((createdSession) => {
-                console.log('⚔️ Basic combat session created, navigating to Combat page...');
                 setCombatLoading(false);
                 setHasNavigatedToCombat(true);
                 // Use the Firestore session ID for navigation
                 navigate(`/combat/${createdSession.id}`);
               }).catch(error => {
-                console.error('❌ Failed to create combat session:', error);
+                console.error('Failed to create combat session:', error);
                 setCombatLoading(false);
                 setHasNavigatedToCombat(false);
               });
@@ -313,13 +313,10 @@ export default function CampaignStory() {
               // Add a timeout to prevent infinite loading
               setTimeout(() => {
                 if (combatLoading) {
-                  console.warn('⚠️ Combat loading timeout, resetting state...');
                   setCombatLoading(false);
                   setHasNavigatedToCombat(false);
                 }
-              }, 5000); // Reduced from 10 seconds to 5 seconds
-            } else {
-              console.log('⏳ Waiting for all players to be ready before combat...');
+              }, 5000);
             }
           } else if (updatedStory.storyMetadata && String(updatedStory.storyMetadata.phaseStatus).toLowerCase() !== 'conflict') {
             // Reset navigation flag when not in conflict phase
@@ -329,17 +326,14 @@ export default function CampaignStory() {
           
           // Update ready status
           if (updatedStory.readyPlayers?.includes(user?.uid)) {
-            console.log('✅ User is ready');
             setIsReady(true);
           }
           
           // Check if all players are ready
           const members = party?.members || [];
           if (updatedStory.readyPlayers?.length === members.length && members.length > 0) {
-            console.log('🎉 All players are ready!');
             setAllPlayersReady(true);
           } else {
-            console.log('⏳ Not all players ready yet:', updatedStory.readyPlayers?.length, '/', members.length);
             setAllPlayersReady(false);
           }
         }
@@ -348,17 +342,44 @@ export default function CampaignStory() {
       setUnsubscribe(() => unsubscribe);
       return () => unsubscribe();
     }
-  }, [story?.id, user?.uid, party?.members, combatState, navigate, hasNavigatedToCombat]);
+  }, [story?.id, user?.uid, party?.members, partyCharacters, combatState, navigate, hasNavigatedToCombat]);
 
   // Subscribe to real-time combat session updates
   useEffect(() => {
     if (combatSessionId) {
       console.log('⚔️ Setting up real-time subscription for combat session:', combatSessionId);
-      const unsubscribe = subscribeToCombatSession(partyId, (updatedCombatSession) => {
+      const unsubscribe = subscribeToCombatSession(combatSessionId, (updatedCombatSession) => {
         if (updatedCombatSession) {
-          console.log('⚔️ Combat session update received:', updatedCombatSession);
+          console.log('⚔️ Combat session update received from database:', updatedCombatSession);
+          console.log('⚔️ Current local combat session state:', combatSession);
           console.log('⚔️ Combat session state:', updatedCombatSession.combatState);
           console.log('⚔️ Combat session ID:', updatedCombatSession.id);
+          
+          // Check if this update is overriding local damage
+          if (combatSession) {
+            const localEnemies = combatSession.combatants.filter(c => c.id.startsWith('enemy_'));
+            const dbEnemies = updatedCombatSession.enemies || [];
+            
+            console.log('⚔️ Comparing local vs database enemy HP:');
+            let hasLocalDamage = false;
+            localEnemies.forEach(localEnemy => {
+              const dbEnemy = dbEnemies.find(e => e.id === localEnemy.id);
+              if (dbEnemy && localEnemy.hp !== dbEnemy.hp) {
+                console.log(`⚠️ HP mismatch for ${localEnemy.name}: Local=${localEnemy.hp}, DB=${dbEnemy.hp}`);
+                // If local HP is lower than DB HP, it means damage was applied locally
+                if (localEnemy.hp < dbEnemy.hp) {
+                  hasLocalDamage = true;
+                  console.log(`🛡️ Preserving local damage for ${localEnemy.name}`);
+                }
+              }
+            });
+            
+            // If we have local damage that hasn't been saved to DB yet, don't override
+            if (hasLocalDamage) {
+              console.log('🛡️ Skipping database update to preserve local damage changes');
+              return;
+            }
+          }
           
           // Reconstruct the full combat session from database data
           const reconstructedSession = {
@@ -375,7 +396,9 @@ export default function CampaignStory() {
             narrativeElements: updatedCombatSession.narrativeElements
           };
           
-          console.log('⚔️ Reconstructed session:', reconstructedSession);
+          console.log('⚔️ Reconstructed session from database:', reconstructedSession);
+          console.log('⚔️ Reconstructed session combatants:', reconstructedSession.combatants.map(c => `${c.name}: ${c.hp}/${c.maxHp}`));
+          
           setCombatSession(reconstructedSession);
           setCurrentCombatant(reconstructedSession.combatants[updatedCombatSession.currentTurn]);
           setCombatState(updatedCombatSession.combatState);
@@ -391,7 +414,7 @@ export default function CampaignStory() {
       
       return () => unsubscribe();
     }
-  }, [combatSessionId, partyId]);
+  }, [combatSessionId]);
 
   // Log current combatant changes
   useEffect(() => {
@@ -488,9 +511,20 @@ export default function CampaignStory() {
             
             // Update combat session
             setCombatSession(updatedSession);
+            console.log('🔄 Combat session state updated in UI:', {
+              combatants: updatedSession.combatants.map(c => ({ name: c.name, hp: c.hp, maxHp: c.maxHp, isEnemy: c.id.startsWith('enemy_') }))
+            });
             
             // Update combat session in database for real-time synchronization
             if (combatSessionId) {
+              console.log('💾 Updating combat session in database:', {
+                combatSessionId,
+                currentTurn: updatedSession.currentTurn,
+                round: updatedSession.round,
+                partyMembers: updatedSession.combatants.filter(c => !c.id.startsWith('enemy_')).map(c => ({ name: c.name, hp: c.hp })),
+                enemies: updatedSession.combatants.filter(c => c.id.startsWith('enemy_')).map(c => ({ name: c.name, hp: c.hp }))
+              });
+              
               await updateCombatSession(combatSessionId, {
                 currentTurn: updatedSession.currentTurn,
                 round: updatedSession.round,
@@ -498,6 +532,10 @@ export default function CampaignStory() {
                 partyMembers: updatedSession.combatants.filter(c => !c.id.startsWith('enemy_')),
                 enemies: updatedSession.combatants.filter(c => c.id.startsWith('enemy_'))
               });
+              
+              console.log('💾 Combat session updated in database successfully');
+            } else {
+              console.log('⚠️ No combatSessionId available for database update');
             }
             
             // Update current combatant based on the new turn
@@ -1390,13 +1428,39 @@ What would you like to do?`;
           ac = Math.max(10, baseAC + dexterityMod + classBonus);
         }
         
-        return {
+        // Map assignedScores to direct attributes for combat system
+        const mappedCharacter = {
           ...character,
           hp: hp,
           maxHp: maxHp,
           ac: ac,
-          initiative: Math.floor(Math.random() * 20) + 1
+          initiative: Math.floor(Math.random() * 20) + 1,
+          // Map assignedScores to direct attributes
+          strength: character.assignedScores?.strength || 10,
+          dexterity: character.assignedScores?.dexterity || 10,
+          constitution: character.assignedScores?.constitution || 10,
+          intelligence: character.assignedScores?.intelligence || 10,
+          wisdom: character.assignedScores?.wisdom || 10,
+          charisma: character.assignedScores?.charisma || 10,
+          // Add combat-specific properties
+          statusEffects: [],
+          cooldowns: {},
+          lastAction: null,
+          turnCount: 0
         };
+        
+        console.log('⚔️ Prepared character for combat:', {
+          name: mappedCharacter.name,
+          class: mappedCharacter.class,
+          strength: mappedCharacter.strength,
+          dexterity: mappedCharacter.dexterity,
+          constitution: mappedCharacter.constitution,
+          hp: mappedCharacter.hp,
+          maxHp: mappedCharacter.maxHp,
+          ac: mappedCharacter.ac
+        });
+        
+        return mappedCharacter;
       });
       
       console.log('⚔️ Prepared party characters:', preparedPartyCharacters);
@@ -1447,6 +1511,12 @@ What would you like to do?`;
       }
       
       console.log('⚔️ Executing combat action:', actionType, 'on target:', targetId);
+      console.log('⚔️ Current combatant:', currentCombatant ? { name: currentCombatant.name, id: currentCombatant.id } : null);
+      console.log('⚔️ Combat session state:', combatSession ? { 
+        currentTurn: combatSession.currentTurn,
+        combatants: combatSession.combatants.map(c => ({ name: c.name, id: c.id, hp: c.hp, maxHp: c.maxHp }))
+      } : null);
+      
       setProcessingCombatAction(true);
       
       if (!combatSession || !currentCombatant) {
@@ -1470,6 +1540,8 @@ What would you like to do?`;
       }
       
       console.log('⚔️ Combat action result:', result);
+      console.log('⚔️ Result damage value:', result.results?.damage);
+      console.log('⚔️ Result healing value:', result.results?.healing);
       
       // Get the updated session from the result
       const updatedSession = result.combatSession;
@@ -1481,6 +1553,13 @@ What would you like to do?`;
           const oldHp = target.hp;
           target.hp = Math.max(0, target.hp - result.results.damage);
           console.log(`⚔️ Applied ${result.results.damage} damage to ${target.name}. HP: ${oldHp} → ${target.hp}`);
+          console.log(`⚔️ Target details after damage:`, {
+            name: target.name,
+            id: target.id,
+            hp: target.hp,
+            maxHp: target.maxHp,
+            isEnemy: target.id.startsWith('enemy_')
+          });
           
           // Add battle log entry for damage
           addBattleLogEntry({
@@ -1492,6 +1571,9 @@ What would you like to do?`;
             action: actionType,
             message: `${currentCombatant.name} deals ${result.results.damage} damage to ${target.name} (${target.hp} HP remaining)`
           });
+        } else {
+          console.error('❌ Target not found in updated session:', targetId);
+          console.log('⚔️ Available combatants:', updatedSession.combatants.map(c => ({ id: c.id, name: c.name })));
         }
       } else if (result.results && result.results.healing > 0) {
         // Add battle log entry for healing
@@ -1526,6 +1608,14 @@ What would you like to do?`;
       
       // Update combat session in database for real-time synchronization
       if (combatSessionId) {
+        console.log('💾 Updating combat session in database:', {
+          combatSessionId,
+          currentTurn: updatedSession.currentTurn,
+          round: updatedSession.round,
+          partyMembers: updatedSession.combatants.filter(c => !c.id.startsWith('enemy_')).map(c => ({ name: c.name, hp: c.hp })),
+          enemies: updatedSession.combatants.filter(c => c.id.startsWith('enemy_')).map(c => ({ name: c.name, hp: c.hp }))
+        });
+        
         await updateCombatSession(combatSessionId, {
           currentTurn: updatedSession.currentTurn,
           round: updatedSession.round,
@@ -1533,6 +1623,10 @@ What would you like to do?`;
           partyMembers: updatedSession.combatants.filter(c => !c.id.startsWith('enemy_')),
           enemies: updatedSession.combatants.filter(c => c.id.startsWith('enemy_'))
         });
+        
+        console.log('💾 Combat session updated in database successfully');
+      } else {
+        console.log('⚠️ No combatSessionId available for database update');
       }
       
       // Update current combatant based on the new turn
@@ -2052,8 +2146,66 @@ What would you like to do?`;
                   <div className="text-center">
                     <div className="text-blue-200 text-lg font-semibold mb-2">⚔️ Combat is Loading...</div>
                     <div className="text-blue-300 text-sm">Preparing combat encounter...</div>
+                    
+                    {/* Combat Ready Up Interface */}
+                    {!allPlayersReady && (
+                      <div className="mt-6">
+                        <div className="text-blue-200 text-lg font-semibold mb-3">Ready Up for Combat</div>
+                        
+                        {/* Debug information */}
+                        <div className="mb-4 p-3 bg-blue-900/30 rounded-lg text-xs">
+                          <div className="text-blue-300 mb-2">Debug Info:</div>
+                          <div className="text-blue-400 space-y-1">
+                            <div>Party Members: {partyMembers.length}</div>
+                            <div>Characters Loaded: {partyCharacters.length}</div>
+                            <div>Ready Players: {story?.readyPlayers?.length || 0}</div>
+                            <div>Current User Has Character: {partyCharacters.find(char => char.userId === user?.uid) ? 'Yes' : 'No'}</div>
+                            <div>Current User Ready: {isReady ? 'Yes' : 'No'}</div>
+                          </div>
+                        </div>
+                        
+                        <div className="flex justify-center items-center space-x-4 mb-4">
+                          <div className="text-2xl font-semibold text-blue-300">
+                            {getReadyCount()}/{getTotalPlayers()} Players Ready
+                          </div>
+                          <div className="text-lg text-blue-400">
+                            ({Math.round((getReadyCount() / getTotalPlayers()) * 100)}%)
+                          </div>
+                        </div>
+                        <div className="w-full bg-blue-700 rounded-full h-4 max-w-lg mx-auto mb-4">
+                          <div 
+                            className="bg-gradient-to-r from-green-500 to-green-400 h-4 rounded-full transition-all duration-500"
+                            style={{ width: `${(getReadyCount() / getTotalPlayers()) * 100}%` }}
+                          ></div>
+                        </div>
+                        
+                        <div className="text-center">
+                          {!partyCharacters.find(char => char.userId === user?.uid) ? (
+                            <div className="space-y-4">
+                              <p className="text-blue-300">You need to create a character first</p>
+                              <button
+                                onClick={() => navigate(`/character-creation/${partyId}`)}
+                                className="bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-700 hover:to-blue-600 text-white px-8 py-3 rounded-xl font-semibold text-lg transition-all duration-300 transform hover:scale-105 shadow-lg"
+                              >
+                                Create Character
+                              </button>
+                            </div>
+                          ) : !isReady ? (
+                            <button
+                              onClick={handleReadyUp}
+                              className="bg-gradient-to-r from-green-600 to-green-500 hover:from-green-700 hover:to-green-600 text-white px-8 py-3 rounded-xl font-semibold text-lg transition-all duration-300 transform hover:scale-105 shadow-lg"
+                            >
+                              Ready Up for Combat
+                            </button>
+                          ) : (
+                            <div className="text-green-400 font-semibold text-xl bg-green-900/30 px-6 py-3 rounded-xl">You are ready for combat!</div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                    
                     <div className="mt-3 text-blue-400 text-xs">
-                      Waiting for all players to be ready...
+                      {allPlayersReady ? 'All players ready! Starting combat...' : 'Waiting for all players to be ready...'}
                     </div>
                   </div>
                 </div>

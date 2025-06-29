@@ -58,10 +58,8 @@ export default function Combat() {
 
   useEffect(() => {
     if (isTestCombat && testData) {
-      // Initialize test combat session
       initializeTestCombat();
     } else if (sessionId) {
-      // Load regular combat session
       loadCombatData();
     }
   }, [isTestCombat, testData, sessionId]);
@@ -73,16 +71,12 @@ export default function Combat() {
         setLoading(false);
         
         if (session) {
-          // Update available actions based on current combatant
           updateAvailableActions(session);
           setEnvironmentalFeatures(session.environmentalFeatures || []);
           setTeamUpOpportunities(session.teamUpOpportunities || []);
           
-          // Check for player death
           checkPlayerDeath();
           
-          // Check if current turn is an enemy turn and auto-process
-          // Only process if we haven't already processed this turn and it's not currently processing
           const currentCombatant = session.combatants?.[session.currentTurn];
           if (currentCombatant && 
               currentCombatant.id.startsWith('enemy_') && 
@@ -91,26 +85,22 @@ export default function Combat() {
               !processingTurn &&
               !isEnemyTurn) {
             
-            console.log('Auto-processing enemy turn for:', currentCombatant.name, 'turn:', session.currentTurn);
-            setLastProcessedTurn(session.currentTurn);
-            
-            // Delay to allow UI to update first
             setTimeout(() => {
               processEnemyTurn();
             }, 1000);
           }
         }
       });
-      return () => unsubscribe();
+      return () => {
+        unsubscribe();
+      };
     }
   }, [sessionId, lastProcessedTurn, processingTurn, isEnemyTurn, isTestCombat]);
 
-  // Auto-process enemy turns in test combat
   useEffect(() => {
     if (isTestCombat && combatSession && combatSession.combatState === 'active') {
       const currentCombatant = getCurrentCombatant();
       if (currentCombatant && currentCombatant.id.startsWith('enemy_')) {
-        // Auto-process enemy turns in test combat
         const timer = setTimeout(() => {
           processEnemyTurn();
         }, 2000);
@@ -119,37 +109,67 @@ export default function Combat() {
     }
   }, [combatSession?.currentTurn, isTestCombat]);
 
-  // Auto-advance turn when all party members are ready
   useEffect(() => {
     if (combatSession && enemyTurnComplete && areAllPartyMembersReady()) {
-      // Auto-advance to next turn
-      const timer = setTimeout(() => {
+      setTimeout(() => {
         setEnemyTurnComplete(false);
         setPartyMembersReady(new Set());
         advanceTurn();
       }, 1000);
-      return () => clearTimeout(timer);
     }
   }, [enemyTurnComplete, partyMembersReady.size, combatSession?.partyMembers?.length]);
 
-  // Update available actions when combat session or turn changes
   useEffect(() => {
     if (combatSession) {
       updateAvailableActions(combatSession);
     }
   }, [combatSession?.currentTurn, combatSession?.combatState]);
 
+  // Auto-check for combat end conditions
+  useEffect(() => {
+    if (combatSession && combatSession.combatState === 'active') {
+      const partyMembers = combatSession.combatants.filter(c => !c.id.startsWith('enemy_'));
+      const enemies = combatSession.combatants.filter(c => c.id.startsWith('enemy_'));
+      
+      const partyAlive = partyMembers.some(member => member.hp > 0);
+      const enemiesAlive = enemies.some(enemy => enemy.hp > 0);
+      
+      if (!partyAlive) {
+        // Party defeated
+        if (isTestCombat) {
+          navigate('/test-environment', { 
+            state: { 
+              ...testData,
+              combatResult: 'defeat' 
+            } 
+          });
+        } else {
+          endCombat('defeat');
+        }
+      } else if (!enemiesAlive) {
+        // Enemies defeated
+        if (isTestCombat) {
+          navigate('/test-environment', { 
+            state: { 
+              ...testData,
+              combatResult: 'victory' 
+            } 
+          });
+        } else {
+          endCombat('victory');
+        }
+      }
+    }
+  }, [combatSession?.combatants, combatSession?.combatState]);
+
   const initializeTestCombat = async () => {
     try {
       setLoading(true);
       
-      // Ensure party members have proper HP and AC
       const validatedPartyMembers = testData.partyMembers.map(member => {
         if (!member.hp || !member.maxHp || !member.ac) {
-          // Calculate missing stats
           const { class: characterClass, level, constitution, dexterity } = member;
           
-          // Calculate HP
           const hitDieSizes = {
             'Barbarian': 12, 'Fighter': 10, 'Paladin': 10, 'Ranger': 10,
             'Cleric': 8, 'Druid': 8, 'Monk': 8, 'Rogue': 8, 'Bard': 8,
@@ -159,7 +179,6 @@ export default function Combat() {
           const constitutionMod = Math.floor((constitution - 10) / 2);
           const hp = Math.max(1, (hitDie + constitutionMod) * level);
           
-          // Calculate AC
           const baseAC = 10;
           const dexterityMod = Math.floor((dexterity - 10) / 2);
           const classACBonuses = {
@@ -180,7 +199,6 @@ export default function Combat() {
         return member;
       });
       
-      // Create a test combat session
       const testSession = {
         id: 'test_combat_session',
         partyMembers: validatedPartyMembers || [],
@@ -192,9 +210,7 @@ export default function Combat() {
         round: 1
       };
 
-      // Check if we have enemies
       if (!testSession.enemies || testSession.enemies.length === 0) {
-        console.error('No enemies provided for test combat!');
         setCombatSession({ 
           ...testSession, 
           status: 'no_enemies',
@@ -204,14 +220,12 @@ export default function Combat() {
         return;
       }
 
-      // Initialize combat with Pokemon-style mechanics
       const initializedCombat = combatService.initializeCombat(
         testSession.partyMembers,
         testSession.enemies,
         testSession.storyContext
       );
 
-      // Use the combatants in their proper initiative order - don't reorder them!
       const finalSession = {
         ...testSession,
         ...initializedCombat,
@@ -222,7 +236,6 @@ export default function Combat() {
       setCombatSession(finalSession);
       setLoading(false);
       
-      // Update available actions for the current combatant
       updateAvailableActions(finalSession);
       setEnvironmentalFeatures(finalSession.environmentalFeatures || []);
       setTeamUpOpportunities(finalSession.teamUpOpportunities || []);
@@ -239,16 +252,12 @@ export default function Combat() {
     
     try {
       setLoading(true);
+      
       const session = await getCombatSession(sessionId);
       
       if (!session) {
-        // No active combat session, redirect back to story
-        try {
-          navigate(`/campaign/${session.partyId || sessionId}`);
-        } catch (error) {
-          console.error('Navigation error in loadCombatData:', error);
-          navigate('/dashboard');
-        }
+        console.error('No combat session found with ID:', sessionId);
+        navigate('/dashboard');
         return;
       }
       
@@ -276,10 +285,9 @@ export default function Combat() {
       
       // If combat session is in 'initialized' state, automatically initialize it properly
       if (session.combatState === 'initialized') {
-        console.log('🔄 Combat session is initialized, setting up combat...');
-        
         // Create combatants array if it doesn't exist
         let combatants = session.combatants || [];
+        
         if (combatants.length === 0) {
           // Combine party members and enemies into combatants
           const partyCombatants = (session.partyMembers || []).map(member => ({
@@ -322,8 +330,6 @@ export default function Combat() {
         updateAvailableActions(activeSession);
         setEnvironmentalFeatures(activeSession.environmentalFeatures || []);
         setTeamUpOpportunities(activeSession.teamUpOpportunities || []);
-        
-        console.log('✅ Combat session activated:', activeSession);
       } else {
         // Session is already in a proper state, just set it
         setCombatSession(session);
@@ -341,16 +347,12 @@ export default function Combat() {
   const updateAvailableActions = (session) => {
     const currentCombatant = getCurrentCombatant(session);
     if (!currentCombatant) {
-      console.log('⚠️ No current combatant found for action update');
       return;
     }
-
-    console.log('🔄 Updating available actions for:', currentCombatant.name, 'combat state:', session.combatState);
 
     const actions = [];
     const cooldowns = currentCombatant.cooldowns || {};
 
-    // Add basic actions
     Object.entries(combatService.actionTypes).forEach(([actionType, config]) => {
       if (cooldowns[actionType] === 0 || cooldowns[actionType] === undefined) {
         actions.push({
@@ -375,7 +377,6 @@ export default function Combat() {
       });
     }
 
-    // Add environmental actions if available
     if (environmentalFeatures.length > 0) {
       actions.push({
         type: 'environmental',
@@ -386,7 +387,6 @@ export default function Combat() {
       });
     }
 
-    // Add team-up actions if available
     if (teamUpOpportunities.length > 0) {
       actions.push({
         type: 'teamUp',
@@ -397,14 +397,13 @@ export default function Combat() {
       });
     }
 
-    console.log('✅ Available actions set:', actions.length, 'actions');
     setAvailableActions(actions);
   };
 
   const addToBattleLog = (entry) => {
     const timestamp = new Date().toLocaleTimeString();
     const logEntry = {
-      id: `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`, // Unique ID
+      id: `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       timestamp,
       round: combatSession?.round || 1,
       turn: combatSession?.currentTurn || 0,
@@ -415,6 +414,72 @@ export default function Combat() {
 
   const startCombat = async () => {
     if (!combatSession) return;
+    
+    try {
+      setProcessingTurn(true);
+      
+      setBattleLog([]);
+      
+      const updatedSession = {
+        ...combatSession,
+        combatState: 'ready',
+        currentTurn: 0,
+        round: 1
+      };
+
+      if (isTestCombat) {
+        setCombatSession(updatedSession);
+        updateAvailableActions(updatedSession);
+      } else {
+        await updateCombatSession(sessionId, updatedSession);
+      }
+      
+      addToBattleLog({
+        type: 'combat_start',
+        description: 'Combat is ready to begin!'
+      });
+      
+    } catch (error) {
+      console.error('Error starting combat:', error);
+    } finally {
+      setProcessingTurn(false);
+    }
+  };
+
+  const beginCombat = async () => {
+    if (!combatSession) return;
+    
+    try {
+      setProcessingTurn(true);
+      
+      const updatedSession = {
+        ...combatSession,
+        combatState: 'active'
+      };
+
+      if (isTestCombat) {
+        setCombatSession(updatedSession);
+        updateAvailableActions(updatedSession);
+      } else {
+        await updateCombatSession(sessionId, updatedSession);
+      }
+      
+      addToBattleLog({
+        type: 'combat_begin',
+        description: 'Fight!'
+      });
+      
+      setCombatReady(true);
+      
+    } catch (error) {
+      console.error('Error beginning combat:', error);
+    } finally {
+      setProcessingTurn(false);
+    }
+  };
+
+  const executeAction = async (actionType, targetId, additionalData = {}) => {
+    if (!combatSession || !isCurrentUserTurn()) return;
     
     try {
       setProcessingTurn(true);
@@ -439,68 +504,19 @@ export default function Combat() {
       // Add combat start entry to battle log
       addToBattleLog({
         type: 'combat_start',
-        description: 'Combat is ready to begin!'
+        description: 'Combat begins!'
       });
-      
-      } catch (error) {
-      console.error('Error starting combat:', error);
-    } finally {
-      setProcessingTurn(false);
-    }
-  };
-
-  const beginCombat = async () => {
-    if (!combatSession) return;
-    
-    try {
-      setProcessingTurn(true);
-      
-      const updatedSession = {
-        ...combatSession,
-        combatState: 'active'
-      };
-
-      if (isTestCombat) {
-        setCombatSession(updatedSession);
-        updateAvailableActions(updatedSession);
-    } else {
-        await updateCombatSession(sessionId, updatedSession);
-      }
       
       // Add combat begin entry to battle log
       addToBattleLog({
         type: 'combat_begin',
-        description: 'Fight!'
+        description: 'The battle is joined!'
       });
-      
-      setCombatReady(true);
-      
-    } catch (error) {
-      console.error('Error beginning combat:', error);
-    } finally {
-      setProcessingTurn(false);
-    }
-  };
-
-  const executeAction = async (actionType, targetId, additionalData = {}) => {
-    if (!combatSession || processingTurn) return;
-
-    try {
-      setProcessingTurn(true);
-      setActionMessage('');
-      setNarrativeDescription('');
-
-      const currentCombatant = getCurrentCombatant();
-      if (!currentCombatant) {
-        throw new Error('No current combatant found');
-      }
-
-      const target = combatSession.combatants.find(c => c.id === targetId);
-      if (!target) {
-        throw new Error('Target not found');
-      }
 
       // Execute the action
+      const currentCombatant = getCurrentCombatant();
+      const target = combatSession.combatants.find(c => c.id === targetId);
+      
       const result = await combatService.executeAction(
         combatSession,
         currentCombatant.id,
@@ -510,15 +526,17 @@ export default function Combat() {
       );
 
       // Update combat session with results
-      const updatedSession = {
+      const resultSession = {
         ...combatSession,
-        ...result.updatedSession
+        currentTurn: result.updatedSession.currentTurn,
+        round: result.updatedSession.round,
+        combatants: result.updatedSession.combatants
       };
 
       if (isTestCombat) {
-        setCombatSession(updatedSession);
+        setCombatSession(resultSession);
       } else {
-        await updateCombatSession(sessionId, updatedSession);
+        await updateCombatSession(sessionId, resultSession);
       }
 
       // Add to battle log
@@ -531,20 +549,14 @@ export default function Combat() {
       if (result.damage > 0 && target) {
         addToBattleLog({
           type: 'damage',
-          actor: currentCombatant.name,
-          target: target.name,
-          damage: result.damage,
-          description: `${currentCombatant.name} deals ${result.damage} damage to ${target.name}`
+          description: `${target.name} takes ${result.damage} damage!`
         });
       }
 
       if (result.healing > 0 && target) {
         addToBattleLog({
           type: 'healing',
-          actor: currentCombatant.name,
-          target: target.name,
-          healing: result.healing,
-          description: `${currentCombatant.name} heals ${target.name} for ${result.healing} HP`
+          description: `${target.name} is healed for ${result.healing} HP!`
         });
       }
 
@@ -555,8 +567,18 @@ export default function Combat() {
       }
 
       // Check if combat ended
-      if (result.combatEnded) {
-        endCombat();
+      const combatResult = combatService.checkCombatEnd(resultSession);
+      if (combatResult.ended) {
+        if (isTestCombat) {
+          navigate('/test-environment', { 
+            state: { 
+              ...testData,
+              combatResult: combatResult.result 
+            } 
+          });
+        } else {
+          await endCombat(combatResult.result);
+        }
         return;
       }
 
@@ -585,7 +607,7 @@ export default function Combat() {
       if (result.healing > 0 && target) {
         setDamageAnimation({
           targetId: target.id,
-          damage: result.healing,
+          healing: result.healing,
           type: 'healing'
         });
         setShowDamageAnimation(true);
@@ -595,13 +617,11 @@ export default function Combat() {
       // Clear selections after action
       setSelectedAction(null);
       setSelectedTarget(null);
-
     } catch (error) {
       console.error('Error executing action:', error);
-      setActionMessage(`Error: ${error.message}`);
       addToBattleLog({
         type: 'error',
-        description: `Error executing action: ${error.message}`
+        description: 'An error occurred while executing the action.'
       });
     } finally {
       setProcessingTurn(false);
@@ -610,83 +630,50 @@ export default function Combat() {
 
   const processEnemyTurn = async () => {
     if (!combatSession || combatSession.combatState !== 'active') {
-      console.error('Combat not active');
       return;
     }
     
     const currentCombatant = getCurrentCombatant();
     if (!currentCombatant || !currentCombatant.id.startsWith('enemy_')) {
-      console.error('Not an enemy turn');
       return;
     }
     
-    console.log('Processing enemy turn for:', currentCombatant.name);
-
     try {
     setProcessingTurn(true);
       setIsEnemyTurn(true);
 
-      // Record enemy turn start in battle log
       addToBattleLog({
         type: 'turn_start',
         actor: currentCombatant.name,
         description: `${currentCombatant.name}'s turn begins`
       });
 
-      // Use the correct method name from combat service
       const selectedAction = combatService.chooseEnemyAction(currentCombatant, combatSession);
-      console.log('Selected enemy action:', selectedAction);
-
       if (!selectedAction) {
-        console.log('No action selected for enemy');
-        addToBattleLog({
-          type: 'no_action',
-          actor: currentCombatant.name,
-          description: `${currentCombatant.name} cannot decide on an action`
-        });
-        
         setTimeout(() => {
           advanceTurn();
         }, 1000);
         return;
       }
 
-      // Fix: Use the correct property names from the combat service
-      const actionType = selectedAction.action; // Changed from selectedAction.type
-      const targetId = selectedAction.target; // Changed from target.id
+      const actionType = selectedAction.action;
+      const targetId = selectedAction.target;
 
       if (!actionType) {
-        console.log('No action type in selected action');
-        addToBattleLog({
-          type: 'no_action',
-          actor: currentCombatant.name,
-          description: `${currentCombatant.name} has no valid action type`
-        });
-        
         setTimeout(() => {
           advanceTurn();
         }, 1000);
         return;
       }
 
-      // Get the target combatant
       const target = combatSession.combatants.find(c => c.id === targetId);
       if (!target && actionType !== 'defend') {
-        console.log('No target found for enemy action');
-        addToBattleLog({
-          type: 'no_target',
-          actor: currentCombatant.name,
-          action: actionType,
-          description: `${currentCombatant.name} cannot find a target for ${actionType}`
-        });
-        
         setTimeout(() => {
           advanceTurn();
         }, 1000);
         return;
       }
 
-      // Record the action in battle log
       addToBattleLog({
         type: 'action',
         actor: currentCombatant.name,
@@ -695,19 +682,15 @@ export default function Combat() {
         description: `${currentCombatant.name} uses ${actionType}${target ? ` on ${target.name}` : ''}`
       });
 
-      // Execute the action
       const result = await combatService.executeAction(
         combatSession,
         currentCombatant.id,
         actionType,
         targetId,
-        selectedAction // Pass the full selectedAction object as additionalData
+        selectedAction
       );
 
       if (result.success) {
-        console.log('Enemy action executed successfully:', result);
-
-        // Update combat session
         const updatedSession = {
           ...combatSession,
           ...(result.updatedSession || {}),
@@ -716,7 +699,6 @@ export default function Combat() {
             : combatSession.currentTurn
         };
 
-        // Record damage/healing in battle log
         if (result.damage) {
           addToBattleLog({
             type: 'damage',
@@ -737,7 +719,6 @@ export default function Combat() {
           });
         }
 
-        // Record status effects
         if (result.statusEffects && result.statusEffects.length > 0) {
           result.statusEffects.forEach(effect => {
             addToBattleLog({
@@ -750,7 +731,6 @@ export default function Combat() {
           });
         }
 
-        // Record death
         if (result.targetDied) {
           addToBattleLog({
             type: 'death',
@@ -762,7 +742,6 @@ export default function Combat() {
 
         setCombatSession(updatedSession);
 
-        // Show damage animation
         if (result.damage && target) {
           setDamageAnimation({
             targetId: target.id,
@@ -773,7 +752,6 @@ export default function Combat() {
           setTimeout(() => setShowDamageAnimation(false), 2000);
         }
 
-        // Show healing animation
         if (result.healing && target) {
           setDamageAnimation({
             targetId: target.id,
@@ -784,7 +762,6 @@ export default function Combat() {
           setTimeout(() => setShowDamageAnimation(false), 2000);
         }
 
-        // Generate narrative description
         const narrative = combatService.generateActionNarrative(
           currentCombatant,
           actionType,
@@ -795,7 +772,6 @@ export default function Combat() {
         setEnemyTurnMessage(`${currentCombatant.name} uses ${actionType}!`);
         setEnemyTurnNarrative(narrative);
 
-        // Check if combat should end
         if (result.combatEnded) {
           console.log('Combat ended');
           if (isTestCombat) {
@@ -806,12 +782,11 @@ export default function Combat() {
               } 
             });
           } else {
-            await endCombat();
+            await endCombat(result.combatResult);
           }
-      return;
-    }
-    
-        // Check if all players are dead
+          return;
+        }
+
         const remainingPlayers = updatedSession.combatants.filter(c => 
           !c.id.startsWith('enemy_') && c.hp > 0
         );
@@ -825,13 +800,12 @@ export default function Combat() {
                 combatResult: 'defeat' 
               } 
             });
-    } else {
-            await endCombat();
+          } else {
+            await endCombat('defeat');
           }
           return;
         }
 
-        // Automatically advance to next turn after a short delay
         setTimeout(() => {
           advanceTurn();
         }, 1000);
@@ -868,13 +842,47 @@ export default function Combat() {
 
   const advanceTurn = async () => {
     if (!combatSession || combatSession.combatState !== 'active') {
-      console.error('Combat not active');
       return;
     }
 
-    console.log('Advancing turn from:', combatSession.currentTurn);
+    // Check for combat end conditions first
+    const partyMembers = combatSession.combatants.filter(c => !c.id.startsWith('enemy_'));
+    const enemies = combatSession.combatants.filter(c => c.id.startsWith('enemy_'));
+    
+    const partyAlive = partyMembers.some(member => member.hp > 0);
+    const enemiesAlive = enemies.some(enemy => enemy.hp > 0);
+    
+    if (!partyAlive) {
+      // Party defeated
+      if (isTestCombat) {
+        navigate('/test-environment', { 
+          state: { 
+            ...testData,
+            combatResult: 'defeat' 
+          } 
+        });
+      } else {
+        await endCombat('defeat');
+      }
+      return;
+    }
+    
+    if (!enemiesAlive) {
+      // Enemies defeated
+      if (isTestCombat) {
+        navigate('/test-environment', { 
+          state: { 
+            ...testData,
+            combatResult: 'victory' 
+          } 
+        });
+      } else {
+        await endCombat('victory');
+      }
+      return;
+    }
 
-    // Find the next alive combatant
+    // Find next alive combatant
     let nextTurn = (combatSession.currentTurn + 1) % combatSession.combatants.length;
     let attempts = 0;
     const maxAttempts = combatSession.combatants.length;
@@ -883,7 +891,7 @@ export default function Combat() {
       const nextCombatant = combatSession.combatants[nextTurn];
       
       if (nextCombatant && nextCombatant.hp > 0) {
-        break; // Found an alive combatant
+        break;
       }
       
       nextTurn = (nextTurn + 1) % combatSession.combatants.length;
@@ -892,7 +900,6 @@ export default function Combat() {
 
     // If we've checked all combatants and none are alive, end combat
     if (attempts >= maxAttempts) {
-      console.log('No alive combatants found, ending combat');
       if (isTestCombat) {
         navigate('/test-environment', { 
           state: { 
@@ -901,55 +908,38 @@ export default function Combat() {
           } 
         });
       } else {
-        await endCombat();
+        await endCombat('draw');
       }
       return;
     }
 
-    // Check if we've completed a full round
+    // Update session with new turn
+    const updatedSession = {
+      ...combatSession,
+      currentTurn: nextTurn
+    };
+    
+    // Increment round if we've completed a full cycle
     if (nextTurn === 0) {
-      const updatedSession = {
-        ...combatSession,
-        currentTurn: nextTurn,
-        round: combatSession.round + 1
-      };
-      
-      if (isTestCombat) {
-        setCombatSession(updatedSession);
-      } else {
-        await updateCombatSession(sessionId, updatedSession);
-      }
-    } else {
-      const updatedSession = {
-        ...combatSession,
-        currentTurn: nextTurn
-      };
-      
-      if (isTestCombat) {
-        setCombatSession(updatedSession);
-      } else {
-        await updateCombatSession(sessionId, updatedSession);
-      }
+      updatedSession.round = combatSession.round + 1;
     }
-
-    console.log('Turn advanced to:', nextTurn, 'combatant:', combatSession.combatants[nextTurn]?.name);
+    
+    if (isTestCombat) {
+      setCombatSession(updatedSession);
+    } else {
+      await updateCombatSession(sessionId, updatedSession);
+    }
 
     // Update available actions for the new current combatant
-    const newSession = isTestCombat ? combatSession : await getCombatSession(sessionId);
-    if (newSession) {
-      updateAvailableActions(newSession);
-    }
+    updateAvailableActions(updatedSession);
   };
 
-  const endCombat = async () => {
+  const endCombat = async (result = 'victory') => {
     if (!combatSession) return;
     
-    // Generate combat summary
-    const summary = combatService.generateCombatSummary(combatSession, 'victory');
+    const summary = combatService.generateCombatSummary(combatSession, result);
     
-    // Mark combat session as ended
     if (isTestCombat) {
-      // For test combat, update only local state
       setCombatSession(prevSession => ({
         ...prevSession,
         status: 'ended',
@@ -957,22 +947,19 @@ export default function Combat() {
         summary: summary
       }));
       
-      // For test combat, navigate back to test environment
       navigate('/test-environment');
     } else {
-    await updateCombatSessionWithNarrative(sessionId, {
-      status: 'ended',
-      combatState: 'ended',
-      summary: summary
-    });
-    
-      // For regular combat, return story to active state
+      await updateCombatSessionWithNarrative(sessionId, {
+        status: 'ended',
+        combatState: 'ended',
+        summary: summary
+      });
+      
       await updateCampaignStory(sessionId, {
         status: 'storytelling',
         currentCombat: null
       });
       
-      // Navigate back to campaign story
       navigate(`/campaign/${sessionId}`);
     }
   };
@@ -990,20 +977,18 @@ export default function Combat() {
         combatant.id === combatantId ? { ...combatant, hp: clampedHp } : combatant
       );
       if (isTestCombat) {
-        // For test combat, update only local state
         setCombatSession(prevSession => ({
           ...prevSession,
           enemies: updatedEnemies,
           combatants: updatedCombatants
         }));
       } else {
-      await updateCombatSessionWithNarrative(sessionId, {
-        enemies: updatedEnemies,
-        combatants: updatedCombatants
-      });
+        await updateCombatSessionWithNarrative(sessionId, {
+          enemies: updatedEnemies,
+          combatants: updatedCombatants
+        });
       }
       
-      // Update local state immediately
       setCombatSession(prevSession => ({
         ...prevSession,
         enemies: updatedEnemies,
@@ -1017,20 +1002,18 @@ export default function Combat() {
         combatant.id === combatantId ? { ...combatant, hp: clampedHp } : combatant
       );
       if (isTestCombat) {
-        // For test combat, update only local state
         setCombatSession(prevSession => ({
           ...prevSession,
           partyMembers: updatedPartyMembers,
           combatants: updatedCombatants
         }));
       } else {
-      await updateCombatSessionWithNarrative(sessionId, {
-        partyMembers: updatedPartyMembers,
-        combatants: updatedCombatants
-      });
+        await updateCombatSessionWithNarrative(sessionId, {
+          partyMembers: updatedPartyMembers,
+          combatants: updatedCombatants
+        });
       }
       
-      // Update local state immediately
       setCombatSession(prevSession => ({
         ...prevSession,
         partyMembers: updatedPartyMembers,
@@ -1056,32 +1039,18 @@ export default function Combat() {
 
   const isCurrentUserTurn = () => {
     const currentCombatant = getCurrentCombatant();
-    console.log('🔍 isCurrentUserTurn check:', {
-      currentCombatant: currentCombatant?.name,
-      currentCombatantId: currentCombatant?.id,
-      currentCombatantUserId: currentCombatant?.userId,
-      userUid: user?.uid,
-      isTestCombat,
-      isEnemy: currentCombatant?.isEnemy
-    });
-    
     if (!currentCombatant) return false;
     
-    // For test combat, if the current combatant is not an enemy, it's the user's turn
     if (isTestCombat) {
       const result = !currentCombatant.isEnemy;
-      console.log('🧪 Test combat turn check:', result);
       return result;
     }
     
-    // For regular combat, check if the current combatant belongs to the current user
     const result = currentCombatant.userId === user?.uid;
-    console.log('🎮 Regular combat turn check:', result);
     return result;
   };
 
   const getCurrentUserCharacter = () => {
-    // For test combat, return the current combatant if it's not an enemy
     if (isTestCombat) {
       const currentCombatant = getCurrentCombatant();
       if (currentCombatant && !currentCombatant.isEnemy) {
@@ -1090,53 +1059,43 @@ export default function Combat() {
       return null;
     }
     
-    // For regular combat, find the character belonging to the current user
     return partyCharacters.find(char => char.userId === user?.uid);
   };
 
-  // Check if current player is dead
   const checkPlayerDeath = () => {
     if (!combatSession) return;
     
     if (isTestCombat) {
-      // For test combat, check if the test character is dead
       const testCharacter = combatSession.combatants.find(c => !c.isEnemy);
       if (testCharacter && testCharacter.hp <= 0) {
         setPlayerDied(true);
         setDeadPlayer(testCharacter);
       }
     } else if (user) {
-      // For regular combat, check if the current user's character is dead
-    const currentPlayer = combatSession.partyMembers.find(p => p.userId === user.uid) ||
-                         combatSession.combatants.find(c => c.userId === user.uid && !c.isEnemy);
-    if (currentPlayer && currentPlayer.hp <= 0) {
-      setPlayerDied(true);
-      setDeadPlayer(currentPlayer);
+      const currentPlayer = combatSession.partyMembers.find(p => p.userId === user.uid) ||
+                           combatSession.combatants.find(c => c.userId === user.uid && !c.isEnemy);
+      if (currentPlayer && currentPlayer.hp <= 0) {
+        setPlayerDied(true);
+        setDeadPlayer(currentPlayer);
       }
     }
   };
 
-  // Handle player death
   const handlePlayerDeath = () => {
     if (isTestCombat) {
-      // For test combat, navigate to dashboard
       navigate('/dashboard');
     } else {
-      // For regular combat, navigate to character creation using partyId
       const partyId = combatSession?.partyId;
       navigate(`/character-creation/${partyId}`);
     }
   };
 
-  // Handle "Okay" button click to proceed after enemy turn
   const handleProceedAfterEnemyTurn = () => {
     if (isTestCombat) {
-      // For test combat, just proceed immediately
       setEnemyTurnComplete(false);
       setPartyMembersReady(new Set());
       advanceTurn();
     } else {
-      // For regular combat, mark current user as ready
       const currentUserId = user?.uid;
       if (currentUserId) {
         setPartyMembersReady(prev => new Set([...prev, currentUserId]));
@@ -1144,10 +1103,9 @@ export default function Combat() {
     }
   };
 
-  // Check if all party members are ready to proceed
   const areAllPartyMembersReady = () => {
     if (isTestCombat) {
-      return true; // Test combat doesn't need multiple confirmations
+      return true;
     }
     
     if (!combatSession?.partyMembers) return false;
@@ -1158,7 +1116,6 @@ export default function Combat() {
     return readyMembers >= alivePartyMembers.length;
   };
 
-  // Defensive fix: always ensure combatants and enemies are arrays
   const safeCombatants = Array.isArray(combatSession?.combatants)
     ? combatSession.combatants
     : Array.isArray(combatSession?.partyMembers) && Array.isArray(combatSession?.enemies)
@@ -1184,7 +1141,6 @@ export default function Combat() {
         ]
       : [];
 
-  // Get valid targets based on selected action
   const getValidTargetsForAction = (actionType) => {
     if (!actionType || !safeCombatants.length) return [];
     
@@ -1193,40 +1149,31 @@ export default function Combat() {
     
     if (!currentCombatant) return [];
     
-    // Determine if current combatant is a player or enemy
     const isPlayer = !currentCombatant.id.startsWith('enemy_');
     
     switch (actionType) {
       case 'attack':
       case 'spell':
       case 'special':
-        // Can target enemies (opposite team)
         if (isPlayer) {
-          // Player targeting enemies
           return aliveCombatants.filter(c => c.id.startsWith('enemy_'));
         } else {
-          // Enemy targeting players
           return aliveCombatants.filter(c => !c.id.startsWith('enemy_'));
         }
         
       case 'heal':
       case 'item':
-        // Can target allies (same team)
         if (isPlayer) {
-          // Player targeting other players
           return aliveCombatants.filter(c => !c.id.startsWith('enemy_') && c.id !== currentCombatant.id);
         } else {
-          // Enemy targeting other enemies
           return aliveCombatants.filter(c => c.id.startsWith('enemy_') && c.id !== currentCombatant.id);
         }
         
       case 'defend':
       case 'environmental':
-        // Can target self or no target needed
         return [currentCombatant];
         
       case 'teamUp':
-        // Can target allies for team-up actions
         if (isPlayer) {
           return aliveCombatants.filter(c => !c.id.startsWith('enemy_') && c.id !== currentCombatant.id);
         } else {
@@ -1234,7 +1181,6 @@ export default function Combat() {
         }
         
       default:
-        // Default to all alive targets
         return aliveCombatants;
     }
   };
@@ -1247,7 +1193,6 @@ export default function Combat() {
     return null;
   }
 
-  // Show loading state
   if (loading) {
     return (
       <div className="fantasy-container py-8">
@@ -1277,7 +1222,6 @@ export default function Combat() {
     );
   }
 
-  // Show message if no enemies to fight
   if ((combatSession.status === 'no_enemies' || (safeEnemies.length === 0)) && !isTestCombat) {
     return (
       <div className="fantasy-container py-8">
@@ -1299,19 +1243,6 @@ export default function Combat() {
 
   const currentCombatant = getCurrentCombatant();
   
-  // Debug logging for UI rendering
-  console.log('🎮 UI Debug:', {
-    currentCombatant: currentCombatant?.name,
-    currentCombatantId: currentCombatant?.id,
-    safeCombatantsLength: safeCombatants.length,
-    safeEnemiesLength: safeEnemies.length,
-    combatSessionState: combatSession?.combatState,
-    availableActionsLength: availableActions.length,
-    isCurrentUserTurn: isCurrentUserTurn(),
-    userUid: user?.uid
-  });
-
-  // Player Death Screen
   if (playerDied && deadPlayer) {
     return (
       <div className="fantasy-container py-8">
@@ -1357,19 +1288,10 @@ export default function Combat() {
   return (
     <div className="min-h-screen bg-gray-900 text-gray-100 p-4">
       <div className="fantasy-container py-4">
-        {/* Combat Header */}
         <div className="flex justify-between items-center mb-6">
           <h1 className="fantasy-title mb-0">⚔️ Combat Arena</h1>
-          <div className="flex space-x-2">
-            {combatSession.combatState === 'active' && (
-                <button onClick={endCombat} className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg shadow-lg">
-                  End Combat
-                </button>
-            )}
-          </div>
         </div>
 
-        {/* Story Context - Now at the top */}
         {combatSession.storyContext && (
           <div className="fantasy-card mb-6">
             <h3 className="font-bold text-gray-100 mb-2">Story Context</h3>
@@ -1377,11 +1299,8 @@ export default function Combat() {
           </div>
         )}
 
-        {/* Main Combat Grid Layout */}
         <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">
-          {/* Left Column - Battle Log */}
           <div className="xl:col-span-1 space-y-6">
-            {/* Battle Log */}
             <div className="fantasy-card h-96">
               <h3 className="text-lg font-semibold mb-4 text-yellow-400">Battle Log</h3>
               <div className="space-y-2 h-80 overflow-y-auto">
@@ -1411,11 +1330,9 @@ export default function Combat() {
               </div>
             </div>
 
-            {/* Combat Status Display */}
             <div className="fantasy-card">
               <h3 className="font-bold text-gray-100 mb-3">Combat Status</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {/* Party Members */}
                 <div>
                   <h4 className="font-semibold text-blue-300 mb-2">Party Members</h4>
                   <div className="space-y-2">
@@ -1448,7 +1365,6 @@ export default function Combat() {
                   </div>
                 </div>
 
-                {/* Enemies */}
                 <div>
                   <h4 className="font-semibold text-red-300 mb-2">Enemies</h4>
                   <div className="space-y-2">
@@ -1483,7 +1399,6 @@ export default function Combat() {
               </div>
             </div>
 
-            {/* Environmental Features */}
             {environmentalFeatures.length > 0 && (
               <div className="fantasy-card">
                 <h3 className="font-bold text-blue-300 mb-2">🌍 Environmental Features</h3>
@@ -1497,7 +1412,6 @@ export default function Combat() {
               </div>
             )}
 
-            {/* Team Up Opportunities */}
             {teamUpOpportunities.length > 0 && (
               <div className="fantasy-card">
                 <h3 className="font-bold text-purple-300 mb-2">🤝 Team Up Opportunities</h3>
@@ -1512,17 +1426,9 @@ export default function Combat() {
             )}
           </div>
 
-          {/* Center Column - Main Combat Area */}
           <div className="xl:col-span-2 space-y-6">
-            {/* Current Turn Actions */}
             {(() => {
               const shouldShowTurnOptions = currentCombatant && safeCombatants.length > 0;
-              console.log('🎯 Turn options condition check:', {
-                currentCombatant: !!currentCombatant,
-                safeCombatantsLength: safeCombatants.length,
-                shouldShowTurnOptions,
-                isCurrentUserTurn: isCurrentUserTurn()
-              });
               return shouldShowTurnOptions;
             })() && (
               <div className="fantasy-card">
@@ -1532,7 +1438,6 @@ export default function Combat() {
                 
                 {isCurrentUserTurn() ? (
                   <div className="space-y-4">
-                    {/* Available Actions */}
                     <div>
                       <h4 className="font-semibold text-gray-200 mb-2">Available Actions:</h4>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -1556,7 +1461,6 @@ export default function Combat() {
                       </div>
                     </div>
 
-                    {/* Target Selection */}
                     {selectedAction && (
                       <div>
                         <h4 className="font-semibold text-gray-200 mb-2">Select Target:</h4>
@@ -1589,7 +1493,6 @@ export default function Combat() {
                       </div>
                     )}
 
-                    {/* Execute Action */}
                     {selectedAction && selectedTarget && (
                       <div className="text-center">
                         <button
@@ -1618,7 +1521,6 @@ export default function Combat() {
               </div>
             )}
 
-            {/* Fallback UI when no combatants or enemies */}
             {(!safeCombatants.length || !safeEnemies.length) && (
               <div className="fantasy-card bg-gray-800 border-gray-600">
                 <h3 className="font-bold text-gray-100 mb-3">Combat Status</h3>
@@ -1639,7 +1541,6 @@ export default function Combat() {
               </div>
             )}
 
-            {/* Action Results */}
             {actionMessage && (
               <div className="fantasy-card bg-green-900/20 border-green-700">
                 <h4 className="font-bold text-green-300 mb-2">Action Result</h4>
@@ -1652,7 +1553,6 @@ export default function Combat() {
               </div>
             )}
 
-            {/* Enemy Turn Animation */}
             {isEnemyTurn && (
               <div className="fantasy-card bg-red-900/20 border-red-700 animate-pulse">
                 <div className="text-center">
@@ -1675,7 +1575,6 @@ export default function Combat() {
               </div>
             )}
 
-            {/* Proceed After Enemy Turn */}
             {enemyTurnComplete && (
               <div className="fantasy-card bg-blue-900/20 border-blue-700">
                 <div className="text-center">
@@ -1742,7 +1641,6 @@ export default function Combat() {
               </div>
             )}
 
-            {/* Processing Turn Indicator */}
             {processingTurn && !isEnemyTurn && (
               <div className="fantasy-card bg-amber-900/20 border-amber-700">
                 <div className="flex items-center justify-center">
@@ -1752,7 +1650,6 @@ export default function Combat() {
               </div>
             )}
 
-            {/* Fight! Confirmation */}
             {combatSession?.combatState === 'ready' && !combatReady && (
               <div className="fantasy-card bg-red-900/20 border-red-700">
                 <div className="text-center">
@@ -1772,9 +1669,7 @@ export default function Combat() {
             )}
           </div>
 
-          {/* Right Column - Turn Order and Additional Info */}
           <div className="xl:col-span-1 space-y-6">
-            {/* Initiative Order */}
             {safeCombatants.length > 0 && (
               <div className="fantasy-card">
                 <h3 className="font-bold text-gray-100 mb-3">🎯 Turn Order</h3>
@@ -1785,6 +1680,8 @@ export default function Combat() {
                       className={`p-3 rounded-lg border-2 transition-colors ${
                         combatant.id === safeCombatants[combatSession.currentTurn]?.id
                           ? 'border-amber-500 bg-amber-900/20'
+                          : combatant.hp <= 0
+                          ? 'border-red-600 bg-red-900/20 opacity-50'
                           : 'border-gray-600 bg-gray-700'
                       }`}
                     >
@@ -1795,18 +1692,25 @@ export default function Combat() {
                             {combatant.id === safeCombatants[combatSession.currentTurn]?.id && (
                               <span className="ml-2 text-amber-400">← Current Turn</span>
                             )}
+                            {combatant.hp <= 0 && (
+                              <span className="ml-2 text-red-400">💀 Defeated</span>
+                            )}
                           </div>
-                          <div className="text-sm text-gray-300">
-                            HP: {combatant.hp}/{combatant.maxHp} | AC: {combatant.ac}
+                          <div className="text-sm text-gray-400">
+                            Initiative: {combatant.initiative || 'N/A'}
                           </div>
-                          {combatant.statusEffects && combatant.statusEffects.length > 0 && (
-                            <div className="text-xs text-red-400 mt-1">
-                              {combatant.statusEffects.map(effect => effect.type).join(', ')}
-                            </div>
-                          )}
                         </div>
-                        <div className="text-sm text-gray-400">
-                          Initiative: {combatant.initiative}
+                        <div className="text-right">
+                          <div className={`text-sm font-medium ${
+                            combatant.hp <= 0 ? 'text-red-400' :
+                            combatant.hp < combatant.maxHp * 0.5 ? 'text-yellow-400' :
+                            'text-green-400'
+                          }`}>
+                            {combatant.hp}/{combatant.maxHp} HP
+                          </div>
+                          <div className="text-xs text-gray-500">
+                            AC: {combatant.ac || 'N/A'}
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -1815,7 +1719,6 @@ export default function Combat() {
               </div>
             )}
 
-            {/* Damage Animation Overlay */}
             {showDamageAnimation && damageAnimation && (
               <div className="fixed inset-0 pointer-events-none z-50 flex items-center justify-center">
                 <div className={`text-6xl font-bold animate-bounce px-6 py-4 rounded-lg shadow-lg ${
@@ -1828,7 +1731,6 @@ export default function Combat() {
               </div>
             )}
 
-            {/* Player Death Screen */}
             {playerDied && deadPlayer && (
               <div className="fantasy-card bg-red-900/20 border-red-700">
                 <div className="text-center py-8">

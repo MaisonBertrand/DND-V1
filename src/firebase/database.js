@@ -866,6 +866,7 @@ export const createCombatSession = async (partyId, combatData) => {
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp()
     };
+    
     const docRef = await addDoc(collection(db, 'combatSessions'), combat);
     return { id: docRef.id, ...combat };
   } catch (error) {
@@ -873,21 +874,16 @@ export const createCombatSession = async (partyId, combatData) => {
   }
 };
 
-export const getCombatSession = async (partyId) => {
+export const getCombatSession = async (sessionId) => {
   try {
-    const q = query(
-      collection(db, 'combatSessions'),
-      where('partyId', '==', partyId),
-      where('status', '==', 'active')
-    );
-    const querySnapshot = await getDocs(q);
+    const combatRef = doc(db, 'combatSessions', sessionId);
+    const docSnap = await getDoc(combatRef);
     
-    if (querySnapshot.empty) {
+    if (!docSnap.exists()) {
       return null;
     }
     
-    const doc = querySnapshot.docs[0];
-    return { id: doc.id, ...doc.data() };
+    return { id: docSnap.id, ...docSnap.data() };
   } catch (error) {
     handleDatabaseError(error, 'getCombatSession');
   }
@@ -895,32 +891,44 @@ export const getCombatSession = async (partyId) => {
 
 export const updateCombatSession = async (combatId, updates) => {
   try {
+    console.log('💾 updateCombatSession called with:', {
+      combatId,
+      updates
+    });
+    
     const combatRef = doc(db, 'combatSessions', combatId);
     await updateDoc(combatRef, {
       ...updates,
-      updatedAt: serverTimestamp()
+      lastUpdated: serverTimestamp()
     });
+    
+    console.log('💾 updateCombatSession completed successfully');
   } catch (error) {
+    console.error('❌ Error in updateCombatSession:', error);
     handleDatabaseError(error, 'updateCombatSession');
   }
 };
 
-export const subscribeToCombatSession = (partyId, callback) => {
+export const subscribeToCombatSession = (sessionId, callback) => {
   try {
-    const q = query(
-      collection(db, 'combatSessions'),
-      where('partyId', '==', partyId),
-      where('status', '==', 'active')
-    );
-    return onSnapshot(q, (querySnapshot) => {
-      if (!querySnapshot.empty) {
-        const doc = querySnapshot.docs[0];
-        callback({ id: doc.id, ...doc.data() });
+    console.log('📡 Setting up combat session subscription for:', sessionId);
+    const combatRef = doc(db, 'combatSessions', sessionId);
+    
+    const unsubscribe = onSnapshot(combatRef, (docSnap) => {
+      console.log('📡 Combat session subscription update received:', docSnap.exists() ? 'Document exists' : 'Document does not exist');
+      if (docSnap.exists()) {
+        const data = { id: docSnap.id, ...docSnap.data() };
+        console.log('📡 Combat session data from subscription:', data);
+        callback(data);
       } else {
+        console.log('📡 Combat session document does not exist');
         callback(null);
       }
     });
+    
+    return unsubscribe;
   } catch (error) {
+    console.error('❌ Error in subscribeToCombatSession:', error);
     handleDatabaseError(error, 'subscribeToCombatSession');
   }
 };

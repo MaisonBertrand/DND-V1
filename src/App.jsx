@@ -47,7 +47,7 @@ function App() {
             <Route path="/campaign-management" element={<CampaignManagement />} />
             <Route path="/character-creation/:partyId" element={<CharacterCreation />} />
             <Route path="/campaign/:partyId" element={<CampaignStory />} />
-            <Route path="/combat/:partyId" element={<Combat />} />
+            <Route path="/combat/:sessionId" element={<Combat />} />
             <Route path="/party-management" element={<PartyManagement />} />
             
             {/* Redirect old campaign-story routes to new campaign routes */}
