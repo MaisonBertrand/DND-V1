@@ -1,9 +1,11 @@
 import React from 'react';
 
+const version = import.meta.env.VITE_APP_VERSION || '3.1.2';
+
 export default function VersionDisplay() {
   return (
     <div className="text-xs text-gray-400 text-center mt-2">
-      Version 3.1.0
+      Version {version}
     </div>
   );
 } 

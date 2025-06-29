@@ -78,20 +78,6 @@ export default function Navbar() {
             DND-V1
           </Link>
           
-          {/* Connection Status Indicator */}
-          <div className="flex items-center space-x-2 mr-4">
-            <div className={`w-2 h-2 rounded-full ${
-              connectionStatus === 'connected' ? 'bg-green-500' :
-              connectionStatus === 'reconnecting' ? 'bg-yellow-500' :
-              'bg-red-500'
-            }`}></div>
-            <span className="text-xs text-gray-400 hidden sm:inline">
-              {connectionStatus === 'connected' ? 'Connected' :
-               connectionStatus === 'reconnecting' ? 'Reconnecting...' :
-               'Disconnected'}
-            </span>
-          </div>
-          
           {/* Desktop Menu */}
           <div className="hidden md:flex items-center space-x-4">
             {!user ? (
