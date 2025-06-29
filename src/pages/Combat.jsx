@@ -134,7 +134,7 @@ export default function Combat() {
 
   // Update available actions when combat session or turn changes
   useEffect(() => {
-    if (combatSession && combatSession.combatState === 'active') {
+    if (combatSession) {
       updateAvailableActions(combatSession);
     }
   }, [combatSession?.currentTurn, combatSession?.combatState]);
@@ -272,10 +272,63 @@ export default function Combat() {
         return;
       }
       
-      setCombatSession(session);
-      updateAvailableActions(session);
-      setEnvironmentalFeatures(session.environmentalFeatures || []);
-      setTeamUpOpportunities(session.teamUpOpportunities || []);
+      // If combat session is in 'initialized' state, automatically initialize it properly
+      if (session.combatState === 'initialized') {
+        console.log('🔄 Combat session is initialized, setting up combat...');
+        
+        // Create combatants array if it doesn't exist
+        let combatants = session.combatants || [];
+        if (combatants.length === 0) {
+          // Combine party members and enemies into combatants
+          const partyCombatants = (session.partyMembers || []).map(member => ({
+            ...member,
+            isEnemy: false,
+            userId: member.userId,
+            cooldowns: member.cooldowns || {},
+            statusEffects: member.statusEffects || [],
+            hp: member.hp ?? member.maxHp ?? 10,
+            maxHp: member.maxHp ?? member.hp ?? 10,
+          }));
+
+          const enemyCombatants = (session.enemies || []).map(enemy => ({
+            ...enemy,
+            isEnemy: true,
+            userId: null,
+            cooldowns: enemy.cooldowns || {},
+            statusEffects: enemy.statusEffects || [],
+            hp: enemy.hp ?? enemy.maxHp ?? 10,
+            maxHp: enemy.maxHp ?? enemy.hp ?? 10,
+          }));
+
+          combatants = [...partyCombatants, ...enemyCombatants];
+        }
+        
+        // Update the session to be active
+        const activeSession = {
+          ...session,
+          combatants: combatants,
+          combatState: 'active',
+          currentTurn: 0,
+          round: 1
+        };
+        
+        // Update the session in the database
+        await updateCombatSession(partyId, activeSession);
+        
+        // Set the active session locally
+        setCombatSession(activeSession);
+        updateAvailableActions(activeSession);
+        setEnvironmentalFeatures(activeSession.environmentalFeatures || []);
+        setTeamUpOpportunities(activeSession.teamUpOpportunities || []);
+        
+        console.log('✅ Combat session activated:', activeSession);
+      } else {
+        // Session is already in a proper state, just set it
+        setCombatSession(session);
+        updateAvailableActions(session);
+        setEnvironmentalFeatures(session.environmentalFeatures || []);
+        setTeamUpOpportunities(session.teamUpOpportunities || []);
+      }
     } catch (error) {
       console.error('Error loading combat data:', error);
     } finally {
@@ -286,8 +339,11 @@ export default function Combat() {
   const updateAvailableActions = (session) => {
     const currentCombatant = getCurrentCombatant(session);
     if (!currentCombatant) {
+      console.log('⚠️ No current combatant found for action update');
       return;
     }
+
+    console.log('🔄 Updating available actions for:', currentCombatant.name, 'combat state:', session.combatState);
 
     const actions = [];
     const cooldowns = currentCombatant.cooldowns || {};
@@ -339,6 +395,7 @@ export default function Combat() {
       });
     }
 
+    console.log('✅ Available actions set:', actions.length, 'actions');
     setAvailableActions(actions);
   };
 
@@ -997,15 +1054,28 @@ export default function Combat() {
 
   const isCurrentUserTurn = () => {
     const currentCombatant = getCurrentCombatant();
+    console.log('🔍 isCurrentUserTurn check:', {
+      currentCombatant: currentCombatant?.name,
+      currentCombatantId: currentCombatant?.id,
+      currentCombatantUserId: currentCombatant?.userId,
+      userUid: user?.uid,
+      isTestCombat,
+      isEnemy: currentCombatant?.isEnemy
+    });
+    
     if (!currentCombatant) return false;
     
     // For test combat, if the current combatant is not an enemy, it's the user's turn
     if (isTestCombat) {
-      return !currentCombatant.isEnemy;
+      const result = !currentCombatant.isEnemy;
+      console.log('🧪 Test combat turn check:', result);
+      return result;
     }
     
     // For regular combat, check if the current combatant belongs to the current user
-    return currentCombatant.userId === user?.uid;
+    const result = currentCombatant.userId === user?.uid;
+    console.log('🎮 Regular combat turn check:', result);
+    return result;
   };
 
   const getCurrentUserCharacter = () => {
@@ -1225,6 +1295,18 @@ export default function Combat() {
   }
 
   const currentCombatant = getCurrentCombatant();
+  
+  // Debug logging for UI rendering
+  console.log('🎮 UI Debug:', {
+    currentCombatant: currentCombatant?.name,
+    currentCombatantId: currentCombatant?.id,
+    safeCombatantsLength: safeCombatants.length,
+    safeEnemiesLength: safeEnemies.length,
+    combatSessionState: combatSession?.combatState,
+    availableActionsLength: availableActions.length,
+    isCurrentUserTurn: isCurrentUserTurn(),
+    userUid: user?.uid
+  });
 
   // Player Death Screen
   if (playerDied && deadPlayer) {
@@ -1430,7 +1512,16 @@ export default function Combat() {
           {/* Center Column - Main Combat Area */}
           <div className="xl:col-span-2 space-y-6">
             {/* Current Turn Actions */}
-            {currentCombatant && safeCombatants.length > 0 && (
+            {(() => {
+              const shouldShowTurnOptions = currentCombatant && safeCombatants.length > 0;
+              console.log('🎯 Turn options condition check:', {
+                currentCombatant: !!currentCombatant,
+                safeCombatantsLength: safeCombatants.length,
+                shouldShowTurnOptions,
+                isCurrentUserTurn: isCurrentUserTurn()
+              });
+              return shouldShowTurnOptions;
+            })() && (
               <div className="fantasy-card">
                 <h3 className="font-bold text-gray-100 mb-3">
                   🎲 {currentCombatant.name}'s Turn
