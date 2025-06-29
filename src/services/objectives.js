@@ -169,17 +169,42 @@ export const generateObjectiveHints = (objectives, storyContext) => {
     
     if (objective.type === OBJECTIVE_TYPES.INVESTIGATION && 
         (contextLower.includes('mystery') || contextLower.includes('unknown'))) {
-      hints.push("There might be more to discover here...");
+      hints.push({
+        hint: "There might be more to discover here...",
+        expectedResponse: "Try searching, investigating, or examining the area for clues"
+      });
     }
     
     if (objective.type === OBJECTIVE_TYPES.PERSUASION && 
         (contextLower.includes('tension') || contextLower.includes('conflict'))) {
-      hints.push("Perhaps words could resolve this...");
+      hints.push({
+        hint: "Perhaps words could resolve this...",
+        expectedResponse: "Try talking, negotiating, or using diplomacy to find a peaceful solution"
+      });
     }
     
     if (objective.type === OBJECTIVE_TYPES.COMBAT && 
         (contextLower.includes('threat') || contextLower.includes('danger'))) {
-      hints.push("The situation seems dangerous...");
+      hints.push({
+        hint: "The situation seems dangerous...",
+        expectedResponse: "Consider fighting, attacking, or defending against the threat"
+      });
+    }
+    
+    if (objective.type === OBJECTIVE_TYPES.EXPLORATION && 
+        (contextLower.includes('hidden') || contextLower.includes('secret'))) {
+      hints.push({
+        hint: "There might be hidden paths or secrets...",
+        expectedResponse: "Try exploring, searching for hidden areas, or looking for secret passages"
+      });
+    }
+    
+    if (objective.type === OBJECTIVE_TYPES.SOCIAL && 
+        (contextLower.includes('people') || contextLower.includes('community'))) {
+      hints.push({
+        hint: "The locals might have valuable information...",
+        expectedResponse: "Try talking to NPCs, building relationships, or gathering information from the community"
+      });
     }
   });
   

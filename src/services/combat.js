@@ -146,7 +146,7 @@ export class CombatService {
       combatants: initiativeOrder,
       currentTurn: 0,
       round: 1,
-      phase: 'preparation',
+      combatState: 'active',
       storyContext: storyContext,
       environmentalFeatures: this.extractEnvironmentalFeatures(storyContext),
       teamUpOpportunities: this.identifyTeamUpOpportunities(partyMembers),
@@ -346,6 +346,18 @@ export class CombatService {
     // Check for status effect applications
     const statusEffects = this.checkStatusEffectApplication(combatant, actionType, target, results);
     
+    // Advance turn counter
+    const nextTurnIndex = (combatSession.currentTurn + 1) % combatSession.combatants.length;
+    const updatedSession = {
+      ...combatSession,
+      currentTurn: nextTurnIndex
+    };
+    
+    // Update round if we've completed a full cycle
+    if (nextTurnIndex === 0) {
+      updatedSession.round = updatedSession.round + 1;
+    }
+    
     return {
       success: true,
       narrative: narrative,
@@ -353,7 +365,9 @@ export class CombatService {
       statusEffects: statusEffects,
       environmentalImpact: this.calculateEnvironmentalImpact(combatSession, actionType, results),
       targetId: targetId,
-      combatSession: combatSession
+      updatedSession: updatedSession,
+      damage: results.damage,
+      healing: results.healing
     };
   }
 
@@ -888,16 +902,16 @@ export class CombatService {
       hasClassAbility: !!this.classAbilities[enemy.class?.toLowerCase()]
     });
     
-    // Basic actions
+    // Basic actions - available if no cooldown or cooldown is 0
     Object.entries(this.actionTypes).forEach(([actionType, config]) => {
-      if (cooldowns[actionType] === 0 || cooldowns[actionType] === undefined) {
+      if (!cooldowns.hasOwnProperty(actionType) || cooldowns[actionType] <= 0) {
         actions.push(actionType);
       }
     });
     
     // Class-specific abilities
     if (enemy.class && this.classAbilities[enemy.class.toLowerCase()]) {
-      if (cooldowns.special === 0 || cooldowns.special === undefined) {
+      if (!cooldowns.hasOwnProperty('special') || cooldowns.special <= 0) {
         actions.push('special');
       }
     }
@@ -972,6 +986,30 @@ export class CombatService {
 
   // Make enemy decision based on situation
   makeEnemyDecision(enemy, availableActions, validTargets, combatSession) {
+    // If no available actions, default to defend
+    if (availableActions.length === 0) {
+      console.log('No available actions for enemy, defaulting to defend');
+      return { 
+        action: 'defend', 
+        targetId: enemy.id,
+        specialAttack: 'Defensive Stance',
+        damageType: 'defense',
+        attribute: 'dexterity'
+      };
+    }
+    
+    // If no valid targets, default to defend
+    if (validTargets.length === 0) {
+      console.log('No valid targets for enemy, defaulting to defend');
+      return { 
+        action: 'defend', 
+        targetId: enemy.id,
+        specialAttack: 'Defensive Stance',
+        damageType: 'defense',
+        attribute: 'dexterity'
+      };
+    }
+    
     const target = validTargets[Math.floor(Math.random() * validTargets.length)];
     
     // Health-based decision making
@@ -987,7 +1025,7 @@ export class CombatService {
       if (healthPercentage < 0.4 && availableActions.includes('spell')) {
         return { 
           action: 'spell', 
-          target: enemy.id, 
+          targetId: enemy.id, 
           spellType: 'healing',
           specialAttack: 'Divine Healing',
           damageType: 'healing',
@@ -997,7 +1035,7 @@ export class CombatService {
       if (availableActions.includes('spell')) {
         return { 
           action: 'spell', 
-          target: target.id, 
+          targetId: target.id, 
           spellType: 'divine',
           specialAttack: 'Divine Smite',
           damageType: 'radiant',
@@ -1013,7 +1051,7 @@ export class CombatService {
         const spellType = spells[Math.floor(Math.random() * spells.length)];
         return { 
           action: 'spell', 
-          target: target.id, 
+          targetId: target.id, 
           spellType: spellType,
           specialAttack: `${spellType.charAt(0).toUpperCase() + spellType.slice(1)} Spell`,
           damageType: spellType === 'fireball' ? 'fire' : spellType === 'lightning' ? 'lightning' : spellType === 'ice' ? 'cold' : 'arcane',
@@ -1027,7 +1065,7 @@ export class CombatService {
       if (availableActions.includes('special')) {
         return { 
           action: 'special', 
-          target: target.id, 
+          targetId: target.id, 
           specialAttack: 'Devastating Strike',
           damageType: 'physical',
           attribute: 'strength',
@@ -1041,7 +1079,7 @@ export class CombatService {
       if (availableActions.includes('spell')) {
         return { 
           action: 'spell', 
-          target: target.id, 
+          targetId: target.id, 
           spellType: 'necrotic',
           specialAttack: 'Death Touch',
           damageType: 'necrotic',
@@ -1055,7 +1093,7 @@ export class CombatService {
       if (availableActions.includes('item')) {
         return { 
           action: 'item', 
-          target: enemy.id, 
+          targetId: enemy.id, 
           itemType: 'healing',
           specialAttack: 'Use Healing Potion',
           damageType: 'healing',
@@ -1065,7 +1103,7 @@ export class CombatService {
       if (availableActions.includes('defend')) {
         return { 
           action: 'defend', 
-          target: null,
+          targetId: enemy.id,
           specialAttack: 'Defensive Stance',
           damageType: 'defense',
           attribute: 'dexterity'
@@ -1081,7 +1119,7 @@ export class CombatService {
     if (lowHealthAllies.length > 1 && availableActions.includes('spell')) {
       return { 
         action: 'spell', 
-        target: target.id, 
+        targetId: target.id, 
         spellType: 'area',
         specialAttack: 'Area Attack',
         damageType: 'mixed',
@@ -1093,7 +1131,7 @@ export class CombatService {
     if (availableActions.includes('attack')) {
       return { 
         action: 'attack', 
-        target: target.id,
+        targetId: target.id,
         specialAttack: 'Standard Attack',
         damageType: 'physical',
         attribute: 'strength'
@@ -1104,7 +1142,7 @@ export class CombatService {
     const action = availableActions[Math.floor(Math.random() * availableActions.length)];
     return { 
       action, 
-      target: target.id,
+      targetId: target.id,
       specialAttack: 'Basic Action',
       damageType: 'physical',
       attribute: 'strength'
@@ -1123,8 +1161,8 @@ export class CombatService {
       attribute: decision.attribute
     });
     
-    if (decision.target) {
-      return await this.executeAction(combatSession, enemy.id, decision.action, decision.target, {
+    if (decision.targetId) {
+      return await this.executeAction(combatSession, enemy.id, decision.action, decision.targetId, {
         itemType: decision.itemType,
         spellType: decision.spellType,
         specialAttack: decision.specialAttack,

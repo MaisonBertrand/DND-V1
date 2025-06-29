@@ -167,10 +167,11 @@ export default function DungeonMaster({ partyCharacters, onStoryGenerated, onCha
       {activeTab === 'plots' && (
         <div className="space-y-6">
           <div>
-            <label className="block text-sm font-medium text-stone-700 mb-2">
+            <label htmlFor="campaign-setting" className="block text-sm font-medium text-stone-700 mb-2">
               Campaign Setting (Optional)
             </label>
             <textarea
+              id="campaign-setting"
               value={campaignSetting}
               onChange={(e) => setCampaignSetting(e.target.value)}
               className="fantasy-input"
@@ -214,10 +215,11 @@ export default function DungeonMaster({ partyCharacters, onStoryGenerated, onCha
       {activeTab === 'characters' && (
         <div className="space-y-6">
           <div>
-            <label className="block text-sm font-medium text-stone-700 mb-2">
+            <label htmlFor="character-select" className="block text-sm font-medium text-stone-700 mb-2">
               Select Character
             </label>
             <select
+              id="character-select"
               value={selectedCharacter}
               onChange={(e) => setSelectedCharacter(e.target.value)}
               className="fantasy-input"
@@ -245,10 +247,11 @@ export default function DungeonMaster({ partyCharacters, onStoryGenerated, onCha
       {activeTab === 'npcs' && (
         <div className="space-y-6">
           <div>
-            <label className="block text-sm font-medium text-stone-700 mb-2">
+            <label htmlFor="npc-role" className="block text-sm font-medium text-stone-700 mb-2">
               NPC Role
             </label>
             <input
+              id="npc-role"
               type="text"
               value={npcRole}
               onChange={(e) => setNpcRole(e.target.value)}
@@ -258,10 +261,11 @@ export default function DungeonMaster({ partyCharacters, onStoryGenerated, onCha
           </div>
           
           <div>
-            <label className="block text-sm font-medium text-stone-700 mb-2">
+            <label htmlFor="npc-context" className="block text-sm font-medium text-stone-700 mb-2">
               Context (Optional)
             </label>
             <textarea
+              id="npc-context"
               value={npcContext}
               onChange={(e) => setNpcContext(e.target.value)}
               className="fantasy-input"
@@ -285,10 +289,11 @@ export default function DungeonMaster({ partyCharacters, onStoryGenerated, onCha
         <div className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-stone-700 mb-2">
+              <label htmlFor="party-level" className="block text-sm font-medium text-stone-700 mb-2">
                 Party Level
               </label>
               <input
+                id="party-level"
                 type="number"
                 min="1"
                 max="20"
@@ -299,10 +304,11 @@ export default function DungeonMaster({ partyCharacters, onStoryGenerated, onCha
             </div>
             
             <div>
-              <label className="block text-sm font-medium text-stone-700 mb-2">
+              <label htmlFor="party-size" className="block text-sm font-medium text-stone-700 mb-2">
                 Party Size
               </label>
               <input
+                id="party-size"
                 type="number"
                 min="1"
                 max="10"
@@ -315,10 +321,11 @@ export default function DungeonMaster({ partyCharacters, onStoryGenerated, onCha
           
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-stone-700 mb-2">
+              <label htmlFor="encounter-difficulty" className="block text-sm font-medium text-stone-700 mb-2">
                 Difficulty
               </label>
               <select
+                id="encounter-difficulty"
                 value={encounterDetails.difficulty}
                 onChange={(e) => setEncounterDetails(prev => ({ ...prev, difficulty: e.target.value }))}
                 className="fantasy-input"
@@ -331,10 +338,11 @@ export default function DungeonMaster({ partyCharacters, onStoryGenerated, onCha
             </div>
             
             <div>
-              <label className="block text-sm font-medium text-stone-700 mb-2">
+              <label htmlFor="encounter-theme" className="block text-sm font-medium text-stone-700 mb-2">
                 Theme (Optional)
               </label>
               <input
+                id="encounter-theme"
                 type="text"
                 value={encounterDetails.theme}
                 onChange={(e) => setEncounterDetails(prev => ({ ...prev, theme: e.target.value }))}

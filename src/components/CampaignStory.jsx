@@ -1,1328 +1,1784 @@
-import { useState, useEffect, useRef } from 'react';
-import { useParams, useNavigate, useLocation } from 'react-router-dom';
-import { onAuthChange } from '../firebase/auth';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { useAuth } from '../firebase/auth';
 import { 
   getCampaignStory, 
-  createCampaignStory, 
+  updateCampaignStory, 
+  addStoryMessage, 
   setPlayerReady, 
-  addStoryMessage,
   subscribeToCampaignStory,
-  getPartyCharacters,
-  updateCampaignStory,
-  getUserParties,
-  getUserProfile,
-  getPartyById,
   setCurrentSpeaker,
-  setCurrentController,
+  getPartyById,
+  getPartyCharacters,
+  subscribeToParty,
   createCombatSession,
+  updateCombatSession,
   subscribeToCombatSession,
-  saveStoryState,
-  getStoryState,
-  updateStoryState,
-  getStoryConsistencyData
+  createCampaignStory
 } from '../firebase/database';
-import { db } from '../firebase/config';
-import { onSnapshot, query, collection, where } from 'firebase/firestore';
-import { dungeonMasterService } from '../services/chatgpt';
 import { 
   generateHiddenObjectives, 
-  checkObjectiveDiscovery, 
-  updateObjectiveState, 
-  getDiscoveredObjectives,
-  areMainObjectivesComplete,
-  generateObjectiveHints,
-  OBJECTIVE_STATES
+  getDiscoveredObjectives
 } from '../services/objectives';
-import { 
-  createCampaignMetadata,
-  generateCampaignContext,
-  updateCampaignProgress,
-  checkPhaseTransition,
-  generateCampaignSummary,
-  saveCampaignSession,
-  CAMPAIGN_PHASES
-} from '../services/campaign';
-import { storyStateService } from '../services/storyState';
-import { combatService } from '../services/combat';
-import ActionValidationService from '../services/actionValidation';
-import DiceRollingService from '../services/diceRolling';
+import { dungeonMasterService } from '../services/chatgpt';
+import { ActionValidationService } from '../services/actionValidation';
+import { CombatService } from '../services/combat';
 import ActionValidationDisplay from './ActionValidationDisplay';
 import DiceRollDisplay from './DiceRollDisplay';
 
 export default function CampaignStory() {
+  const { user, loading: authLoading } = useAuth();
   const { partyId } = useParams();
   const navigate = useNavigate();
-  const location = useLocation();
-  const currentPath = location.pathname;
-  const [user, setUser] = useState(null);
+  
+  // State management
   const [story, setStory] = useState(null);
   const [party, setParty] = useState(null);
-  const [partyCharacters, setPartyCharacters] = useState([]);
   const [partyMembers, setPartyMembers] = useState([]);
-  const [memberProfiles, setMemberProfiles] = useState({});
+  const [partyCharacters, setPartyCharacters] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [playerResponse, setPlayerResponse] = useState('');
-  const [isReady, setIsReady] = useState(false);
-  const [isGeneratingPlots, setIsGeneratingPlots] = useState(false);
-  const [isCombatStarting, setIsCombatStarting] = useState(false);
-  const isGeneratingPlotsRef = useRef(false);
-  const hasStartedStoryRef = useRef(false);
-  
-  // Objective system state
+  const [currentPhase, setCurrentPhase] = useState('storytelling');
   const [objectives, setObjectives] = useState([]);
-  const [currentPhase, setCurrentPhase] = useState('Investigation');
-  const [objectiveHints, setObjectiveHints] = useState([]);
-  const [showObjectiveHints, setShowObjectiveHints] = useState(false);
-  const [storyState, setStoryState] = useState(null);
-
-  // Enhanced action validation state
+  const [inlineValidation, setInlineValidation] = useState(null);
   const [showActionValidation, setShowActionValidation] = useState(false);
+  const [actionValidation, setActionValidation] = useState(null);
   const [showDiceRoll, setShowDiceRoll] = useState(false);
-  const [currentValidation, setCurrentValidation] = useState(null);
-  const [currentDiceResult, setCurrentDiceResult] = useState(null);
-  const [actionValidationService] = useState(() => new ActionValidationService());
-  const [diceService] = useState(() => new DiceRollingService());
+  const [diceResult, setDiceResult] = useState(null);
+  const [unsubscribe, setUnsubscribe] = useState(null);
+  const [isReady, setIsReady] = useState(false);
+  const [allPlayersReady, setAllPlayersReady] = useState(false);
+  const [isGeneratingPlots, setIsGeneratingPlots] = useState(false);
+  const [showDebug, setShowDebug] = useState(false);
+  
+  // Combat state
+  const [combatState, setCombatState] = useState('inactive');
+  const [combatSession, setCombatSession] = useState(null);
+  const [combatSessionId, setCombatSessionId] = useState(null);
+  const [currentCombatant, setCurrentCombatant] = useState(null);
+  const [processingCombatAction, setProcessingCombatAction] = useState(false);
+  const [battleLog, setBattleLog] = useState([]);
+  const [hasNavigatedToCombat, setHasNavigatedToCombat] = useState(false);
+  const [combatLoading, setCombatLoading] = useState(false);
 
+  // Services
+  const actionValidationService = new ActionValidationService();
+  const combatService = new CombatService();
+
+  // Helper functions - moved to top to avoid hoisting issues
+  const getReadyCount = () => story?.readyPlayers?.length || 0;
+  const getTotalPlayers = () => partyMembers.length;
+  
+  const getSortedCharacters = () => {
+    return partyCharacters.sort((a, b) => a.name.localeCompare(b.name));
+  };
+
+  const highlightKeywords = (text) => {
+    if (!text) return '';
+    return text
+      // Bold text with yellow color
+      .replace(/\*\*(.*?)\*\*/g, '<strong class="text-yellow-400 font-bold">$1</strong>')
+      // Italic text with blue color
+      .replace(/\*(.*?)\*/g, '<em class="text-blue-400 italic">$1</em>')
+      // Code blocks with dark background
+      .replace(/`(.*?)`/g, '<code class="bg-slate-700 px-2 py-1 rounded text-slate-200 font-mono text-sm">$1</code>')
+      // Character names in green
+      .replace(/([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*):/g, '<span class="text-green-400 font-semibold">$1:</span>')
+      // Important words in orange
+      .replace(/\b(weapon|sword|shield|armor|magic|spell|dragon|monster|treasure|gold|silver|quest|adventure|hero|villain)\b/gi, '<span class="text-orange-400 font-medium">$1</span>')
+      // Location names in purple
+      .replace(/\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\b/g, (match) => {
+        // Don't color if it's already colored or if it's a common word
+        if (match.includes('<') || ['The', 'A', 'An', 'And', 'Or', 'But', 'In', 'On', 'At', 'To', 'For', 'Of', 'With', 'By'].includes(match)) {
+          return match;
+        }
+        return `<span class="text-purple-400 font-medium">${match}</span>`;
+      })
+      // Line breaks
+      .replace(/\n/g, '<br>');
+  };
+
+  // Check authentication and redirect if needed
   useEffect(() => {
-    const unsubscribe = onAuthChange((user) => {
-      if (!user) {
+    if (!user && !authLoading) {
         navigate('/login');
-        return;
       }
-      setUser(user);
-    });
-    return () => unsubscribe();
-  }, [navigate]);
+  }, [user, authLoading, navigate]);
 
+  // Load data when user and partyId are available
   useEffect(() => {
-    if (user && partyId) {
+    if (partyId && user && !authLoading) {
       loadStoryAndCharacters();
     }
-  }, [user, partyId]);
+  }, [partyId, user, authLoading]);
 
-  // Subscribe to combat sessions to automatically redirect when combat begins
+  // Subscribe to real-time story updates
   useEffect(() => {
-    if (partyId) {
-      try {
-        const unsubscribe = subscribeToCombatSession(partyId, (combatSession) => {
-          if (combatSession && combatSession.status === 'active') {
-            // Check if we're already on the combat page
-            if (!currentPath.includes('/combat/')) {
-              // Combat has been initiated, redirect all players to combat screen
-              navigate(`/combat/${partyId}`);
+    if (story?.id) {
+      console.log('📡 Setting up real-time subscription for story:', story.id);
+      const unsubscribe = subscribeToCampaignStory(story.id, (updatedStory) => {
+        if (updatedStory) {
+          console.log('📡 Story update received:', updatedStory);
+          setStory(updatedStory);
+          
+          // Robust phase check for conflict
+          const storyContent = updatedStory.currentContent || '';
+          const storyMetadata = updatedStory.storyMetadata || {};
+          
+          // Check multiple sources for conflict phase
+          const phaseStatus = storyMetadata.phaseStatus || 
+                             (storyContent.toLowerCase().includes('phase_status:') ? 
+                              storyContent.toLowerCase().split('phase_status:')[1]?.split('\n')[0]?.trim() : null) ||
+                             (storyContent.toLowerCase().includes('conflict') ? 'conflict' : null);
+          
+          // Additional combat detection based on story content keywords
+          const combatKeywords = ['attack', 'battle', 'combat', 'fight', 'enemy', 'enemies', 'monster', 'creature', 'ghoul', 'bandit', 'goblin', 'troll'];
+          const hasCombatKeywords = combatKeywords.some(keyword => storyContent.toLowerCase().includes(keyword));
+          
+          console.log('🔍 Phase detection debug:', {
+            storyMetadataPhase: storyMetadata.phaseStatus,
+            contentPhase: storyContent.toLowerCase().includes('phase_status:') ? 
+                         storyContent.toLowerCase().split('phase_status:')[1]?.split('\n')[0]?.trim() : 'not found',
+            conflictKeywords: storyContent.toLowerCase().includes('conflict'),
+            combatKeywords: hasCombatKeywords,
+            finalPhaseStatus: phaseStatus
+          });
+          
+          if ((phaseStatus && String(phaseStatus).toLowerCase() === 'conflict') || 
+              (hasCombatKeywords && storyContent.toLowerCase().includes('attack') && !hasNavigatedToCombat)) {
+            console.log('⚔️ Conflict phase detected, preparing combat session...');
+            setHasNavigatedToCombat(true);
+            setCombatLoading(true);
+            
+            // Wait for all players to be ready before creating combat session
+            const members = party?.members || [];
+            if (updatedStory.readyPlayers?.length === members.length && members.length > 0) {
+              console.log('🎉 All players ready, creating combat session...');
+              
+              // Create a basic combat session before navigating
+              console.log('🔍 Debugging party members before combat session creation:', partyMembers);
+              console.log('🔍 Debugging party characters before combat session creation:', partyCharacters);
+              
+              // Use partyCharacters (actual character objects) instead of partyMembers (user IDs)
+              const charactersToUse = partyCharacters.length > 0 ? partyCharacters : partyMembers;
+              
+              // Deep clean and validate party members data
+              const validatedPartyMembers = charactersToUse.map((member, index) => {
+                console.log(`🔍 Validating member ${index}:`, member);
+                
+                // If member is a string (user ID), create a basic character object
+                if (typeof member === 'string') {
+                  console.log(`⚠️ Member ${index} is a user ID string, creating basic character object`);
+                  const basicCharacter = {
+                    id: `member_${index}`,
+                    name: `Player ${index + 1}`,
+                    userId: member,
+                    race: 'Unknown',
+                    class: 'Unknown',
+                    level: 1,
+                    initiative: Math.floor(Math.random() * 20) + 1,
+                    hp: 10,
+                    maxHp: 10,
+                    ac: 10
+                  };
+                  console.log(`✅ Created basic character for user ID:`, basicCharacter);
+                  return basicCharacter;
+                }
+                
+                // If member is an object, validate and clean it
+                const cleanMember = {
+                  id: member.id || `member_${index}`,
+                  name: member.name || `Unknown Member ${index}`,
+                  userId: member.userId || null,
+                  race: member.race || 'Unknown',
+                  class: member.class || 'Unknown',
+                  level: member.level || 1,
+                  // Combat stats with fallbacks
+                  initiative: member.initiative || Math.floor(Math.random() * 20) + 1,
+                  hp: member.hp || member.maxHp || 10,
+                  maxHp: member.maxHp || member.hp || 10,
+                  ac: member.ac || 10,
+                  // Remove any undefined values
+                  ...Object.fromEntries(
+                    Object.entries(member).filter(([key, value]) => 
+                      value !== undefined && 
+                      value !== null && 
+                      key !== 'id' && 
+                      key !== 'name' && 
+                      key !== 'userId' && 
+                      key !== 'race' && 
+                      key !== 'class' && 
+                      key !== 'level' && 
+                      key !== 'initiative' && 
+                      key !== 'hp' && 
+                      key !== 'maxHp' && 
+                      key !== 'ac'
+                    )
+                  )
+                };
+                
+                console.log(`✅ Cleaned member ${index}:`, cleanMember);
+                return cleanMember;
+              });
+              
+              console.log('✅ Final validated party members:', validatedPartyMembers);
+              
+              // Extract enemies from story content
+              let extractedEnemies = [];
+              
+              // Debug: Log the story metadata
+              console.log('🔍 Story metadata:', updatedStory.storyMetadata);
+              console.log('🔍 Story metadata enemy details:', updatedStory.storyMetadata?.enemyDetails);
+              
+              // First, try to get enemies from story metadata
+              if (updatedStory.storyMetadata?.enemyDetails && updatedStory.storyMetadata.enemyDetails.length > 0) {
+                console.log('🔍 Found enemy details in story metadata:', updatedStory.storyMetadata.enemyDetails);
+                extractedEnemies = convertEnemyDetailsToCombatEnemies(updatedStory.storyMetadata.enemyDetails);
+                console.log('⚔️ Extracted enemies from story metadata:', extractedEnemies);
+              }
+              
+              // If no enemies found in metadata, try parsing the story content
+              if (extractedEnemies.length === 0 && updatedStory.currentContent) {
+                console.log('🔍 No enemies in metadata, trying to parse story content...');
+                const parsedResponse = parseStructuredResponse(updatedStory.currentContent);
+                if (parsedResponse.enemyDetails && parsedResponse.enemyDetails.length > 0) {
+                  extractedEnemies = convertEnemyDetailsToCombatEnemies(parsedResponse.enemyDetails);
+                  console.log('⚔️ Extracted enemies from story content:', extractedEnemies);
+                }
+              }
+              
+              // If still no enemies found, use fallback enemies
+              if (extractedEnemies.length === 0) {
+                console.log('⚠️ No enemies found in story or metadata, using fallback enemies');
+                extractedEnemies = [
+                  {
+                    id: 'enemy_0',
+                    name: 'Gnoll Tribesmen',
+                    hp: 12,
+                    maxHp: 12,
+                    ac: 15,
+                    level: 1,
+                    class: 'humanoid',
+                    race: 'gnoll',
+                    initiative: Math.floor(Math.random() * 20) + 1,
+                    strength: 14,
+                    dexterity: 12,
+                    constitution: 12,
+                    intelligence: 8,
+                    wisdom: 8,
+                    charisma: 6,
+                    statusEffects: [],
+                    cooldowns: {},
+                    lastAction: null,
+                    turnCount: 0,
+                    basicAttack: 'Spiked Club (1d6 + 2 bludgeoning damage)',
+                    specialAbility: 'Pack Tactics (The Gnoll has advantage on an attack roll against a creature if at least one of the gnoll\'s allies is within 5 feet of the creature and the ally isn\'t incapacitated.)'
+                  }
+                ];
+              }
+              
+              console.log('⚔️ Final enemies for combat session:', extractedEnemies);
+              
+              // Create a basic combat session with the party members and enemies
+              const basicCombatSession = {
+                partyId,
+                partyMembers: validatedPartyMembers,
+                enemies: extractedEnemies, // Use the extracted enemies
+                storyContext: updatedStory.currentContent || 'Combat encounter',
+                combatState: 'initialized',
+                currentTurn: 0,
+                round: 1,
+                initiative: [], // Add empty initiative array to prevent Firebase error
+                environmentalFeatures: [],
+                teamUpOpportunities: [],
+                narrativeElements: []
+              };
+              
+              console.log('✅ Final combat session object:', basicCombatSession);
+              
+              // Store the basic session in the database
+              createCombatSession(partyId, basicCombatSession).then(() => {
+                console.log('⚔️ Basic combat session created, navigating to Combat page...');
+                setCombatLoading(false);
+                setHasNavigatedToCombat(true);
+                navigate(`/combat/${partyId}`);
+              }).catch(error => {
+                console.error('❌ Failed to create combat session:', error);
+                setCombatLoading(false);
+                setHasNavigatedToCombat(false);
+              });
+              
+              // Add a timeout to prevent infinite loading
+              setTimeout(() => {
+                if (combatLoading) {
+                  console.warn('⚠️ Combat loading timeout, resetting state...');
+                  setCombatLoading(false);
+                  setHasNavigatedToCombat(false);
+                }
+              }, 5000); // Reduced from 10 seconds to 5 seconds
+            } else {
+              console.log('⏳ Waiting for all players to be ready before combat...');
+            }
+          } else if (updatedStory.storyMetadata && String(updatedStory.storyMetadata.phaseStatus).toLowerCase() !== 'conflict') {
+            // Reset navigation flag when not in conflict phase
+            setHasNavigatedToCombat(false);
+            setCombatLoading(false);
+          }
+          
+          // Update ready status
+          if (updatedStory.readyPlayers?.includes(user?.uid)) {
+            console.log('✅ User is ready');
+            setIsReady(true);
+          }
+          
+          // Check if all players are ready
+          const members = party?.members || [];
+          if (updatedStory.readyPlayers?.length === members.length && members.length > 0) {
+            console.log('🎉 All players are ready!');
+            setAllPlayersReady(true);
+          } else {
+            console.log('⏳ Not all players ready yet:', updatedStory.readyPlayers?.length, '/', members.length);
+            setAllPlayersReady(false);
+          }
+        }
+      });
+      
+      setUnsubscribe(() => unsubscribe);
+      return () => unsubscribe();
+    }
+  }, [story?.id, user?.uid, party?.members, combatState, navigate, hasNavigatedToCombat]);
+
+  // Subscribe to real-time combat session updates
+  useEffect(() => {
+    if (combatSessionId) {
+      console.log('⚔️ Setting up real-time subscription for combat session:', combatSessionId);
+      const unsubscribe = subscribeToCombatSession(partyId, (updatedCombatSession) => {
+        if (updatedCombatSession) {
+          console.log('⚔️ Combat session update received:', updatedCombatSession);
+          console.log('⚔️ Combat session state:', updatedCombatSession.combatState);
+          console.log('⚔️ Combat session ID:', updatedCombatSession.id);
+          
+          // Reconstruct the full combat session from database data
+          const reconstructedSession = {
+            combatants: [
+              ...updatedCombatSession.partyMembers,
+              ...updatedCombatSession.enemies
+            ],
+            currentTurn: updatedCombatSession.currentTurn,
+            round: updatedCombatSession.round,
+            combatState: updatedCombatSession.combatState,
+            storyContext: updatedCombatSession.storyContext,
+            environmentalFeatures: updatedCombatSession.environmentalFeatures,
+            teamUpOpportunities: updatedCombatSession.teamUpOpportunities,
+            narrativeElements: updatedCombatSession.narrativeElements
+          };
+          
+          console.log('⚔️ Reconstructed session:', reconstructedSession);
+          setCombatSession(reconstructedSession);
+          setCurrentCombatant(reconstructedSession.combatants[updatedCombatSession.currentTurn]);
+          setCombatState(updatedCombatSession.combatState);
+        } else {
+          console.log('⚔️ Combat session ended or not found');
+          console.log('⚔️ Clearing combat state...');
+          setCombatSession(null);
+          setCombatSessionId(null);
+          setCombatState('inactive');
+          setCurrentCombatant(null);
+        }
+      });
+      
+      return () => unsubscribe();
+    }
+  }, [combatSessionId, partyId]);
+
+  // Log current combatant changes
+  useEffect(() => {
+    if (currentCombatant && combatSession) {
+      console.log('🔄 Turn changed to:', currentCombatant.name, 'at index:', combatSession.currentTurn);
+      console.log('🔄 Full turn order:', combatSession.combatants.map((c, i) => `${i}: ${c.name} (${c.initiative})`));
+    }
+  }, [currentCombatant, combatSession]);
+
+  // Auto-process enemy turns
+  useEffect(() => {
+    if (combatState === 'active' && currentCombatant && currentCombatant.id.startsWith('enemy_') && !processingCombatAction) {
+      console.log('🤖 Auto-processing enemy turn for:', currentCombatant.name);
+      console.log('🤖 Current turn order:', combatSession?.combatants.map((c, i) => `${i}: ${c.name} (${c.initiative})`));
+      console.log('🤖 Current turn index:', combatSession?.currentTurn);
+      
+      const timer = setTimeout(async () => {
+        try {
+          setProcessingCombatAction(true);
+          
+          // Choose enemy action
+          const availableActions = combatService.getAvailableActions(currentCombatant);
+          console.log('🤖 Available actions for enemy:', availableActions);
+          
+          const validTargets = combatService.getValidTargets(currentCombatant, 'attack', combatSession);
+          console.log('🤖 Valid targets for enemy:', validTargets.map(t => t.name));
+          
+          const chosenAction = combatService.makeEnemyDecision(currentCombatant, availableActions, validTargets, combatSession);
+          
+          console.log('🤖 Enemy decision:', chosenAction);
+          
+          // Execute enemy action
+          const result = await combatService.executeAction(combatSession, currentCombatant.id, chosenAction.action, chosenAction.targetId);
+          
+          if (result.success) {
+            console.log('🤖 Enemy action result:', result);
+            console.log('🤖 Action details:', {
+              enemy: currentCombatant.name,
+              action: chosenAction.action,
+              target: chosenAction.targetId,
+              specialAttack: chosenAction.specialAttack,
+              damageType: chosenAction.damageType
+            });
+            
+            // Get the updated session from the result
+            const updatedSession = result.combatSession;
+            
+            // Apply damage to target if damage was dealt
+            if (result.results && result.results.damage > 0) {
+              const target = updatedSession.combatants.find(c => c.id === chosenAction.targetId);
+              if (target) {
+                const oldHp = target.hp;
+                target.hp = Math.max(0, target.hp - result.results.damage);
+                console.log(`🤖 Enemy applied ${result.results.damage} damage to ${target.name}. HP: ${oldHp} → ${target.hp}`);
+                
+                // Add battle log entry for damage
+                addBattleLogEntry({
+                  type: 'damage',
+                  attacker: currentCombatant.name,
+                  target: target.name,
+                  damage: result.results.damage,
+                  targetHp: target.hp,
+                  action: chosenAction.action,
+                  message: `${currentCombatant.name} deals ${result.results.damage} damage to ${target.name} (${target.hp} HP remaining)`
+                });
+              }
+            } else if (result.results && result.results.healing > 0) {
+              // Add battle log entry for healing
+              const target = updatedSession.combatants.find(c => c.id === chosenAction.targetId);
+              if (target) {
+                addBattleLogEntry({
+                  type: 'healing',
+                  healer: currentCombatant.name,
+                  target: target.name,
+                  healing: result.results.healing,
+                  action: chosenAction.action,
+                  message: `${currentCombatant.name} heals ${target.name} for ${result.results.healing} HP`
+                });
+              }
+            } else {
+              // Add battle log entry for other actions
+              addBattleLogEntry({
+                type: 'action',
+                actor: currentCombatant.name,
+                action: chosenAction.action,
+                target: updatedSession.combatants.find(c => c.id === chosenAction.targetId)?.name || 'None',
+                message: `${currentCombatant.name} uses ${chosenAction.action}`
+              });
+            }
+            
+            // Log the updated combat session for debugging
+            console.log('🤖 Updated combat session:', updatedSession);
+            console.log('🤖 Combatants after enemy action:', updatedSession.combatants.map(c => `${c.name}: ${c.hp}/${c.maxHp}`));
+            
+            // Update combat session
+            setCombatSession(updatedSession);
+            
+            // Update combat session in database for real-time synchronization
+            if (combatSessionId) {
+              await updateCombatSession(combatSessionId, {
+                currentTurn: updatedSession.currentTurn,
+                round: updatedSession.round,
+                combatState: updatedSession.combatState,
+                partyMembers: updatedSession.combatants.filter(c => !c.id.startsWith('enemy_')),
+                enemies: updatedSession.combatants.filter(c => c.id.startsWith('enemy_'))
+              });
+            }
+            
+            // Update current combatant based on the new turn
+            const nextCombatant = updatedSession.combatants[updatedSession.currentTurn];
+            setCurrentCombatant(nextCombatant);
+            
+            // Check if combat should end
+            const combatResult = combatService.checkCombatEnd(updatedSession);
+            if (combatResult.isComplete) {
+              console.log('⚔️ Combat ended:', combatResult);
+              setCombatState('complete');
+              
+              // Add combat end entry to battle log
+              addBattleLogEntry({
+                type: 'combat_end',
+                result: combatResult.result,
+                message: combatResult.result === 'victory' ? 
+                  '🎉 Victory! All enemies have been defeated!' : 
+                  combatResult.result === 'defeat' ? 
+                  '💀 Defeat! The party has been overwhelmed!' : 
+                  '🤝 Combat ends in a draw.'
+              });
+              
+              // Clear battle log after a delay to show the final result
+              setTimeout(() => {
+                setBattleLog([]);
+              }, 5000);
+              
+              // Generate combat summary and update story
+              const summary = combatService.generateCombatSummary(updatedSession, combatResult);
+              const narrative = combatService.generateCombatNarrative(updatedSession, combatResult);
+              
+              // Update story with combat results
+              await updateCampaignStory(story.id, {
+                currentContent: narrative,
+                storyMetadata: {
+                  ...story.storyMetadata,
+                  phaseStatus: 'Storytelling',
+                  combatResult: combatResult
+                }
+              });
+            } else {
+              // Check for individual enemy deaths
+              const deadEnemies = updatedSession.combatants.filter(c => 
+                c.id.startsWith('enemy_') && c.hp <= 0 && c.maxHp > 0
+              );
+              
+              deadEnemies.forEach(enemy => {
+                enemy.maxHp = 0; // Mark as processed
+                addBattleLogEntry({
+                  type: 'enemy_death',
+                  enemy: enemy.name,
+                  message: `💀 ${enemy.name} has been defeated!`
+                });
+              });
             }
           }
-        });
-        return () => unsubscribe();
-      } catch (error) {
-        console.error('Error subscribing to combat session:', error);
-      }
+          
+          setProcessingCombatAction(false);
+        } catch (error) {
+          console.error('❌ Error processing enemy turn:', error);
+          setProcessingCombatAction(false);
+        }
+      }, 2000); // 2 second delay for enemy turn
+      
+      return () => clearTimeout(timer);
     }
-  }, [partyId, navigate, currentPath]);
+  }, [currentCombatant, combatState, combatSession, story?.id, story?.storyMetadata, combatService, processingCombatAction, combatSessionId]);
 
-  // Subscribe to character updates to refresh character list in real-time
+  // Subscribe to real-time character updates
   useEffect(() => {
     if (partyId) {
-      try {
-        const unsubscribe = onSnapshot(
-          query(collection(db, 'characters'), where('partyId', '==', partyId)),
-          (querySnapshot) => {
-            const characters = querySnapshot.docs.map(doc => ({
-              id: doc.id,
-              ...doc.data()
-            }));
-            console.log('Characters updated in real-time:', characters);
+      console.log('👥 Setting up real-time subscription for characters:', partyId);
+      const unsubscribe = subscribeToParty(partyId, async (updatedParty) => {
+        if (updatedParty) {
+          console.log('👥 Party update received:', updatedParty);
+          setParty(updatedParty);
+          setPartyMembers(updatedParty.members || []);
+          
+          // Reload characters when party updates
+          try {
+            const characters = await getPartyCharacters(partyId);
+            console.log('🎭 Characters reloaded:', characters);
+            console.log('🎭 Character count:', characters.length);
+            console.log('🎭 Character details:', characters.map(c => ({ id: c.id, name: c.name, userId: c.userId, partyId: c.partyId })));
             setPartyCharacters(characters);
-          },
-          (error) => {
-            console.error('Error subscribing to character updates:', error);
+          } catch (error) {
+            console.error('❌ Error reloading characters:', error);
           }
-        );
-        return () => unsubscribe();
-      } catch (error) {
-        console.error('Error setting up character subscription:', error);
-      }
+        }
+      });
+      
+      return () => unsubscribe();
     }
   }, [partyId]);
 
-  // Reset combat starting state when component unmounts
+  // Cleanup subscription on unmount
   useEffect(() => {
     return () => {
-      setIsCombatStarting(false);
+      if (unsubscribe) {
+        unsubscribe();
+      }
     };
-  }, []);
+  }, [unsubscribe]);
 
-  // Reset story generation ref when story status changes
-  useEffect(() => {
-    if (story?.status === 'ready_up') {
-      hasStartedStoryRef.current = false;
-      isGeneratingPlotsRef.current = false;
-    }
-  }, [story?.status]);
-
-  // Auto-ready up when user has a character but isn't ready
-  useEffect(() => {
-    if (user && partyCharacters.length > 0 && story) {
-      const userCharacter = partyCharacters.find(char => char.userId === user.uid);
-      const isUserReady = story.readyPlayers?.includes(user.uid);
-      
-      // Only auto-ready if user has a character but isn't ready, AND story is in ready_up status
-      if (userCharacter && !isUserReady && story.status === 'ready_up') {
-        handleReadyUp();
-      }
-    }
-  }, [partyCharacters, story, user]);
-
-  const loadStoryAndCharacters = async () => {
+  const loadStoryAndCharacters = useCallback(async () => {
+    if (!partyId) return;
+    
     try {
+      console.log('🔄 Starting loadStoryAndCharacters...');
       setLoading(true);
-      console.log('Loading story and characters for partyId:', partyId);
       
-      const [storyData, characters, partyData] = await Promise.all([
-        getCampaignStory(partyId),
-        getPartyCharacters(partyId),
-        getPartyById(partyId)
-      ]);
-      
-      console.log('Loaded characters:', characters);
-      console.log('Loaded story:', storyData);
-      console.log('Loaded party:', partyData);
-      
-      setPartyCharacters(characters);
+      // Load party data first
+      const partyData = await getPartyById(partyId);
+      console.log('👥 Party data loaded:', partyData);
       setParty(partyData);
+      const members = partyData?.members || [];
+      setPartyMembers(members);
       
-      // If no characters exist, try to get party members and their profiles
-      if (characters.length === 0 && user) {
-        try {
-          const userParties = await getUserParties(user.uid);
-          const currentParty = userParties.find(party => party.id === partyId);
-          if (currentParty) {
-            setPartyMembers(currentParty.members || []);
-            console.log('Loaded party members:', currentParty.members);
-            
-            // Fetch profiles for all members
-            const profiles = {};
-            for (const memberId of currentParty.members) {
-              try {
-                const profile = await getUserProfile(memberId);
-                profiles[memberId] = profile;
-              } catch (error) {
-                console.error('Error loading profile for member:', memberId, error);
-                profiles[memberId] = null;
-              }
-            }
-            setMemberProfiles(profiles);
-          }
-        } catch (error) {
-          console.error('Error loading party members:', error);
-        }
-      }
+      // Load story data
+      let storyData = await getCampaignStory(partyId);
+      console.log('📖 Story data loaded:', storyData);
       
-      if (storyData) {
-        // Clean up any old voting data to prevent tie messages
-        if (storyData.votingSession && storyData.status === 'voting') {
-          await updateCampaignStory(storyData.id, {
-            votingSession: null
-          });
-          storyData.votingSession = null;
-        }
-        
-        // Remove any tie-related messages from old voting system
-        if (storyData.storyMessages) {
-          const filteredMessages = storyData.storyMessages.filter(msg => 
-            !msg.content?.includes('tie') && 
-            !msg.content?.includes('vote again') &&
-            msg.type !== 'tie_break'
-          );
-          
-          if (filteredMessages.length !== storyData.storyMessages.length) {
-            await updateCampaignStory(storyData.id, {
-              storyMessages: filteredMessages
-            });
-            storyData.storyMessages = filteredMessages;
-          }
+      // Create story if it doesn't exist
+      if (!storyData) {
+        console.log('📝 Creating new campaign story...');
+        storyData = await createCampaignStory(partyId);
+        console.log('✅ New story created:', storyData);
         }
         
         setStory(storyData);
-        setIsReady(storyData.readyPlayers?.includes(user?.uid) || false);
-        
-        // Initialize objectives if story is in storytelling mode
-        if (storyData.status === 'storytelling' && partyData) {
-          const hiddenObjectives = generateHiddenObjectives(partyData.description || '');
-          setObjectives(hiddenObjectives);
-          
-          // Set initial phase based on story progress
-          const messageCount = storyData.storyMessages?.length || 0;
-          if (messageCount < 5) {
-            setCurrentPhase('Investigation');
-          } else if (messageCount < 15) {
-            setCurrentPhase('Conflict');
-          } else {
-            setCurrentPhase('Resolution');
-          }
-        }
-      } else {
-        // Create new story if none exists
-        const newStory = await createCampaignStory(partyId);
-        setStory(newStory);
-      }
+      
+      // Load characters
+      const characters = await getPartyCharacters(partyId);
+      console.log('🎭 Characters loaded:', characters);
+      console.log('🎭 Character count:', characters.length);
+      console.log('🎭 Character details:', characters.map(c => ({ id: c.id, name: c.name, userId: c.userId, partyId: c.partyId })));
+      setPartyCharacters(characters);
+      
+      // Generate objectives
+      const objectivesData = generateHiddenObjectives(partyData?.description || "adventure");
+      setObjectives(objectivesData);
+      
+      console.log('✅ loadStoryAndCharacters completed successfully');
     } catch (error) {
-      console.error('Error in loadStoryAndCharacters:', error);
-      setError('Failed to load campaign story');
+      console.error('❌ Error loading story and characters:', error);
+      setError('Failed to load campaign data');
     } finally {
       setLoading(false);
     }
-  };
+  }, [partyId]);
 
-  useEffect(() => {
-    if (story?.id && user) {
-      const unsubscribe = subscribeToCampaignStory(story.id, (updatedStory) => {
-        if (updatedStory) {
-          setStory(updatedStory);
-          setIsReady(updatedStory.readyPlayers?.includes(user.uid) || false);
-          
-          // If story status changed to voting, stop generating plots
-          if (updatedStory.status === 'voting') {
-            setIsGeneratingPlots(false);
-            hasStartedStoryRef.current = false;
-          }
-          
-          // Update objectives and phase if story is in storytelling mode
-          if (updatedStory.status === 'storytelling' && party) {
-            // Initialize objectives if not already set
-            if (objectives.length === 0) {
-              const hiddenObjectives = generateHiddenObjectives(party.description || '');
-              setObjectives(hiddenObjectives);
-            }
-            
-            // Update phase based on story progress
-            const messageCount = updatedStory.storyMessages?.length || 0;
-            if (messageCount < 5 && currentPhase !== 'Investigation') {
-              setCurrentPhase('Investigation');
-            } else if (messageCount >= 5 && messageCount < 15 && currentPhase !== 'Conflict') {
-              setCurrentPhase('Conflict');
-            } else if (messageCount >= 15 && currentPhase !== 'Resolution') {
-              setCurrentPhase('Resolution');
-            }
-            
-            // Generate objective hints based on current story context
-            const latestMessage = updatedStory.storyMessages?.[updatedStory.storyMessages.length - 1];
-            if (latestMessage && latestMessage.role === 'assistant') {
-              const hints = generateObjectiveHints(objectives, latestMessage.content);
-              setObjectiveHints(hints);
-            }
-          }
-        }
-      });
-      return () => unsubscribe();
-    }
-  }, [story?.id, user?.uid, party, objectives, currentPhase]);
-
-  const handleReadyUp = async () => {
-    if (!user) return;
+  const handleReadyUp = useCallback(async () => {
+    if (!user || !story) return;
     
-    // Check if user has a character in this party
-    const userCharacter = partyCharacters.find(char => char.userId === user.uid);
-    
-    if (!userCharacter) {
-      // No character exists, redirect to character creation
-      navigate(`/character-creation/${partyId}`);
-      return;
-    }
-    
-    // User has a character, proceed with ready up
     try {
+      console.log('👋 User readying up...');
+      setLoading(true);
       await setPlayerReady(story.id, user.uid);
-      setIsReady(true);
+      console.log('✅ Player ready status set');
     } catch (error) {
+      console.error('❌ Error readying up:', error);
       setError('Failed to ready up');
+    } finally {
+      setLoading(false);
     }
-  };
+  }, [user, story]);
 
-  const handleStartStory = async () => {
-    // Prevent duplicate requests
-    if (isGeneratingPlotsRef.current || hasStartedStoryRef.current || story?.status === 'voting' || story?.status === 'storytelling') {
-      console.log('Plot generation already in progress or completed');
-      return;
-    }
+  const handleStartStory = useCallback(async () => {
+    if (!user || !story) return;
     
-    // Check if plots already exist - check for any plot selection messages
-    const existingPlots = story?.storyMessages?.filter(msg => msg.type === 'plot_selection');
-    if (existingPlots && existingPlots.length > 0) {
-      console.log('Plots already exist, skipping generation');
-      // If we're in ready_up but have plots, move to voting
-      if (story?.status === 'ready_up') {
+    try {
+      console.log('🚀 Starting story generation...');
+      setLoading(true);
+      setIsGeneratingPlots(true);
+      
+      // Set status to generating
+      await updateCampaignStory(story.id, { status: 'generating' });
+      console.log('📊 Status set to generating');
+      
+      try {
+        // Generate plots using the dungeon master service
+        const plotsResponse = await dungeonMasterService.generateStoryPlots(
+          partyCharacters,
+          party?.description || 'An epic adventure awaits!',
+          objectives
+        );
+        console.log('📜 Generated plots response:', plotsResponse);
+        
+        // Parse the plots from the response
+        const parsedPlots = parsePlotsFromResponse(plotsResponse);
+        console.log('✅ Parsed plots array:', parsedPlots);
+        
+        // Move to voting phase with the generated plots
         await updateCampaignStory(story.id, {
           status: 'voting',
-          votingSession: null
+          availablePlots: parsedPlots
         });
+        console.log('🗳️ Moved to voting phase');
+      } catch (aiError) {
+        console.warn('AI service unavailable, using fallback plots:', aiError);
+        
+        // Fallback: Use predefined plots
+        const fallbackPlots = [
+          {
+            title: "The Lost Artifact",
+            description: "A powerful artifact has been stolen and the party must track it down through dangerous territory.",
+            summary: "An ancient artifact of great power has been stolen from the local temple. The party must follow the trail of the thieves through dangerous wilderness and hostile territory.",
+            campaignLength: "medium"
+          },
+          {
+            title: "The Dark Forest",
+            description: "A mysterious forest has appeared overnight, and strange creatures are emerging from its depths.",
+            summary: "A dark forest has mysteriously appeared on the outskirts of town. Strange creatures and magical phenomena are emerging, and the party must investigate the source.",
+            campaignLength: "short"
+          },
+          {
+            title: "The Dragon's Lair",
+            description: "A dragon has been terrorizing the countryside, and the party must find a way to stop it.",
+            summary: "A fearsome dragon has been attacking villages and stealing livestock. The party must find the dragon's lair and either defeat it or negotiate a peaceful solution.",
+            campaignLength: "long"
+          }
+        ];
+        
+        // Move to voting phase with fallback plots
+        await updateCampaignStory(story.id, {
+          status: 'voting',
+          availablePlots: fallbackPlots
+        });
+        console.log('🗳️ Moved to voting phase with fallback plots');
+        
+        setError('AI service temporarily unavailable. Using predefined plot options.');
       }
-      return;
+    } catch (error) {
+      console.error('❌ Error starting story:', error);
+      setError('Failed to start story generation');
+      // Reset status on error
+      await updateCampaignStory(story.id, { status: 'ready_up' });
+    } finally {
+      setLoading(false);
+      setIsGeneratingPlots(false);
     }
-    
-    // Additional check to prevent multiple clicks
-    if (loading) {
-      console.log('Already loading, skipping request');
-      return;
-    }
-    
+  }, [user, story, partyCharacters, party?.description, objectives]);
+
+  const handlePlotSelection = useCallback(async (plotIndex) => {
     try {
-      isGeneratingPlotsRef.current = true;
-      hasStartedStoryRef.current = true;
-      setIsGeneratingPlots(true);
+      console.log('🎯 Selecting plot:', plotIndex);
       setLoading(true);
       
-      // Double-check that we're still in ready_up status
-      if (story?.status !== 'ready_up') {
-        console.log('Story is no longer in ready_up status');
+      // Get the filtered plots (without fallback plots)
+      const validPlots = story?.availablePlots?.filter(plot => plot.title && !plot.title.startsWith('Plot ')) || [];
+      const selectedPlot = validPlots[plotIndex];
+      
+      console.log('📋 Available plots:', story?.availablePlots);
+      console.log('🎯 Valid plots:', validPlots);
+      console.log('🎯 Selected plot:', selectedPlot);
+      
+      if (!selectedPlot) {
+        console.error('❌ Selected plot not found');
+        setError('Selected plot not found');
         return;
       }
       
-      // Generate character context for AI
-      const characterContext = partyCharacters.map(char => 
-        `${char.name} - Level ${char.level} ${char.race} ${char.class}. ${char.personality || ''}. ${char.backstory || ''}`
-      ).join('\n');
-      
-      // Generate plot options
-      const plotPrompt = `Generate 3 distinct campaign plot options for this party. For each plot, provide a compelling title and a brief summary (2-3 sentences). Format as:
-
-Plot 1: [Title]
-[Summary]
-
-Plot 2: [Title]  
-[Summary]
-
-Plot 3: [Title]
-[Summary]
-
-Party: ${characterContext}`;
-
-      const plotResponse = await dungeonMasterService.generatePlotOptions(partyCharacters, party);
-      
-      // Add AI message with plots
-      await addStoryMessage(story.id, {
-        role: 'assistant',
-        content: plotResponse,
-        type: 'plot_selection'
+      // Set status to generating story content
+      await updateCampaignStory(story.id, { 
+        status: 'generating_story',
+        selectedPlot: plotIndex,
+        selectedPlotData: selectedPlot,
+        currentContent: `Generating story content for: ${selectedPlot.title}...`
       });
+      console.log('📝 Status set to generating_story');
       
-      // Update story status to voting (DM will select plot)
-      await updateCampaignStory(story.id, {
-        status: 'voting',
-        votingSession: null // Ensure no old voting data
-      });
-      
+      try {
+        // Generate the actual story content using the dungeon master service
+        const storyContent = await dungeonMasterService.generateStoryIntroduction(
+          partyCharacters,
+          selectedPlot.description,
+          selectedPlot.title,
+          party
+        );
+        console.log('📖 Generated story content:', storyContent);
+        
+        // Move to storytelling phase with the generated content
+        await updateCampaignStory(story.id, { 
+          status: 'storytelling',
+          currentContent: storyContent || `The adventure begins with ${selectedPlot.title}!`,
+          currentSpeaker: { userId: party.dmId, name: 'Dungeon Master', id: 'dm', race: 'DM', class: 'Dungeon Master' }
+        });
+        console.log('✅ Plot selected and story generated successfully');
+      } catch (aiError) {
+        console.warn('AI service unavailable, using fallback story:', aiError);
+        
+        // Fallback: Use a simple story introduction
+        const fallbackContent = `The adventure begins with ${selectedPlot.title}!
+
+${selectedPlot.summary}
+
+The party finds themselves at the beginning of this epic journey. The path ahead is uncertain, but the promise of adventure and glory awaits those brave enough to take the first step.
+
+What would you like to do?`;
+        
+        // Move to storytelling phase with fallback content
+        await updateCampaignStory(story.id, { 
+          status: 'storytelling',
+          currentContent: fallbackContent,
+          currentSpeaker: { userId: party.dmId, name: 'Dungeon Master', id: 'dm', race: 'DM', class: 'Dungeon Master' }
+        });
+        console.log('✅ Plot selected with fallback story content');
+        
+        setError('AI service temporarily unavailable. Using simplified story introduction.');
+      }
     } catch (error) {
-      setError('Failed to start story generation');
-      console.error(error);
-    } finally {
-      isGeneratingPlotsRef.current = false;
-      setIsGeneratingPlots(false);
-      setLoading(false);
-    }
-  };
-
-  const handlePlotSelection = async (plotNumber) => {
-    if (!user || !party) return;
-    
-    // Only the campaign creator (dmId) can select the plot
-    if (party.dmId !== user.uid) {
-      setError('Only the campaign creator can select the plot');
-      return;
-    }
-    
-    // Check if plot has already been selected
-    if (story?.status === 'storytelling') {
-      console.log('Plot already selected, story in progress');
-      return;
-    }
-    
-    try {
-      setLoading(true);
-      
-      // Get the plot details from the story messages
-      const plotMessage = story.storyMessages.find(msg => msg.type === 'plot_selection');
-      
-      // Generate campaign goal based on the selected plot
-      const campaignGoal = await dungeonMasterService.generateCampaignGoal(
-        partyCharacters,
-        plotMessage?.content || '',
-        party
-      );
-      
-      // Update story status to storytelling with campaign metadata
-      await updateCampaignStory(story.id, {
-        status: 'storytelling',
-        currentPlot: plotNumber,
-        votingSession: null,
-        campaignMetadata: {
-          ...story.campaignMetadata,
-          mainGoal: campaignGoal,
-          campaignPhase: CAMPAIGN_PHASES.INTRODUCTION,
-          plotDetails: plotMessage?.content || ''
-        }
-      });
-      
-      // Add a message indicating the plot was chosen
-      await addStoryMessage(story.id, {
-        role: 'assistant',
-        content: `The Dungeon Master has chosen Plot ${plotNumber}! Let the story begin...`,
-        type: 'plot_selected'
-      });
-      
-      // Generate initial story introduction
-      const storyIntroduction = await dungeonMasterService.generateStoryIntroduction(
-        partyCharacters,
-        plotMessage?.content || '',
-        plotNumber,
-        party
-      );
-      
-      // Add the story introduction
-      await addStoryMessage(story.id, {
-        role: 'assistant',
-        content: storyIntroduction,
-        type: 'story_introduction'
-      });
-      
-      // Set the DM as the initial controller
-      await setCurrentController(story.id, party.dmId);
-      
-    } catch (error) {
+      console.error('❌ Error selecting plot:', error);
       setError('Failed to select plot');
-      console.error(error);
+      // Reset status on error
+      await updateCampaignStory(story.id, { status: 'voting' });
     } finally {
       setLoading(false);
     }
-  };
+  }, [story, partyCharacters, party]);
 
-  const handleSendResponse = async () => {
-    if (!playerResponse.trim() || !user || !story) return;
+  const handleSendResponse = useCallback(async () => {
+    if (!playerResponse.trim()) return;
     
     try {
       setLoading(true);
+      setError('');
       
-      // Get current story state for consistency
-      const currentStoryState = storyState || await getStoryState(story.id);
-      
-      // Get user character
-      const userCharacter = partyCharacters.find(char => char.userId === user.uid);
+      // Validate action
+      const userCharacter = partyCharacters.find(char => char.userId === user?.uid);
       if (!userCharacter) {
         setError('You need a character to participate in the story');
         return;
       }
 
-      // Enhanced action validation with atmospheric responses
-      const enhancedContext = {
-        context: 'campaign_story',
-        storyState: currentStoryState,
-        customContext: {
-          description: currentStoryState?.currentLocation?.description || 'A mysterious location',
-          environmentalFeatures: currentStoryState?.currentLocation?.features || [],
-          npcs: currentStoryState?.npcs || [],
-          circumstances: extractCircumstancesFromStoryState(currentStoryState)
-        }
-      };
-
-      // Validate action with atmospheric response
-      const validationResult = actionValidationService.validatePlayerAction(
-        playerResponse,
-        userCharacter,
-        enhancedContext
-      );
-
-      // Show action validation if there are dice results
-      if (validationResult.valid && validationResult.diceResult) {
-        setCurrentValidation(validationResult);
-        setShowActionValidation(true);
+      // Validate the action (optional - can be skipped if AI is unavailable)
+      try {
+        const validation = await actionValidationService.validatePlayerAction(
+          playerResponse,
+          userCharacter,
+          { 
+            storyState: story,
+            currentContent: story?.currentContent || '',
+            party: party
+          }
+        );
+        setInlineValidation(validation);
         
-        if (validationResult.diceResult.actions) {
-          setCurrentDiceResult(validationResult.diceResult);
-          setShowDiceRoll(true);
+        // Show validation result but don't block the response
+        if (validation.diceResult) {
+          setShowActionValidation(true);
+          setActionValidation(validation);
         }
-        
-        // Don't proceed with story until user confirms action
-        return;
+      } catch (validationError) {
+        console.warn('Action validation unavailable:', validationError);
+        // Continue without validation
       }
-      
-      // If no dice validation needed, proceed with story
-      await processStoryResponse(playerResponse, userCharacter, currentStoryState, validationResult);
-      
-    } catch (error) {
-      setError('Failed to send response');
-      console.error(error);
-    } finally {
-      setLoading(false);
-    }
-  };
 
-  // Process story response after action validation
-  const processStoryResponse = async (playerResponse, userCharacter, currentStoryState, validationResult) => {
-      // Add player message with story state metadata
-      const playerMessage = await addStoryMessageWithMetadata(story.id, {
-        role: 'user',
-        content: playerResponse,
-        userId: user.uid,
-      characterName: userCharacter.name
-      }, currentStoryState);
-      
-      // Check for objective discovery
-      const discoveredObjectives = checkObjectiveDiscovery(playerResponse, objectives);
-      if (discoveredObjectives.length > 0) {
-        setObjectives(prev => {
-          const updated = [...prev];
-          discoveredObjectives.forEach(newObj => {
-            const index = updated.findIndex(obj => obj.id === newObj.id);
-            if (index !== -1) {
-              updated[index] = newObj;
-            }
-          });
-          return updated;
-        });
-      }
-      
-      // Generate AI response with enhanced context
-      let aiResponse;
-      if (story.campaignMetadata && story.campaignMetadata.mainGoal) {
-        // Use campaign continuation for ongoing campaigns
-        aiResponse = await dungeonMasterService.generateCampaignContinuation(
+      try {
+        // Try to process story response with AI
+        const result = await dungeonMasterService.generateStructuredStoryResponse(
           partyCharacters, 
-          story.campaignMetadata,
-          story.storyMessages, 
+          story?.storyMessages || [],
           playerResponse,
+          currentPhase, 
+          getDiscoveredObjectives(objectives), 
+          null, 
           party
         );
-      } else {
-        // Use enhanced story continuation with story state
-        aiResponse = await dungeonMasterService.generateStoryContinuation(
-          partyCharacters,
-          story.storyMessages,
-          playerResponse,
-          currentStoryState,
-          'individual',
-          party
-        );
-      }
-      
-    // Extract entities from AI response if validation result has entities
-    let extractedEntities = null;
-    if (validationResult && validationResult.entities) {
-      extractedEntities = validationResult.entities;
-    } else {
-      // Extract entities from AI response using action validation service
-      extractedEntities = actionValidationService.extractEntities(aiResponse, {
-        storyState: currentStoryState,
-        partyCharacters
-      });
-    }
-    
-    // Update story state based on AI response and extracted entities
-      const updatedStoryState = storyStateService.updateStoryState(
-        currentStoryState,
-        aiResponse,
-        playerResponse,
-      userCharacter.id
-    );
-    
-    // Add extracted entities to story state
-    if (extractedEntities) {
-      updatedStoryState.extractedEntities = extractedEntities;
-      
-      // Store entities for future reference
-      if (!updatedStoryState.knownEntities) {
-        updatedStoryState.knownEntities = {
-          enemies: [],
-          items: [],
-          locations: [],
-          statusEffects: [],
-          questHooks: [],
-          npcs: []
-        };
-      }
-      
-      // Merge new entities with known entities
-      Object.keys(extractedEntities).forEach(category => {
-        if (extractedEntities[category] && extractedEntities[category].length > 0) {
-          extractedEntities[category].forEach(newEntity => {
-            const existingIndex = updatedStoryState.knownEntities[category].findIndex(
-              existing => existing.name.toLowerCase() === newEntity.name.toLowerCase()
-            );
-            if (existingIndex === -1) {
-              updatedStoryState.knownEntities[category].push(newEntity);
-            } else {
-              // Update existing entity with new information
-              updatedStoryState.knownEntities[category][existingIndex] = {
-                ...updatedStoryState.knownEntities[category][existingIndex],
-                ...newEntity
-              };
-            }
-          });
-        }
-      });
-    }
-      
-      // Save updated story state
-      await updateStoryState(story.id, updatedStoryState);
-      setStoryState(updatedStoryState);
-      
-    // Add AI response with updated story state and entities
-      await addStoryMessageWithMetadata(story.id, {
-        role: 'assistant',
-        content: aiResponse,
-      type: 'story_continuation',
-      entities: extractedEntities
-      }, updatedStoryState);
-      
-      // Update campaign metadata with new context
-      if (story.campaignMetadata) {
-        const newContext = generateCampaignContext(story.campaignMetadata, story.storyMessages, partyCharacters);
-        const newProgress = updateCampaignProgress(story.campaignMetadata, story.storyMessages, objectives);
-        const newPhase = checkPhaseTransition(story.campaignMetadata, story.storyMessages, objectives);
         
-        const metadataUpdates = {
-          'campaignMetadata.storyContext': {
-            ...story.campaignMetadata.storyContext,
-            ...newContext
-          },
-          'campaignMetadata.campaignProgress': newProgress
+        // Parse the structured response
+        const parsedResponse = parseStructuredResponse(result);
+        
+        // Add the message to story history
+        const newMessage = {
+          speaker: story?.currentSpeaker?.name || userCharacter.name,
+          content: playerResponse,
+          timestamp: new Date()
         };
         
-        if (newPhase) {
-          metadataUpdates['campaignMetadata.campaignPhase'] = newPhase;
-        }
+        // Update story with parsed content and add message to history
+        await updateCampaignStory(story.id, {
+          currentContent: parsedResponse.storyContent || `${story?.currentContent || ''}\n\n${userCharacter.name}: "${playerResponse}"`,
+          currentSpeaker: null,
+          storyMessages: [...(story?.storyMessages || []), newMessage],
+          // Store additional structured data for future use
+          storyMetadata: {
+            currentLocation: parsedResponse.currentLocation,
+            activeNPCs: parsedResponse.activeNPCs,
+            plotDevelopments: parsedResponse.plotDevelopments,
+            characterReactions: parsedResponse.characterReactions,
+            nextActions: parsedResponse.nextActions,
+            storyTone: parsedResponse.storyTone,
+            phaseStatus: parsedResponse.phaseStatus,
+            enemyDetails: parsedResponse.enemyDetails || []
+          }
+        });
+      } catch (aiError) {
+        console.warn('AI service unavailable, continuing story manually:', aiError);
         
-        await updateCampaignStory(story.id, metadataUpdates);
-      } else {
-        console.warn('No campaign metadata found, skipping campaign updates');
+        // Fallback: Continue story manually without AI
+        const newMessage = {
+          speaker: story?.currentSpeaker?.name || userCharacter.name,
+          content: playerResponse,
+          timestamp: new Date()
+        };
+        
+        // Update story with just the player's response
+        await updateCampaignStory(story.id, {
+          currentContent: `${story?.currentContent || ''}\n\n${userCharacter.name}: "${playerResponse}"`,
+          currentSpeaker: null,
+          storyMessages: [...(story?.storyMessages || []), newMessage]
+        });
+        
+        // Show a warning to the user
+        setError('AI service temporarily unavailable. Story continued manually.');
       }
       
       setPlayerResponse('');
+      setInlineValidation(null);
+      await loadStoryAndCharacters();
       
-    // Enhanced combat detection with story context and action validation
-    const combatDetection = detectCombatOpportunity(aiResponse, updatedStoryState, playerResponse, validationResult);
-      
-      if (combatDetection.shouldInitiate) {
-        setIsCombatStarting(true);
-        
-        // Create enhanced combat session
-        const enhancedCombatData = {
-          storyContext: aiResponse,
-          partyMembers: partyCharacters,
-        enemies: generateEnemiesFromContext(aiResponse, partyCharacters.length, combatDetection.enemyType),
-          environmentalFeatures: updatedStoryState.currentLocation?.features || [],
-          teamUpOpportunities: combatService.identifyTeamUpOpportunities(partyCharacters),
-        narrativeElements: combatService.extractNarrativeElements(aiResponse),
-        extractedEntities: extractedEntities // Pass extracted entities to combat
-        };
-        
-        const combatSession = await createEnhancedCombatSession(partyId, enhancedCombatData);
-        
-        // Pause story for combat
-        await updateCampaignStory(story.id, {
-          status: 'paused',
-          currentCombat: combatSession.id
-        });
-        
-        // Redirect to combat after a short delay
-        setTimeout(() => {
-          navigate(`/combat/${partyId}`);
-        }, 2000);
-      }
-  };
-
-  // Extract circumstances from story state
-  const extractCircumstancesFromStoryState = (storyState) => {
-    const circumstances = [];
-    
-    if (!storyState) return circumstances;
-    
-    // Add location-based circumstances
-    if (storyState.currentLocation) {
-      const location = storyState.currentLocation;
-      if (location.atmosphere?.includes('dangerous')) circumstances.push('in danger');
-      if (location.atmosphere?.includes('hostile')) circumstances.push('in hostile environment');
-      if (location.atmosphere?.includes('peaceful')) circumstances.push('in peaceful environment');
-      if (location.lighting === 'dark') circumstances.push('in darkness');
-      if (location.weather === 'stormy') circumstances.push('in storm');
+    } catch (error) {
+      console.error('Error sending response:', error);
+      setError('Failed to send response');
+    } finally {
+      setLoading(false);
     }
-    
-    // Add NPC-based circumstances
-    if (storyState.npcs?.length > 0) {
-      const hostileNPCs = storyState.npcs.filter(npc => npc.disposition === 'hostile');
-      if (hostileNPCs.length > 0) circumstances.push('with hostile NPCs');
-    }
-    
-    return circumstances;
-  };
+  }, [playerResponse, partyCharacters, user?.uid, story, party, currentPhase, objectives, loadStoryAndCharacters]);
 
-  // Enhanced combat detection with action validation
-  const detectCombatOpportunity = (aiResponse, storyState, playerResponse, validationResult) => {
-    const combatKeywords = ['combat', 'battle', 'fight', 'attack', 'enemy', 'monster'];
-    const tensionKeywords = ['tension', 'threat', 'danger', 'hostile', 'aggressive'];
-    
-    // Check for explicit combat mentions
-    const hasCombatKeywords = combatKeywords.some(keyword => 
-      aiResponse.toLowerCase().includes(keyword)
-    );
-    
-    // Check for escalating tension
-    const hasTension = tensionKeywords.some(keyword => 
-      aiResponse.toLowerCase().includes(keyword)
-    );
-    
-    // Check story context for combat-appropriate situations
-    const isCombatAppropriate = storyState?.currentLocation?.atmosphere?.includes('dangerous') || 
-                               storyState?.currentLocation?.atmosphere?.includes('hostile') ||
-                               storyState?.currentLocation?.atmosphere?.includes('threatening');
-    
-    // Check if player response indicates combat intent
-    const playerWantsCombat = combatKeywords.some(keyword => 
-      playerResponse.toLowerCase().includes(keyword)
-    );
-
-    // Check if action validation detected combat actions
-    const hasCombatActions = validationResult?.diceResult?.actions?.some(action => 
-      ['attack', 'spell', 'dodge', 'parry'].includes(action.action)
-    );
-
-    // Check for enemies in story context
-    const hasEnemies = storyState?.npcs?.some(npc => npc.disposition === 'hostile') ||
-                      aiResponse.toLowerCase().includes('enemy') ||
-                      aiResponse.toLowerCase().includes('monster') ||
-                      aiResponse.toLowerCase().includes('creature');
-
-    // Determine enemy type from context
-    let enemyType = 'bandit';
-    const contextLower = aiResponse.toLowerCase();
-    if (contextLower.includes('goblin')) enemyType = 'goblin';
-    else if (contextLower.includes('orc')) enemyType = 'orc';
-    else if (contextLower.includes('troll')) enemyType = 'troll';
-    else if (contextLower.includes('dragon')) enemyType = 'dragon';
-    else if (contextLower.includes('undead') || contextLower.includes('skeleton')) enemyType = 'skeleton';
-    else if (contextLower.includes('zombie')) enemyType = 'zombie';
-    
-    return {
-      shouldInitiate: hasCombatKeywords || (hasTension && isCombatAppropriate) || playerWantsCombat || (hasCombatActions && hasEnemies),
-      reason: hasCombatKeywords ? 'explicit_combat' : 
-              hasTension && isCombatAppropriate ? 'escalating_tension' :
-              playerWantsCombat ? 'player_intent' :
-              hasCombatActions && hasEnemies ? 'action_triggered_combat' : 'none',
-      enemyType: enemyType
-    };
-  };
-
-  // Action validation handlers
-  const handleActionValidationClose = () => {
+  const handleActionValidationClose = useCallback(() => {
     setShowActionValidation(false);
-    setCurrentValidation(null);
-  };
+    setActionValidation(null);
+  }, []);
 
-  const handleDiceRollClose = () => {
+  const handleDiceRollClose = useCallback(() => {
     setShowDiceRoll(false);
-    setCurrentDiceResult(null);
-  };
+    setDiceResult(null);
+  }, []);
 
-  const handleActionProceed = async () => {
-    if (!currentValidation) return;
-
-    const userCharacter = partyCharacters.find(char => char.userId === user.uid);
-    if (!userCharacter) return;
-
-    // Process the action with dice rolling
-    const diceResult = diceService.validateAction(
-      playerResponse,
-      userCharacter,
-      {
-        context: 'campaign_story',
-        validation: currentValidation
-      }
-    );
-
-    setCurrentDiceResult(diceResult);
-    setShowDiceRoll(true);
+  const handleActionProceed = useCallback(async () => {
+    // Handle action proceed logic
     setShowActionValidation(false);
-  };
+  }, []);
 
-  const handleActionRevise = () => {
+  const handleActionRevise = useCallback(() => {
     setShowActionValidation(false);
-    setCurrentValidation(null);
-  };
+    setActionValidation(null);
+  }, []);
 
-  // Enhanced enemy generation with story context
-  const generateEnemiesFromContext = (context, partySize, enemyType = 'bandit') => {
-    const enemyTypes = {
-      'goblin': { name: 'Goblin', hp: 12, ac: 14, level: 1, charisma: 8 },
-      'orc': { name: 'Orc', hp: 30, ac: 16, level: 3, charisma: 12 },
-      'troll': { name: 'Troll', hp: 84, ac: 15, level: 5, charisma: 7 },
-      'dragon': { name: 'Dragon', hp: 200, ac: 19, level: 10, charisma: 19 },
-      'bandit': { name: 'Bandit', hp: 16, ac: 12, level: 1, charisma: 10 },
-      'skeleton': { name: 'Skeleton', hp: 13, ac: 13, level: 1, charisma: 5 },
-      'zombie': { name: 'Zombie', hp: 22, ac: 8, level: 1, charisma: 3 }
-    };
-
-    const baseEnemy = enemyTypes[enemyType] || enemyTypes['bandit'];
-    const enemyCount = Math.min(partySize + 1, 6); // Balance with party size
-
-    const generatedEnemies = [];
-    for (let i = 0; i < enemyCount; i++) {
-      generatedEnemies.push({
-        id: `enemy_${i}`,
-        name: `${baseEnemy.name} ${i + 1}`,
-        type: baseEnemy.name,
-        hp: baseEnemy.hp + Math.floor(Math.random() * 10),
-        maxHp: baseEnemy.hp + Math.floor(Math.random() * 10),
-        ac: baseEnemy.ac + Math.floor(Math.random() * 3),
-        initiative: Math.floor(Math.random() * 20) + 1,
-        charisma: baseEnemy.charisma,
-        portrait: '/placeholder-enemy.png'
-      });
-    }
-
-    return generatedEnemies;
-  };
-
-  // Change the local function name to avoid conflict with the imported one
-  const handlePhaseTransition = async () => {
-    if (!story || !party) return;
-    
-    const messageCount = story.storyMessages?.length || 0;
-    const discoveredObjectives = getDiscoveredObjectives(objectives);
-    
-    let shouldTransition = false;
-    let newPhase = currentPhase;
-    
-    // Phase transition logic
-    if (currentPhase === 'Investigation' && messageCount >= 5 && discoveredObjectives.length >= 1) {
-      newPhase = 'Conflict';
-      shouldTransition = true;
-    } else if (currentPhase === 'Conflict' && messageCount >= 15 && discoveredObjectives.length >= 2) {
-      newPhase = 'Resolution';
-      shouldTransition = true;
-    }
-    
-    if (shouldTransition && newPhase !== currentPhase) {
-      setCurrentPhase(newPhase);
+  const handleSetSpeaker = useCallback(async (character) => {
+    try {
+      console.log('🎤 Setting speaker:', character);
+      console.log('🎤 Character data:', JSON.stringify(character));
+      console.log('🎤 Story ID:', story?.id);
+      setLoading(true);
       
-      // Generate phase transition message
-      const transitionResponse = await dungeonMasterService.generatePhaseTransition(
+      if (character) {
+        await setCurrentSpeaker(story.id, character);
+      } else {
+        // Clear current speaker
+        await updateCampaignStory(story.id, { currentSpeaker: null });
+      }
+      
+      console.log('✅ Speaker set');
+    } catch (error) {
+      console.error('❌ Error setting speaker:', error);
+      setError('Failed to set speaker');
+    } finally {
+      setLoading(false);
+    }
+  }, [story?.id]);
+
+  const handleContinueStory = useCallback(async () => {
+    try {
+      console.log('🚀 Continuing story...');
+      setLoading(true);
+      
+      // Generate next story segment using the dungeon master service
+      const nextContent = await dungeonMasterService.generateStoryContinuation(
         partyCharacters,
+        story?.storyMessages || [],
+        "The story continues...",
         currentPhase,
-        `Story has progressed through ${messageCount} messages with ${discoveredObjectives.length} objectives discovered`,
+        getDiscoveredObjectives(objectives),
+        null,
         party
       );
       
-      await addStoryMessage(story.id, {
-        role: 'assistant',
-        content: transitionResponse,
-        type: 'phase_transition'
+      // Update the story with new content
+      await updateCampaignStory(story.id, {
+        currentContent: nextContent || "The story continues...",
+        currentSpeaker: null
       });
-    }
-  };
-
-  // Highlight keywords in story messages
-  const highlightKeywords = (text) => {
-    if (!text) return text;
-    
-    // Enemy keywords to highlight
-    const enemyKeywords = [
-      'enemy', 'enemies', 'monster', 'monsters', 'bandit', 'bandits', 
-      'goblin', 'goblins', 'orc', 'orcs', 'dragon', 'dragons', 
-      'troll', 'trolls', 'zombie', 'zombies', 'skeleton', 'skeletons', 
-      'assassin', 'assassins', 'guard', 'guards', 'soldier', 'soldiers',
-      'thief', 'thieves', 'brigand', 'brigands', 'raider', 'raiders',
-      'cultist', 'cultists', 'demon', 'demons', 'devil', 'devils',
-      'ghost', 'ghosts', 'specter', 'specters', 'wraith', 'wraiths',
-      'hobgoblin', 'hobgoblins', 'bugbear', 'bugbears', 'kobold', 'kobolds',
-      'ogre', 'ogres', 'giant', 'giants', 'beholder', 'beholders',
-      'lich', 'liches', 'vampire', 'vampires', 'werewolf', 'werewolves',
-      'hag', 'hags', 'witch', 'witches', 'necromancer', 'necromancers'
-    ];
-    
-    // Investigation keywords to highlight
-    const investigationKeywords = [
-      'search', 'investigate', 'examine', 'look around', 'check', 'explore',
-      'clue', 'clues', 'evidence', 'footprint', 'footprints', 'track', 'tracks',
-      'marking', 'markings', 'sign', 'signs', 'trace', 'traces', 'remains',
-      'ruin', 'ruins', 'artifact', 'artifacts', 'scroll', 'scrolls',
-      'book', 'books', 'map', 'maps', 'diary', 'journal', 'note', 'notes',
-      'door', 'doors', 'passage', 'passages', 'tunnel', 'tunnels',
-      'chamber', 'chambers', 'room', 'rooms', 'area', 'areas',
-      'mystery', 'mysterious', 'hidden', 'secret', 'secrets', 'concealed',
-      'strange', 'unusual', 'curious', 'suspicious', 'odd', 'peculiar',
-      'trap', 'traps', 'pressure plate', 'pressure plates', 'lever', 'levers',
-      'button', 'buttons', 'switch', 'switches', 'key', 'keys', 'lock', 'locks'
-    ];
-    
-    // Location keywords to highlight
-    const locationKeywords = [
-      'tavern', 'inn', 'shop', 'market', 'temple', 'castle', 'fortress',
-      'tower', 'dungeon', 'cave', 'forest', 'mountain', 'river', 'bridge',
-      'gate', 'wall', 'street', 'alley', 'square', 'plaza', 'district',
-      'village', 'town', 'city', 'settlement', 'outpost', 'camp',
-      'crypt', 'tomb', 'grave', 'cemetery', 'shrine', 'altar',
-      'library', 'archive', 'guild', 'hall', 'mansion', 'palace',
-      'basement', 'cellar', 'attic', 'rooftop', 'balcony', 'courtyard',
-      'garden', 'park', 'field', 'meadow', 'swamp', 'desert', 'island'
-    ];
-    
-    // Action/Combat keywords to highlight
-    const actionKeywords = [
-      'attack', 'fight', 'battle', 'combat', 'defend', 'strike',
-      'sword', 'swords', 'axe', 'axes', 'bow', 'bows', 'arrow', 'arrows',
-      'spell', 'spells', 'magic', 'magical', 'cast', 'casting',
-      'initiative', 'turn', 'round', 'action', 'movement',
-      'charge', 'retreat', 'advance', 'position', 'formation',
-      'shield', 'armor', 'helmet', 'dagger', 'daggers', 'mace', 'maces',
-      'fireball', 'lightning', 'heal', 'healing', 'cure', 'bless', 'curse'
-    ];
-    
-    let highlightedText = text;
-    
-    // Combine all keywords and highlight them in bold
-    const allKeywords = [...enemyKeywords, ...investigationKeywords, ...locationKeywords, ...actionKeywords];
-    
-    allKeywords.forEach(keyword => {
-      const regex = new RegExp(`\\b${keyword}\\b`, 'gi');
-      highlightedText = highlightedText.replace(regex, `<strong>${keyword}</strong>`);
-    });
-    
-    return highlightedText;
-  };
-
-  const getReadyCount = () => story?.readyPlayers?.length || 0;
-  const getTotalPlayers = () => {
-    // Always use party data if available (most reliable)
-    if (party && party.members && Array.isArray(party.members)) {
-      return party.members.length;
-    }
-    // Fallback to character count if no party data
-    if (partyCharacters.length > 0) {
-      return partyCharacters.length;
-    }
-    // Fallback to party members if loaded
-    if (partyMembers.length > 0) {
-      return partyMembers.length;
-    }
-    // Final fallback
-    return 1;
-  };
-  const allPlayersReady = getReadyCount() === getTotalPlayers();
-
-  // Parse plot names and details from AI response
-  const getPlotData = () => {
-    const plotMessages = story.storyMessages.filter(msg => msg.type === 'plot_selection');
-    if (plotMessages.length > 0) {
-      // Use only the most recent plot selection message
-      const content = plotMessages[plotMessages.length - 1].content;
-      const lines = content.split('\n');
-      const plots = [];
-      let currentPlot = null;
-      const seenTitles = new Set();
       
-      lines.forEach(line => {
-        const trimmedLine = line.trim();
-        if (trimmedLine.startsWith('Plot 1:') || trimmedLine.startsWith('Plot 2:') || trimmedLine.startsWith('Plot 3:')) {
-          // Save previous plot if exists
-          if (currentPlot && !seenTitles.has(currentPlot.title)) {
-            plots.push(currentPlot);
-            seenTitles.add(currentPlot.title);
-          }
-          // Start new plot
-          const plotNumber = trimmedLine.match(/Plot (\d+):/)?.[1];
-          const title = trimmedLine.replace(/Plot \d+:\s*/, '').trim();
+      console.log('✅ Story continued');
+    } catch (error) {
+      console.error('❌ Error continuing story:', error);
+      setError('Failed to continue story');
+    } finally {
+      setLoading(false);
+    }
+  }, [partyCharacters, story, currentPhase, objectives, party]);
+
+  // Helper function to parse the AI response into structured plot objects
+  const parsePlotsFromResponse = (response) => {
+    try {
+      console.log('🔍 Parsing plots from response...');
+      
+      // Split the response by plot sections - this format is now guaranteed
+      const plotSections = response.split(/\*\*Plot Option \d+:\*\*/).filter(section => section.trim());
+      
+      console.log('📋 Found plot sections:', plotSections.length);
+      
+      const plots = plotSections.map((section, index) => {
+        const lines = section.trim().split('\n').filter(line => line.trim());
+        
+        let title = `Plot ${index + 1}`;
+        let description = '';
+        let summary = '';
+        let campaignLength = '';
+        
+        // Parse each line
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i].trim();
           
-          // Only create new plot if we haven't seen this title before
-          if (!seenTitles.has(title)) {
-            currentPlot = {
-              number: parseInt(plotNumber),
-              title: title,
-              summary: ''
-            };
-          } else {
-            currentPlot = null; // Skip duplicate
+          // Extract title
+          if (line.startsWith('1. Title:')) {
+            const titleMatch = line.match(/1\.\s*Title:\s*"([^"]+)"/);
+            if (titleMatch) {
+              title = titleMatch[1];
+            }
           }
-        } else if (currentPlot && trimmedLine && !trimmedLine.startsWith('Party:') && !trimmedLine.startsWith('CRITICAL') && !trimmedLine.startsWith('Make each')) {
-          // Add to summary
-          currentPlot.summary += (currentPlot.summary ? ' ' : '') + trimmedLine;
+          
+          // Extract summary
+          if (line.startsWith('2. Summary:')) {
+            let summaryText = line.replace('2. Summary:', '').trim();
+            let j = i + 1;
+            while (j < lines.length && !lines[j].trim().startsWith('3.')) {
+              summaryText += ' ' + lines[j].trim();
+              j++;
+            }
+            summary = summaryText.trim();
+            i = j - 1;
+          }
+          
+          // Extract main conflict
+          if (line.startsWith('3. Main Conflict:')) {
+            let conflictText = line.replace('3. Main Conflict:', '').trim();
+            let j = i + 1;
+            while (j < lines.length && !lines[j].trim().startsWith('4.')) {
+              conflictText += ' ' + lines[j].trim();
+              j++;
+            }
+            description = conflictText.trim();
+            i = j - 1;
+          }
+          
+          // Extract campaign length
+          if (line.startsWith('5. Estimated Campaign Length:')) {
+            const lengthMatch = line.match(/5\.\s*Estimated Campaign Length:\s*(short|medium|long)/i);
+            if (lengthMatch) {
+              campaignLength = lengthMatch[1].toLowerCase();
+            }
+          }
         }
+        
+        // Use summary as description if no description found
+        if (!description && summary) {
+          description = summary;
+        }
+        
+        console.log(`📋 Plot ${index + 1} parsed:`, { title, description, summary, campaignLength });
+        
+        return {
+          id: index,
+          title: title,
+          description: description || summary || `Plot ${index + 1} description`,
+          summary: summary,
+          campaignLength: campaignLength,
+          index: index
+        };
       });
       
-      // Add the last plot if it's not a duplicate
-      if (currentPlot && !seenTitles.has(currentPlot.title)) {
-        plots.push(currentPlot);
+      console.log('✅ Parsed plots:', plots);
+      return plots;
+    } catch (error) {
+      console.error('❌ Error parsing plots:', error);
+      // Return a fallback array if parsing fails
+      return [
+        { id: 0, title: 'Plot 1', description: 'Adventure awaits!', index: 0 },
+        { id: 1, title: 'Plot 2', description: 'Another exciting journey!', index: 1 },
+        { id: 2, title: 'Plot 3', description: 'A mysterious quest!', index: 2 }
+      ];
+    }
+  };
+
+  // Helper function to parse structured AI response
+  const parseStructuredResponse = (response) => {
+    try {
+      console.log('🔍 Parsing structured response:', response);
+      
+      const sections = {
+        storyContent: '',
+        currentLocation: '',
+        activeNPCs: [],
+        plotDevelopments: '',
+        characterReactions: '',
+        nextActions: [],
+        storyTone: '',
+        phaseStatus: '',
+        enemyDetails: []
+      };
+      
+      // Extract STORY_CONTENT
+      const storyContentMatch = response.match(/\*\*STORY_CONTENT:\*\*\s*([\s\S]*?)(?=\*\*|$)/);
+      if (storyContentMatch) {
+        sections.storyContent = storyContentMatch[1].trim();
       }
       
-      // Ensure we only return the first 3 unique plots
-      return plots.slice(0, 3);
+      // Extract CURRENT_LOCATION
+      const locationMatch = response.match(/\*\*CURRENT_LOCATION:\*\*\s*([\s\S]*?)(?=\*\*|$)/);
+      if (locationMatch) {
+        sections.currentLocation = locationMatch[1].trim();
+      }
+      
+      // Extract ACTIVE_NPCS
+      const npcsMatch = response.match(/\*\*ACTIVE_NPCS:\*\*\s*([\s\S]*?)(?=\*\*|$)/);
+      if (npcsMatch) {
+        sections.activeNPCs = npcsMatch[1].trim().split(',').map(npc => npc.trim()).filter(npc => npc);
+      }
+      
+      // Extract PLOT_DEVELOPMENTS
+      const plotMatch = response.match(/\*\*PLOT_DEVELOPMENTS:\*\*\s*([\s\S]*?)(?=\*\*|$)/);
+      if (plotMatch) {
+        sections.plotDevelopments = plotMatch[1].trim();
+      }
+      
+      // Extract CHARACTER_REACTIONS
+      const reactionsMatch = response.match(/\*\*CHARACTER_REACTIONS:\*\*\s*([\s\S]*?)(?=\*\*|$)/);
+      if (reactionsMatch) {
+        sections.characterReactions = reactionsMatch[1].trim();
+      }
+      
+      // Extract NEXT_ACTIONS
+      const actionsMatch = response.match(/\*\*NEXT_ACTIONS:\*\*\s*([\s\S]*?)(?=\*\*|$)/);
+      if (actionsMatch) {
+        sections.nextActions = actionsMatch[1].trim().split(',').map(action => action.trim()).filter(action => action);
+      }
+      
+      // Extract STORY_TONE
+      const toneMatch = response.match(/\*\*STORY_TONE:\*\*\s*([\s\S]*?)(?=\*\*|$)/);
+      if (toneMatch) {
+        sections.storyTone = toneMatch[1].trim();
+      }
+      
+      // Extract PHASE_STATUS
+      const phaseMatch = response.match(/\*\*PHASE_STATUS:\*\*\s*([\s\S]*?)(?=\*\*|$)/);
+      if (phaseMatch) {
+        sections.phaseStatus = phaseMatch[1].trim();
+      }
+      
+      // Extract ENEMY_DETAILS
+      const enemyDetailsMatch = response.match(/\*\*ENEMY_DETAILS:\*\*\s*([\s\S]*?)(?=\*\*|$)/);
+      if (enemyDetailsMatch) {
+        const enemyDetailsText = enemyDetailsMatch[1].trim();
+        console.log('🔍 Raw enemy details text:', enemyDetailsText);
+        
+        // Split by "Name:" to get individual enemy blocks
+        const enemyBlocks = enemyDetailsText.split(/(?=Name:)/).filter(block => block.trim());
+        console.log('🔍 Enemy blocks found:', enemyBlocks.length);
+        
+        sections.enemyDetails = enemyBlocks.map((block, index) => {
+          console.log(`🔍 Parsing enemy block ${index}:`, block);
+          const enemy = {};
+          
+          // Extract Name
+          const nameMatch = block.match(/Name:\s*([^\n]+)/);
+          if (nameMatch) enemy.name = nameMatch[1].trim();
+          
+          // Extract Type
+          const typeMatch = block.match(/Type:\s*([^\n]+)/);
+          if (typeMatch) enemy.type = typeMatch[1].trim();
+          
+          // Extract Level
+          const levelMatch = block.match(/Level:\s*([^\n]+)/);
+          if (levelMatch) enemy.level = parseInt(levelMatch[1].trim()) || 1;
+          
+          // Extract HP (handle "12 each" format)
+          const hpMatch = block.match(/HP:\s*([^\n]+)/);
+          if (hpMatch) {
+            const hpText = hpMatch[1].trim();
+            const hpNumber = hpText.match(/(\d+)/);
+            enemy.hp = hpNumber ? parseInt(hpNumber[1]) : 20;
+          }
+          
+          // Extract AC
+          const acMatch = block.match(/AC:\s*([^\n]+)/);
+          if (acMatch) enemy.ac = parseInt(acMatch[1].trim()) || 12;
+          
+          // Extract Basic Attack
+          const basicAttackMatch = block.match(/Basic Attack:\s*([^\n]+)/);
+          if (basicAttackMatch) enemy.basicAttack = basicAttackMatch[1].trim();
+          
+          // Extract Special Ability
+          const specialAbilityMatch = block.match(/Special Ability:\s*([^\n]+)/);
+          if (specialAbilityMatch) enemy.specialAbility = specialAbilityMatch[1].trim();
+          
+          // Extract Stats
+          const statsMatch = block.match(/Stats:\s*([^\n]+)/);
+          if (statsMatch) enemy.stats = statsMatch[1].trim();
+          
+          console.log(`✅ Parsed enemy ${index}:`, enemy);
+          return enemy;
+        });
+      }
+      
+      console.log('✅ Parsed structured response:', sections);
+      return sections;
+    } catch (error) {
+      console.error('❌ Error parsing structured response:', error);
+      // Fallback: return the original response as story content
+      return {
+        storyContent: response,
+        currentLocation: '',
+        activeNPCs: [],
+        plotDevelopments: '',
+        characterReactions: '',
+        nextActions: [],
+        storyTone: '',
+        phaseStatus: '',
+        enemyDetails: []
+      };
     }
-    return [
-      { number: 1, title: 'Plot 1', summary: 'No plot data available' },
-      { number: 2, title: 'Plot 2', summary: 'No plot data available' },
-      { number: 3, title: 'Plot 3', summary: 'No plot data available' }
-    ];
   };
 
-  const getPlotNames = () => {
-    return getPlotData().map(plot => plot.title);
-  };
+  // Helper function to convert enemy details to combat-ready enemies
+  const convertEnemyDetailsToCombatEnemies = (enemyDetails) => {
+    if (!Array.isArray(enemyDetails) || enemyDetails.length === 0) {
+      console.log('⚠️ No enemy details provided, returning empty array');
+      return [];
+    }
 
-  // Sort characters so current user's character appears first
-  const getSortedCharacters = () => {
-    if (!partyCharacters.length || !user) return partyCharacters;
+    console.log('🔧 Converting enemy details to combat-ready enemies:', enemyDetails);
     
-    return [...partyCharacters].sort((a, b) => {
-      // Current user's character goes first
-      if (a.userId === user.uid) return -1;
-      if (b.userId === user.uid) return 1;
-      // Otherwise maintain original order
-      return 0;
+    return enemyDetails.map((enemy, index) => {
+      // Generate a unique ID for the enemy
+      const enemyId = `enemy_${index}`;
+      
+      // Convert the parsed enemy details to combat-ready format
+      const combatEnemy = {
+        id: enemyId,
+        name: enemy.name || `Enemy ${index + 1}`,
+        hp: enemy.hp || 20,
+        maxHp: enemy.hp || 20, // Use same value for maxHp if not specified
+        ac: enemy.ac || 12,
+        level: enemy.level || 1,
+        class: enemy.type?.toLowerCase() || 'enemy',
+        race: enemy.type?.toLowerCase() || 'unknown',
+        initiative: Math.floor(Math.random() * 20) + 1,
+        // Basic stats with fallbacks
+        strength: 12,
+        dexterity: 10,
+        constitution: 12,
+        intelligence: 8,
+        wisdom: 8,
+        charisma: 6,
+        // Combat properties
+        statusEffects: [],
+        cooldowns: {},
+        lastAction: null,
+        turnCount: 0,
+        // Combat abilities
+        basicAttack: enemy.basicAttack || 'Basic attack (1d6 damage)',
+        specialAbility: enemy.specialAbility || 'None',
+        // Additional properties
+        type: enemy.type || 'humanoid',
+        stats: enemy.stats || 'Standard enemy stats'
+      };
+      
+      console.log(`✅ Converted enemy ${index}:`, combatEnemy);
+      return combatEnemy;
     });
   };
 
-  // Add campaign summary display
-  const renderCampaignSummary = () => {
-    if (!story?.campaignMetadata) return null;
-    
-    const metadata = story.campaignMetadata;
-    
+  // Add entry to battle log
+  const addBattleLogEntry = useCallback((entry) => {
+    const timestamp = new Date().toLocaleTimeString();
+    const logEntry = {
+      id: Date.now(),
+      timestamp,
+      ...entry
+    };
+    setBattleLog(prev => [...prev, logEntry]);
+    console.log('📜 Battle Log Entry:', logEntry);
+  }, []);
+
+  // Initialize combat when conflict phase is detected
+  const initializeCombat = useCallback(async (storyData) => {
+    try {
+      console.log('⚔️ Initializing combat...');
+      
+      // In initializeCombat, robust fallback for enemies
+      let extractedEnemies = [];
+      if (Array.isArray(storyData.storyMetadata?.enemies) && storyData.storyMetadata.enemies.length > 0) {
+        extractedEnemies = [...storyData.storyMetadata.enemies];
+      } else {
+        // Fallback enemy details
+        extractedEnemies = [
+          {
+            id: 'enemy_0',
+            name: 'Gnoll Pack',
+            hp: 20,
+            maxHp: 20,
+            ac: 12,
+            level: 1,
+            class: 'enemy',
+            race: 'unknown',
+            initiative: Math.floor(Math.random() * 20) + 1,
+            strength: 12,
+            dexterity: 10,
+            constitution: 12,
+            intelligence: 8,
+            wisdom: 8,
+            charisma: 6
+          },
+          {
+            id: 'enemy_1',
+            name: 'Gnoll Pack-Leader',
+            hp: 25,
+            maxHp: 25,
+            ac: 14,
+            level: 2,
+            class: 'enemy',
+            race: 'unknown',
+            initiative: Math.floor(Math.random() * 20) + 1,
+            strength: 14,
+            dexterity: 12,
+            constitution: 14,
+            intelligence: 10,
+            wisdom: 10,
+            charisma: 8
+          }
+        ];
+        console.log('⚔️ Using fallback enemy details:', extractedEnemies);
+      }
+      setEnemies(extractedEnemies);
+      
+      // Add combat start entry to battle log
+      addBattleLogEntry({
+        type: 'combat_start',
+        message: `Combat begins! ${extractedEnemies.length} enemies appear.`,
+        enemies: extractedEnemies.map(e => e.name)
+      });
+      
+      // Prepare party characters with proper stats
+      const preparedPartyCharacters = partyCharacters.map(character => {
+        // Calculate HP if not present
+        let hp = character.hp;
+        let maxHp = character.maxHp;
+        
+        if (!hp || !maxHp) {
+          const hitDieSizes = {
+            'Barbarian': 12, 'Fighter': 10, 'Paladin': 10, 'Ranger': 10,
+            'Cleric': 8, 'Druid': 8, 'Monk': 8, 'Rogue': 8, 'Bard': 8,
+            'Sorcerer': 6, 'Warlock': 8, 'Wizard': 6
+          };
+          
+          const hitDie = hitDieSizes[character.class] || 8;
+          const constitution = character.assignedScores?.constitution || 10;
+          const constitutionMod = Math.floor((constitution - 10) / 2);
+          const calculatedHp = Math.max(1, (hitDie + constitutionMod) * (character.level || 1));
+          
+          hp = calculatedHp;
+          maxHp = calculatedHp;
+        }
+        
+        // Calculate AC if not present
+        let ac = character.ac;
+        if (!ac) {
+          const baseAC = 10;
+          const dexterity = character.assignedScores?.dexterity || 10;
+          const dexterityMod = Math.floor((dexterity - 10) / 2);
+          const classACBonuses = {
+            'Barbarian': 3, 'Monk': 2, 'Fighter': 4, 'Paladin': 4, 'Cleric': 4,
+            'Ranger': 3, 'Rogue': 2, 'Bard': 2, 'Druid': 2, 'Sorcerer': 0,
+            'Warlock': 0, 'Wizard': 0
+          };
+          const classBonus = classACBonuses[character.class] || 0;
+          ac = Math.max(10, baseAC + dexterityMod + classBonus);
+        }
+        
+        return {
+          ...character,
+          hp: hp,
+          maxHp: maxHp,
+          ac: ac,
+          initiative: Math.floor(Math.random() * 20) + 1
+        };
+      });
+      
+      console.log('⚔️ Prepared party characters:', preparedPartyCharacters);
+      
+      // Initialize combat session
+      const session = combatService.initializeCombat(
+        preparedPartyCharacters,
+        extractedEnemies,
+        storyData.currentContent || 'Combat encounter'
+      );
+      
+      console.log('⚔️ Combat initialized with turn order:', session.combatants.map((c, i) => `${i}: ${c.name} (initiative: ${c.initiative})`));
+      
+      // Store combat session in database for real-time synchronization
+      const dbCombatSession = await createCombatSession(partyId, {
+        storyContext: session.storyContext,
+        partyMembers: session.combatants.filter(c => !c.id.startsWith('enemy_')),
+        enemies: session.combatants.filter(c => c.id.startsWith('enemy_')),
+        initiative: session.combatants.map(c => ({ id: c.id, name: c.name, initiative: c.initiative })),
+        currentTurn: session.currentTurn,
+        round: session.round,
+        combatState: session.combatState,
+        environmentalFeatures: session.environmentalFeatures,
+        teamUpOpportunities: session.teamUpOpportunities,
+        narrativeElements: session.narrativeElements
+      });
+      
+      console.log('⚔️ Combat session stored in database:', dbCombatSession);
+      
+      setCombatSession(session);
+      setCombatSessionId(dbCombatSession.id);
+      setCombatState('active');
+      setCurrentCombatant(session.combatants[0]);
+      
+      console.log('⚔️ Combat initialized:', session);
+    } catch (error) {
+      console.error('❌ Error initializing combat:', error);
+    }
+  }, [partyCharacters, combatService, addBattleLogEntry, partyId]);
+
+  // Execute combat action
+  const executeCombatAction = useCallback(async (actionType, targetId) => {
+    try {
+      // Prevent multiple executions
+      if (processingCombatAction) {
+        console.log('⚔️ Combat action already processing, skipping...');
+        return;
+      }
+      
+      console.log('⚔️ Executing combat action:', actionType, 'on target:', targetId);
+      setProcessingCombatAction(true);
+      
+      if (!combatSession || !currentCombatant) {
+        console.error('❌ No active combat session or current combatant');
+        setProcessingCombatAction(false);
+        return;
+      }
+      
+      // Execute the action
+      const result = await combatService.executeAction(
+        combatSession,
+        currentCombatant.id,
+        actionType,
+        targetId
+      );
+      
+      if (!result.success) {
+        console.error('❌ Combat action failed:', result.message);
+        setProcessingCombatAction(false);
+        return;
+      }
+      
+      console.log('⚔️ Combat action result:', result);
+      
+      // Get the updated session from the result
+      const updatedSession = result.combatSession;
+      
+      // Apply damage to target if damage was dealt
+      if (result.results && result.results.damage > 0) {
+        const target = updatedSession.combatants.find(c => c.id === targetId);
+        if (target) {
+          const oldHp = target.hp;
+          target.hp = Math.max(0, target.hp - result.results.damage);
+          console.log(`⚔️ Applied ${result.results.damage} damage to ${target.name}. HP: ${oldHp} → ${target.hp}`);
+          
+          // Add battle log entry for damage
+          addBattleLogEntry({
+            type: 'damage',
+            attacker: currentCombatant.name,
+            target: target.name,
+            damage: result.results.damage,
+            targetHp: target.hp,
+            action: actionType,
+            message: `${currentCombatant.name} deals ${result.results.damage} damage to ${target.name} (${target.hp} HP remaining)`
+          });
+        }
+      } else if (result.results && result.results.healing > 0) {
+        // Add battle log entry for healing
+        const target = updatedSession.combatants.find(c => c.id === targetId);
+        if (target) {
+          addBattleLogEntry({
+            type: 'healing',
+            healer: currentCombatant.name,
+            target: target.name,
+            healing: result.results.healing,
+            action: actionType,
+            message: `${currentCombatant.name} heals ${target.name} for ${result.results.healing} HP`
+          });
+        }
+      } else {
+        // Add battle log entry for other actions
+        addBattleLogEntry({
+          type: 'action',
+          actor: currentCombatant.name,
+          action: actionType,
+          target: updatedSession.combatants.find(c => c.id === targetId)?.name || 'None',
+          message: `${currentCombatant.name} uses ${actionType}`
+        });
+      }
+      
+      // Log the updated combat session for debugging
+      console.log('⚔️ Updated combat session:', updatedSession);
+      console.log('⚔️ Combatants after action:', updatedSession.combatants.map(c => `${c.name}: ${c.hp}/${c.maxHp}`));
+      
+      // Update combat session
+      setCombatSession(updatedSession);
+      
+      // Update combat session in database for real-time synchronization
+      if (combatSessionId) {
+        await updateCombatSession(combatSessionId, {
+          currentTurn: updatedSession.currentTurn,
+          round: updatedSession.round,
+          combatState: updatedSession.combatState,
+          partyMembers: updatedSession.combatants.filter(c => !c.id.startsWith('enemy_')),
+          enemies: updatedSession.combatants.filter(c => c.id.startsWith('enemy_'))
+        });
+      }
+      
+      // Update current combatant based on the new turn
+      const nextCombatant = updatedSession.combatants[updatedSession.currentTurn];
+      setCurrentCombatant(nextCombatant);
+      
+      // Clear selected action
+      setSelectedAction(null);
+      
+      // Check if combat should end
+      const combatResult = combatService.checkCombatEnd(updatedSession);
+      if (combatResult.isComplete) {
+        console.log('⚔️ Combat ended:', combatResult);
+        setCombatState('complete');
+        
+        // Add combat end entry to battle log
+        addBattleLogEntry({
+          type: 'combat_end',
+          result: combatResult.result,
+          message: combatResult.result === 'victory' ? 
+            '🎉 Victory! All enemies have been defeated!' : 
+            combatResult.result === 'defeat' ? 
+            '💀 Defeat! The party has been overwhelmed!' : 
+            '🤝 Combat ends in a draw.'
+        });
+        
+        // Clear battle log after a delay to show the final result
+        setTimeout(() => {
+          setBattleLog([]);
+        }, 5000);
+        
+        // Generate combat summary and update story
+        const summary = combatService.generateCombatSummary(updatedSession, combatResult);
+        const narrative = combatService.generateCombatNarrative(updatedSession, combatResult);
+        
+        // Update story with combat results
+        await updateCampaignStory(story.id, {
+          currentContent: narrative,
+          storyMetadata: {
+            ...story.storyMetadata,
+            phaseStatus: 'Storytelling',
+            combatResult: combatResult
+          }
+        });
+      } else {
+        // Check for individual enemy deaths
+        const deadEnemies = updatedSession.combatants.filter(c => 
+          c.id.startsWith('enemy_') && c.hp <= 0 && c.maxHp > 0
+        );
+        
+        deadEnemies.forEach(enemy => {
+          enemy.maxHp = 0; // Mark as processed
+          addBattleLogEntry({
+            type: 'enemy_death',
+            enemy: enemy.name,
+            message: `💀 ${enemy.name} has been defeated!`
+          });
+        });
+      }
+      
+      setProcessingCombatAction(false);
+      
+    } catch (error) {
+      console.error('❌ Error executing combat action:', error);
+      setProcessingCombatAction(false);
+    }
+  }, [combatSession, currentCombatant, story?.id, story?.storyMetadata, combatService, processingCombatAction, combatSessionId]);
+
+  // Show loading state while auth is loading
+  if (authLoading) {
     return (
-      <div className="bg-purple-900/20 border border-purple-600 rounded-lg p-4 mb-6">
-        <h3 className="font-bold text-purple-200 mb-2">📖 Campaign Progress</h3>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-          <div>
-            <span className="font-semibold">Session:</span> {metadata.sessionNumber}
-          </div>
-          <div>
-            <span className="font-semibold">Phase:</span> {metadata.campaignPhase.replace('_', ' ')}
-          </div>
-          <div>
-            <span className="font-semibold">Progress:</span> {metadata.campaignProgress}%
-          </div>
-          <div>
-            <span className="font-semibold">Goal:</span> {metadata.mainGoal ? 'Set' : 'Pending'}
-          </div>
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
+          <p className="text-slate-300">Loading campaign...</p>
         </div>
-        {metadata.mainGoal && (
-          <div className="mt-2 text-purple-200">
-            <span className="font-semibold">Main Goal:</span> {metadata.mainGoal}
-          </div>
-        )}
       </div>
     );
-  };
+  }
 
-  if (!user) {
+  if (error) {
     return (
-      <div className="fantasy-container py-8">
-        <div className="fantasy-card">
-          <div className="text-center py-8">
-            <div className="text-gray-400">Loading...</div>
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-red-400 mb-4">{error}</p>
+          <div className="space-x-4">
+            <button 
+              onClick={() => {
+                setError('');
+                loadStoryAndCharacters();
+              }}
+              className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors"
+            >
+              Retry
+            </button>
+            <button 
+              onClick={() => navigate('/dashboard')}
+              className="bg-slate-700 hover:bg-slate-600 text-slate-200 px-4 py-2 rounded-lg transition-colors"
+            >
+              Back to Dashboard
+            </button>
           </div>
         </div>
       </div>
     );
   }
 
-  if (loading) {
-    return (
-      <div className="fantasy-container py-8">
-        <div className="fantasy-card">
-          <div className="text-center py-8">
-            <div className="text-gray-400">Loading campaign story...</div>
+  if (!story) {
+  return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-slate-300">Story not found</p>
+            <button 
+            onClick={() => navigate('/dashboard')}
+            className="mt-4 bg-slate-700 hover:bg-slate-600 text-slate-200 px-4 py-2 rounded-lg transition-colors"
+            >
+              Back to Dashboard
+            </button>
           </div>
         </div>
-      </div>
     );
   }
 
   return (
-    <div className="fantasy-container py-8">
-      <div className="fantasy-card">
-        <div className="flex justify-between items-center mb-6">
-          <h1 className="fantasy-title mb-0">Campaign Story</h1>
-          <button onClick={() => navigate('/dashboard')} className="fantasy-button bg-gray-600 hover:bg-gray-700">
-            Back to Dashboard
-          </button>
-        </div>
-
-        {error && (
-          <div className="bg-red-900/20 border border-red-600 text-red-200 px-4 py-3 rounded-lg mb-6">
-            {error}
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
+      <div className="container mx-auto px-4 py-6">
+        {/* Header */}
+        <div className="bg-slate-800/50 backdrop-blur-sm border border-slate-700 rounded-lg p-6 mb-6">
+          <div className="flex justify-between items-center">
+            <div>
+              <h1 className="text-3xl font-bold text-slate-200 mb-2">{party?.name || 'Campaign Story'}</h1>
+              <p className="text-slate-300">{party?.description || 'Adventure awaits!'}</p>
           </div>
-        )}
-
-        {/* Combat Starting Notification */}
-        {isCombatStarting && (
-          <div className="bg-orange-900/20 border border-orange-600 text-orange-200 px-4 py-3 rounded-lg mb-6">
-            <div className="flex items-center justify-center space-x-2">
-              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-orange-500"></div>
-              <span className="font-semibold">⚔️ Combat is being initiated! Redirecting to battle arena...</span>
+            <div className="text-right">
+              <div className="text-slate-300 text-sm">Status: <span className="font-semibold text-slate-200">{story?.status || 'unknown'}</span></div>
             </div>
           </div>
-        )}
-
-        {/* Story Paused for Combat */}
-        {story?.status === 'paused' && story?.currentCombat && (
-          <div className="bg-blue-900/20 border border-blue-600 text-blue-200 px-4 py-3 rounded-lg mb-6">
-            <div className="flex items-center justify-center space-x-2">
-              <span className="font-semibold">⚔️ Story is paused for combat. Please wait for the battle to conclude.</span>
             </div>
-          </div>
-        )}
 
         {/* Ready Up Phase */}
         {story?.status === 'ready_up' && (
-          <div className="space-y-6">
-            <div className="text-center">
-              <h2 className="text-xl font-bold text-gray-100 mb-4">Ready Up</h2>
-              <p className="text-gray-300 mb-4">
-                All players must ready up before the story begins
-              </p>
+          <div className="bg-gradient-to-br from-slate-800/50 to-slate-700/50 border border-slate-600 rounded-lg p-8 max-w-4xl mx-auto mb-6">
+            <div className="text-center mb-8">
+              <h2 className="text-3xl font-bold text-slate-200 mb-3">Campaign Lobby</h2>
+              <p className="text-slate-300 text-lg">Waiting for all players to ready up</p>
               
-              {/* Progress indicator */}
-              <div className="mb-6">
-                <div className="flex justify-center items-center space-x-4 mb-2">
-                  <div className="text-lg font-semibold text-amber-400">
+              <div className="mt-8 mb-8">
+                <div className="flex justify-center items-center space-x-4 mb-4">
+                  <div className="text-2xl font-semibold text-slate-300">
                     {getReadyCount()}/{getTotalPlayers()} Players Ready
                   </div>
-                  <div className="text-sm text-gray-400">
+                  <div className="text-lg text-slate-400">
                     ({Math.round((getReadyCount() / getTotalPlayers()) * 100)}%)
                   </div>
                 </div>
-                <div className="w-full bg-gray-700 rounded-full h-2 max-w-md mx-auto">
+                <div className="w-full bg-slate-700 rounded-full h-4 max-w-lg mx-auto">
                   <div 
-                    className="bg-amber-500 h-2 rounded-full transition-all duration-300"
+                    className="bg-gradient-to-r from-green-500 to-green-400 h-4 rounded-full transition-all duration-500"
                     style={{ width: `${(getReadyCount() / getTotalPlayers()) * 100}%` }}
                   ></div>
                 </div>
               </div>
-              
-              {partyCharacters.length === 0 && (
-                <div className="bg-blue-900/20 border border-blue-600 rounded-lg p-4 mb-4">
-                  <p className="text-blue-200">
-                    <strong>No characters created yet!</strong> Players should create their characters first. 
-                    You can still ready up and start the story, but characters will need to be created before the adventure begins.
-                  </p>
-                </div>
-              )}
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {partyCharacters.length > 0 ? (
-                // Show characters if they exist
-                getSortedCharacters().map(character => {
-                  const isReady = story.readyPlayers?.includes(character.userId);
-                  const isCurrentUser = character.userId === user?.uid;
-                  
-                  return (
-                    <div key={character.id} className={`fantasy-card transition-all duration-200 ${
-                      isReady ? 'bg-green-900/20 border-green-600' : 'bg-amber-900/20 border-amber-600'
-                    }`}>
                     <div className="text-center">
-                      <div className="w-16 h-16 bg-gray-600 rounded-full mx-auto mb-2 flex items-center justify-center">
-                        <span className="text-xs text-gray-300">IMG</span>
-                      </div>
-                      <h3 className="font-bold text-gray-100">{character.name}</h3>
-                      <p className="text-sm text-gray-300">
-                        Level {character.level} {character.race} {character.class}
-                      </p>
-                        {isCurrentUser && (
-                          <>
-                            <span className="text-blue-400 text-xs font-medium">(You)</span>
-                      <div className="mt-2">
+              {!isReady ? (
+                <div className="space-y-4">
+                  {!partyCharacters.find(char => char.userId === user?.uid) ? (
+                    <div className="space-y-4">
+                      <p className="text-slate-300">You need to create a character first</p>
                               <button
-                                className="fantasy-button bg-emerald-600 hover:bg-emerald-700 text-xs px-3 py-1 mt-2"
                                 onClick={() => navigate(`/character-creation/${partyId}`)}
+                        className="bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-700 hover:to-blue-600 text-white px-10 py-4 rounded-xl font-semibold text-lg transition-all duration-300 transform hover:scale-105 shadow-lg"
                               >
-                                Edit Character
+                        Create Character
                               </button>
                             </div>
-                          </>
-                        )}
-                        <div className="mt-2">
-                          {isReady ? (
-                            <div className="flex items-center justify-center space-x-1 text-green-400 font-semibold">
-                              <span>✓</span>
-                              <span>Ready</span>
+                  ) : (
+                    <button
+                      onClick={handleReadyUp}
+                      className="bg-gradient-to-r from-green-600 to-green-500 hover:from-green-700 hover:to-green-600 text-white px-10 py-4 rounded-xl font-semibold text-lg transition-all duration-300 transform hover:scale-105 shadow-lg"
+                    >
+                      Ready Up
+                    </button>
+                  )}
                             </div>
                           ) : (
-                            <div className="flex items-center justify-center space-x-1 text-gray-400">
-                              <div className="w-3 h-3 border-2 border-gray-500 border-t-gray-300 rounded-full animate-spin"></div>
-                              <span>Waiting...</span>
-                            </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                  );
-                })
-              ) : (
-                // Show party members if no characters exist
-                partyMembers.map((memberId, index) => {
-                  const profile = memberProfiles[memberId];
-                  const displayName = profile?.username || `Player ${index + 1}`;
-                  const isReady = story.readyPlayers?.includes(memberId);
-                  const isCurrentUser = memberId === user?.uid;
-                  
-                  return (
-                    <div key={memberId} className={`fantasy-card transition-all duration-200 ${
-                      isReady ? 'bg-green-900/20 border-green-600' : 'bg-amber-900/20 border-amber-600'
-                    }`}>
-                      <div className="text-center">
-                        <div className="w-16 h-16 bg-gray-600 rounded-full mx-auto mb-2 flex items-center justify-center">
-                          <span className="text-xs text-gray-300">IMG</span>
-                        </div>
-                        <h3 className="font-bold text-gray-100">{displayName}</h3>
-                        <p className="text-sm text-gray-300">
-                          No character created yet
-                        </p>
-                        {isCurrentUser && (
-                          <span className="text-blue-400 text-xs font-medium">(You)</span>
-                        )}
-                        <div className="mt-2">
-                          {isReady ? (
-                            <div className="flex items-center justify-center space-x-1 text-green-400 font-semibold">
-                              <span>✓</span>
-                              <span>Ready</span>
-                            </div>
-                          ) : (
-                            <div className="flex items-center justify-center space-x-1 text-gray-400">
-                              <div className="w-3 h-3 border-2 border-gray-500 border-t-gray-300 rounded-full animate-spin"></div>
-                              <span>Waiting...</span>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-
-            <div className="text-center">
-              {!isReady ? (
-                <button
-                  onClick={handleReadyUp}
-                  className="fantasy-button"
-                >
-                  {partyCharacters.find(char => char.userId === user?.uid) 
-                    ? 'Ready Up' 
-                    : 'Create Character & Ready Up'
-                  }
-                </button>
-              ) : (
-                <div className="text-green-400 font-semibold">You are ready!</div>
+                <div className="text-green-400 font-semibold text-xl bg-green-900/30 px-6 py-3 rounded-xl">You are ready!</div>
               )}
               
-              {allPlayersReady && (
-                <button
-                  onClick={handleStartStory}
-                  disabled={loading || isGeneratingPlots || story?.status === 'voting'}
-                  className="fantasy-button bg-amber-600 hover:bg-amber-700 ml-4"
-                >
-                  {loading || isGeneratingPlots ? 'Generating Story...' : 'Start Story Generation'}
-                </button>
+              {/* Only show Start Story button to DM when all players are ready */}
+              {allPlayersReady && party?.dmId === user?.uid && (
+                <div className="mt-6">
+                  <button
+                    onClick={handleStartStory}
+                    disabled={loading || isGeneratingPlots}
+                    className="bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-700 hover:to-blue-600 text-white px-10 py-4 rounded-xl font-semibold text-lg transition-all duration-300 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {loading || isGeneratingPlots ? 'Generating Story...' : 'Start Story Generation'}
+                  </button>
+                      </div>
+              )}
+              
+              {/* Show waiting message to non-DM players when all are ready */}
+              {allPlayersReady && party?.dmId !== user?.uid && (
+                <div className="mt-6">
+                  <div className="text-blue-400 font-semibold text-lg bg-blue-900/30 px-6 py-3 rounded-xl">
+                    Waiting for Dungeon Master to start the story...
+                        </div>
+                </div>
+              )}
+                            </div>
+                            </div>
+                          )}
+
+        {/* Story Generation Loading */}
+        {story?.status === 'generating' && (
+          <div className="bg-gradient-to-br from-slate-800/50 to-slate-700/50 border border-slate-600 rounded-lg p-8 max-w-4xl mx-auto mb-6">
+            <div className="text-center">
+              <h2 className="text-3xl font-bold text-slate-200 mb-4">Generating Your Adventure</h2>
+              <p className="text-slate-300 text-lg mb-8">The Dungeon Master is crafting your story. This may take a moment...</p>
+              
+              <div className="flex justify-center items-center space-x-4 mb-8">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-slate-400"></div>
+                <div className="text-slate-300 font-semibold text-lg">Creating Story Plots...</div>
+                        </div>
+                      </div>
+                    </div>
+              )}
+
+        {/* Story Content Generation Loading */}
+        {story?.status === 'generating_story' && (
+          <div className="bg-gradient-to-br from-slate-800/50 to-slate-700/50 border border-slate-600 rounded-lg p-8 max-w-4xl mx-auto mb-6">
+            <div className="text-center">
+              <h2 className="text-3xl font-bold text-slate-200 mb-4">Crafting Your Story</h2>
+              <p className="text-slate-300 text-lg mb-8">The Dungeon Master is weaving the tale of your adventure...</p>
+              
+              <div className="flex justify-center items-center space-x-4 mb-8">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-slate-400"></div>
+                <div className="text-slate-300 font-semibold text-lg">Generating Story Content...</div>
+              </div>
+              
+              {story?.selectedPlotData && (
+                <div className="bg-slate-900/50 rounded-lg p-4 max-w-2xl mx-auto">
+                  <h3 className="text-slate-200 font-semibold mb-2">Selected Plot: {story.selectedPlotData.title}</h3>
+                  <p className="text-slate-300 text-sm">{story.selectedPlotData.description}</p>
+                </div>
               )}
             </div>
           </div>
@@ -1330,345 +1786,873 @@ Party: ${characterContext}`;
 
         {/* Voting Phase */}
         {story?.status === 'voting' && (
-          <div className="space-y-6">
-            <h2 className="text-xl font-bold text-gray-100">Choose Your Adventure</h2>
-
-            {/* Plot Selection Interface for DM */}
-            {party && party.dmId === user?.uid ? (
-              <div className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  {getPlotData().map((plot) => (
-                    <div key={plot.number} className="fantasy-card bg-amber-900/20 border-amber-600">
-                      <h3 className="font-bold text-gray-100 mb-2 text-lg">{plot.title}</h3>
-                      <p className="text-gray-300 text-sm mb-4">
-                        {plot.summary}
-                      </p>
-                      <button
-                        onClick={() => handlePlotSelection(plot.number)}
-                        disabled={loading}
-                        className="fantasy-button w-full bg-amber-600 hover:bg-amber-700"
-                      >
-                        {loading ? 'Selecting...' : `Choose Plot ${plot.number}`}
-                      </button>
-                    </div>
-                  ))}
-                </div>
+          <div className="bg-gradient-to-br from-slate-800/50 to-slate-700/50 border border-slate-600 rounded-lg p-8 max-w-4xl mx-auto mb-6">
+            <h2 className="text-3xl font-bold text-slate-200 mb-6 text-center">Choose Your Adventure</h2>
+            
+            {/* Debug toggle button */}
+            <div className="mb-4 flex justify-center">
+              <button
+                onClick={() => setShowDebug(!showDebug)}
+                className="bg-slate-700 hover:bg-slate-600 text-slate-300 px-4 py-2 rounded-lg text-sm transition-colors"
+              >
+                {showDebug ? 'Hide Debug' : 'Show Debug'}
+              </button>
+            </div>
+            
+            {/* Debug info */}
+            {showDebug && (
+              <div className="mb-4 p-4 bg-slate-700/50 rounded-lg">
+                <p className="text-slate-300 text-sm">Debug: Available plots count: {story?.availablePlots?.length || 0}</p>
+                <p className="text-slate-300 text-sm">Debug: Raw plots: {JSON.stringify(story?.availablePlots?.slice(0, 2))}</p>
               </div>
-            ) : (
-              <div className="bg-blue-900/20 border border-blue-600 rounded-lg p-4">
-                <h3 className="font-bold text-blue-200 mb-2">⏳ Waiting for Dungeon Master</h3>
-                <p className="text-blue-200">
-                  The campaign creator is choosing which plot to pursue. Please wait while they make their decision.
-                </p>
-                
-                {/* Show plot options to non-DM players */}
-                <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
-                  {getPlotData().map((plot) => (
-                    <div key={plot.number} className="bg-gray-700 border border-gray-600 rounded-lg p-3">
-                      <h4 className="font-bold text-gray-100 mb-2">{plot.title}</h4>
-                      <p className="text-gray-300 text-sm">
-                        {plot.summary}
-                      </p>
+            )}
+            
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              {Array.isArray(story?.availablePlots) && story.availablePlots.length > 0 ? (
+                story.availablePlots
+                  .map((plot, index) => (
+                    <div key={index} className="bg-slate-800/70 border-2 border-slate-600 rounded-xl p-6 hover:border-slate-500 transition-all duration-300">
+                      <h3 className="font-bold text-slate-200 text-xl mb-3">{plot.title}</h3>
+                      <p className="text-slate-300 mb-4">{plot.description || "Adventure description here..."}</p>
+                      
+                      {/* Campaign Length */}
+                      {plot.campaignLength && (
+                        <div className="mb-4">
+                          <span className="text-slate-400 text-sm">Length: </span>
+                          <span className="text-slate-200 font-semibold capitalize">{plot.campaignLength}</span>
+                        </div>
+                      )}
+                      
+                      {/* Only show selection button to DM */}
+                      {party?.dmId === user?.uid ? (
+                      <button
+                          onClick={() => handlePlotSelection(index)}
+                        disabled={loading}
+                          className="w-full bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-700 hover:to-blue-600 text-white px-6 py-3 rounded-lg font-semibold transition-all duration-300 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                          {loading ? 'Selecting...' : `Choose This Plot`}
+                      </button>
+                      ) : (
+                        <div className="text-center py-3">
+                          <span className="text-slate-400 text-sm">Waiting for DM to choose...</span>
                     </div>
-                  ))}
+            )}
                 </div>
+                  ))
+              ) : (
+                // Fallback if no plots are available
+                <div className="col-span-3 text-center">
+                  <p className="text-slate-300">No plots available. Please try generating the story again.</p>
+            {party?.dmId === user?.uid && (
+                      <button
+                      onClick={handleStartStory}
+                      className="mt-4 bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-semibold transition-colors"
+                      >
+                      Regenerate Plots
+                      </button>
+                  )}
+                    </div>
+              )}
+                </div>
+            
+            {/* Show waiting message to non-DM players */}
+            {party?.dmId !== user?.uid && (
+              <div className="text-center mt-6">
+                <p className="text-slate-300 text-lg">Waiting for the Dungeon Master to select a plot...</p>
               </div>
             )}
           </div>
         )}
 
-        {/* Storytelling Phase */}
-        {(story?.status === 'storytelling' || story?.status === 'paused') && (
-          <div className="space-y-6">
-            <h2 className="text-xl font-bold text-gray-100">Your Adventure</h2>
-            
-            {/* Story Phase Indicator - Only show to DM */}
-            {party?.dmId === user?.uid && (
-              <div className="bg-purple-900/20 border border-purple-600 rounded-lg p-4">
-                <h3 className="font-bold text-purple-200 mb-2">📖 Story Phase: {currentPhase}</h3>
-                <p className="text-purple-200 text-sm">
-                  {currentPhase === 'Investigation' && 'Explore, discover clues, and gather information about the situation.'}
-                  {currentPhase === 'Conflict' && 'Face challenges, threats, and make difficult choices.'}
-                  {currentPhase === 'Resolution' && 'Conclude the story arc and see the consequences of your actions.'}
-                </p>
-              </div>
-            )}
-            
-            {/* Discovered Objectives - Only show to DM */}
-            {party?.dmId === user?.uid && objectives.length > 0 && (
-              <div className="bg-emerald-900/20 border border-emerald-600 rounded-lg p-4">
-                <h3 className="font-bold text-emerald-200 mb-3">🎯 Discovered Objectives</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                  {getDiscoveredObjectives(objectives).map((objective) => (
-                    <div key={objective.id} className="bg-gray-700 border border-emerald-500 rounded-lg p-3">
-                      <div className="flex items-center justify-between mb-2">
-                        <h4 className="font-semibold text-emerald-200 text-sm">{objective.title}</h4>
-                        <span className={`text-xs px-2 py-1 rounded-full ${
-                          objective.state === OBJECTIVE_STATES.COMPLETED 
-                            ? 'bg-green-900 text-green-200' 
-                            : objective.state === OBJECTIVE_STATES.IN_PROGRESS
-                            ? 'bg-blue-900 text-blue-200'
-                            : 'bg-yellow-900 text-yellow-200'
-                        }`}>
-                          {objective.state === OBJECTIVE_STATES.COMPLETED ? '✓ Complete' :
-                           objective.state === OBJECTIVE_STATES.IN_PROGRESS ? '⟳ In Progress' :
-                           '🔍 Discovered'}
-                        </span>
-                      </div>
-                      <p className="text-emerald-200 text-xs">{objective.description}</p>
+        {/* Main Story Content */}
+        {story?.status === 'storytelling' && (
+          <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+            {/* Sidebar: Party Members, Campaign Progress, Objectives */}
+            <div className="lg:col-span-1">
+              <div className="flex flex-col gap-y-6 lg:sticky lg:top-6">
+                {/* Party Members */}
+                <div className="hidden lg:block bg-gradient-to-br from-slate-800/50 to-slate-700/50 border border-slate-600 rounded-lg p-4">
+                  <div className="flex justify-between items-center mb-3">
+                    <h3 className="font-bold text-slate-200">Party Members</h3>
+                    <button
+                      onClick={() => setShowDebug(!showDebug)}
+                      className="text-xs bg-slate-600 hover:bg-slate-500 px-2 py-1 rounded text-slate-200"
+                    >
+                      {showDebug ? 'Hide Debug' : 'Show Debug'}
+                    </button>
+                  </div>
+                  {showDebug && (
+                    <div className="mb-2 p-2 bg-slate-700/50 rounded text-xs">
+                      <p className="text-slate-300">Debug: Characters loaded: {partyCharacters.length}</p>
+                      <p className="text-slate-300">Debug: Party members: {partyMembers.length}</p>
+                      <p className="text-slate-300">Debug: Characters: {JSON.stringify(partyCharacters.map(c => ({ name: c.name, userId: c.userId })))}</p>
+                      <p className="text-slate-300">Debug: Current Speaker: {JSON.stringify(story?.currentSpeaker)}</p>
+                      <p className="text-slate-300">Debug: User UID: {user?.uid}</p>
+                      <p className="text-slate-300">Debug: Party DM ID: {party?.dmId}</p>
+                      <p className="text-slate-300">Debug: Is DM speaking: {story?.currentSpeaker?.id === 'dm' ? 'Yes' : 'No'}</p>
+                      <p className="text-slate-300">Debug: Is user DM: {user?.uid === party?.dmId ? 'Yes' : 'No'}</p>
                     </div>
-                  ))}
+                  )}
+                  <div className="space-y-2">
+                    {getSortedCharacters().map((character) => {
+                      const isCurrentSpeaker = story?.currentSpeaker?.userId === character.userId;
+                      const isCurrentUser = user?.uid === character.userId;
+                      // Check if this character is the current combatant during combat
+                      const isCurrentCombatant = combatState === 'active' && combatSession?.combatants?.[combatSession.currentTurn]?.userId === character.userId;
+                      
+                      // Allow selection if the current user is the current speaker OR if DM is speaking and user is DM OR if no speaker and user is DM
+                      // BUT only if combat is not active
+                      const canBeSelected = combatState !== 'active' && (
+                        (story?.currentSpeaker?.userId === user?.uid) || 
+                        (story?.currentSpeaker?.id === 'dm' && user?.uid === party?.dmId) ||
+                        (!story?.currentSpeaker && user?.uid === party?.dmId)
+                      ) && !isCurrentSpeaker; // Prevent selecting yourself as speaker (redundant)
+                      return (
+                        <div 
+                          key={character.id}
+                          className={`p-2 rounded transition-colors ${
+                            isCurrentSpeaker
+                              ? 'bg-blue-600/30 border border-blue-500' 
+                              : canBeSelected
+                                ? 'bg-slate-700/50 hover:bg-slate-600/50 cursor-pointer'
+                                : 'bg-slate-700/30 opacity-60 cursor-not-allowed'
+                          }`}
+                          onClick={canBeSelected ? () => handleSetSpeaker(character) : undefined}
+                        >
+                          <div className="font-semibold text-slate-200 text-xs">{character.name}</div>
+                          <div className="text-slate-400 text-xs">{character.race} {character.class}</div>
+                          {combatState === 'active' ? (
+                            isCurrentCombatant ? (
+                              <div className="text-yellow-400 text-xs mt-1">🎲 Current Turn</div>
+                            ) : (
+                              <div className="text-red-400 text-xs mt-1">⚔️ Combat Active</div>
+                            )
+                          ) : (
+                            isCurrentSpeaker && (
+                              <div className="text-blue-400 text-xs mt-1">Currently Speaking</div>
+                            )
+                          )}
+                          {!canBeSelected && !isCurrentSpeaker && combatState !== 'active' && (
+                            <div className="text-slate-500 text-xs mt-1">Waiting for turn...</div>
+                          )}
+                          {canBeSelected && !isCurrentSpeaker && (
+                            <div className="text-green-400 text-xs mt-1">Click to select</div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
                 
-                {/* Objective Hints */}
-                {objectiveHints.length > 0 && (
-                  <div className="mt-4 pt-4 border-t border-emerald-500">
-                    <div className="flex items-center justify-between mb-2">
-                      <h4 className="font-semibold text-emerald-200 text-sm">💡 Subtle Hints</h4>
-                      <button
-                        onClick={() => setShowObjectiveHints(!showObjectiveHints)}
-                        className="text-emerald-300 hover:text-emerald-100 text-xs"
-                      >
-                        {showObjectiveHints ? 'Hide' : 'Show'} Hints
-                      </button>
+                {/* Campaign Progress */}
+                {story?.campaignMetadata && combatState !== 'active' && (
+                  <div className="bg-gradient-to-br from-slate-800/50 to-slate-700/50 border border-slate-600 rounded-lg p-4">
+                    <h3 className="font-bold text-slate-200 mb-3">Campaign Progress</h3>
+                    <div className="space-y-2 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-slate-300">Session:</span>
+                        <span className="text-slate-200 font-semibold">{story.campaignMetadata.sessionNumber}</span>
                     </div>
-                    {showObjectiveHints && (
+                      <div className="flex justify-between">
+                        <span className="text-slate-300">Progress:</span>
+                        <span className="text-slate-200 font-semibold">{story.campaignMetadata.campaignProgress}%</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Objectives */}
+                {objectives.length > 0 && combatState !== 'active' && (
+                  <div className="bg-gradient-to-br from-slate-800/50 to-slate-700/50 border border-slate-600 rounded-lg p-4">
+                    <h3 className="font-bold text-slate-200 mb-3">Objectives</h3>
                       <div className="space-y-2">
-                        {objectiveHints.map((hint, index) => (
-                          <div key={index} className="text-emerald-200 text-xs italic">
-                            {hint}
+                      {objectives.map((objective, index) => (
+                        <div key={index} className="text-sm">
+                          <div className="text-slate-300">{objective.title}</div>
+                          <div className="text-slate-400 text-xs">{objective.description}</div>
                           </div>
                         ))}
                       </div>
-                    )}
                   </div>
                 )}
               </div>
-            )}
-            
-            {/* Turn-taking guidance */}
-            <div className="bg-blue-900/20 border border-blue-600 rounded-lg p-4">
-              <h3 className="font-bold text-blue-200 mb-2">🎭 Storytelling Guidelines</h3>
-              <p className="text-blue-200 text-sm">
-                <strong>Turn-taking:</strong> Respond to the story or let someone else speak. Only one person can respond at a time.
-              </p>
             </div>
             
-            {/* Story Messages */}
-            <div className="bg-gray-700 border border-gray-600 rounded-lg p-4 max-h-96 overflow-y-auto">
-              {story.storyMessages
-                .filter(message => message.type !== 'plot_selection') // Filter out plot selection messages
-                .map(message => (
-                <div key={message.id} className="mb-4">
-                  {message.role === 'assistant' ? (
-                    <div className="bg-blue-900/20 border border-blue-600 rounded-lg p-3">
-                      <div className="font-semibold text-blue-200 mb-1">Game Master</div>
-                      <div 
-                        className="text-blue-100 whitespace-pre-wrap"
-                        dangerouslySetInnerHTML={{ __html: highlightKeywords(message.content) }}
-                      />
-                    </div>
-                  ) : (
-                    <div className="bg-green-900/20 border border-green-600 rounded-lg p-3">
-                      <div className="font-semibold text-green-200 mb-1">
-                        {message.playerName}
+            {/* Main Content */}
+            <div className="lg:col-span-3">
+              {/* Story Content */}
+              {story?.currentContent && (
+                <div className="bg-gradient-to-br from-slate-800/50 to-slate-700/50 border border-slate-600 rounded-lg p-8 mb-8 shadow-lg">
+                  <div className="mb-6">
+                    <h2 className="text-2xl font-bold text-slate-100 mb-2 border-b border-slate-600 pb-3">
+                      📖 Current Story
+                    </h2>
+                  </div>
+                  <div 
+                    className="text-slate-200 leading-8 text-lg max-w-none prose prose-invert prose-lg prose-slate"
+                    style={{
+                      lineHeight: '1.8',
+                      fontSize: '1.125rem',
+                      letterSpacing: '0.025em'
+                    }}
+                    dangerouslySetInnerHTML={{ 
+                      __html: highlightKeywords(story.currentContent)
+                    }}
+                  />
+                  
+                  {/* Story Metadata Display */}
+                  {story?.storyMetadata && (
+                    <div className="mt-6 p-4 bg-slate-700/30 rounded-lg border border-slate-600">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                        {story.storyMetadata.currentLocation && (
+                          <div>
+                            <span className="text-blue-400 font-semibold">📍 Location:</span>
+                            <span className="text-slate-300 ml-2">{story.storyMetadata.currentLocation}</span>
+                          </div>
+                        )}
+                        {story.storyMetadata.storyTone && (
+                          <div>
+                            <span className="text-purple-400 font-semibold">🎭 Tone:</span>
+                            <span className="text-slate-300 ml-2">{story.storyMetadata.storyTone}</span>
+                          </div>
+                        )}
+                        {story.storyMetadata.activeNPCs && story.storyMetadata.activeNPCs.length > 0 && (
+                          <div>
+                            <span className="text-green-400 font-semibold">👥 Active NPCs:</span>
+                            <span className="text-slate-300 ml-2">{story.storyMetadata.activeNPCs.join(', ')}</span>
+                          </div>
+                        )}
+                        {story.storyMetadata.phaseStatus && (
+                          <div>
+                            <span className="text-orange-400 font-semibold">📊 Phase:</span>
+                            <span className="text-slate-300 ml-2 capitalize">{story.storyMetadata.phaseStatus}</span>
+                          </div>
+                        )}
                       </div>
-                      <div 
-                        className="text-green-100"
-                        dangerouslySetInnerHTML={{ __html: highlightKeywords(message.content) }}
-                      />
+                      
+                      {story.storyMetadata.nextActions && story.storyMetadata.nextActions.length > 0 && (
+                        <div className="mt-4">
+                          <span className="text-yellow-400 font-semibold">🎯 Possible Actions:</span>
+                          <ul className="mt-2 space-y-1">
+                            {story.storyMetadata.nextActions.map((action, index) => (
+                              <li key={index} className="text-slate-300 text-sm">• {action}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
-              ))}
-            </div>
+              )}
 
-            {/* Response Interface - Only show when story is active, not paused */}
-            {story?.status === 'storytelling' && story?.currentSpeaker ? (
-              <div className="space-y-4">
-                {/* Current Speaker Response - Only show to the user whose character is selected */}
-                {story.currentSpeaker.userId === user?.uid ? (
-                  <div className="bg-amber-900/20 border border-amber-600 rounded-lg p-4">
-                    <h3 className="font-bold text-amber-200 mb-3">How will you respond?</h3>
-                    <div className="flex items-center space-x-3 mb-4">
-                      <div className="w-10 h-10 bg-amber-600 rounded-full flex items-center justify-center">
-                        <span className="text-amber-100 font-bold">
-                          {story.currentSpeaker.name.charAt(0)}
-                        </span>
+              {/* Combat Loading Message */}
+              {combatLoading && (
+                <div className="bg-gradient-to-br from-blue-800/50 to-blue-700/50 border border-blue-600 rounded-lg p-6 mb-6">
+                  <div className="text-center">
+                    <div className="text-blue-200 text-lg font-semibold mb-2">⚔️ Combat is Loading...</div>
+                    <div className="text-blue-300 text-sm">Preparing combat encounter...</div>
+                    <div className="mt-3 text-blue-400 text-xs">
+                      Waiting for all players to be ready...
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Combat UI - Display when in conflict phase */}
+              {combatState === 'active' && combatSession && (
+                <div className="bg-gradient-to-br from-red-800/50 to-red-700/50 border border-red-600 rounded-lg p-6 mb-6">
+                  <div className="mb-4">
+                    <h3 className="text-xl font-bold text-red-100 mb-2 border-b border-red-600 pb-2">
+                      ⚔️ Combat Encounter
+                    </h3>
+                    <div className="text-red-200 text-sm">
+                      Round: {combatSession.round} | Turn: {combatSession.currentTurn + 1}
+                    </div>
+                    {/* Turn Order Display */}
+                    <div className="mt-3 p-3 bg-slate-800/30 rounded-lg">
+                      <h5 className="text-slate-300 font-medium mb-2">Turn Order (Initiative):</h5>
+                      <div className="flex flex-wrap gap-1">
+                        {combatSession.combatants.map((combatant, index) => (
+                          <div 
+                            key={combatant.id} 
+                            className={`px-2 py-1 rounded text-xs font-medium ${
+                              index === combatSession.currentTurn 
+                                ? 'bg-yellow-600 text-yellow-100 border border-yellow-500' 
+                                : 'bg-slate-700 text-slate-300'
+                            }`}
+                          >
+                            {index + 1}. {combatant.name} ({combatant.initiative})
+                          </div>
+                        ))}
                       </div>
-                      <div>
-                        <div className="font-medium text-amber-200">{story.currentSpeaker.name}</div>
-                        <div className="text-sm text-amber-300">
-                          {story.currentSpeaker.race} {story.currentSpeaker.class}
-                        </div>
+                    </div>
+                  </div>
+                  
+                  {/* Combatants */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                    {/* Party Members */}
+                    <div>
+                      <h4 className="text-green-400 font-semibold mb-2">Party Members</h4>
+                      <div className="space-y-2">
+                        {combatSession.combatants?.filter(c => !c.id.startsWith('enemy_')).map((combatant) => (
+                          <div key={combatant.id} className={`p-2 rounded ${combatant.id === currentCombatant?.id ? 'bg-green-600/30 border border-green-500' : 'bg-slate-700/30'}`}>
+                            <div className="flex justify-between items-center">
+                              <span className="text-slate-200 font-medium">{combatant.name}</span>
+                              <span className="text-slate-300 text-sm">HP: {combatant.hp || 0}/{combatant.maxHp || 0}</span>
+                            </div>
+                            {combatant.id === currentCombatant?.id && (
+                              <div className="text-green-400 text-xs mt-1">Current Turn</div>
+                            )}
+                          </div>
+                        ))}
                       </div>
                     </div>
                     
-                    <div className="flex space-x-2">
-                      <input
-                        type="text"
+                    {/* Enemies */}
+                    <div>
+                      <h4 className="text-red-400 font-semibold mb-2">Enemies</h4>
+                      <div className="space-y-2">
+                        {combatSession.combatants?.filter(c => c.id.startsWith('enemy_')).map((enemy) => (
+                          <div key={enemy.id} className={`p-2 rounded ${enemy.id === currentCombatant?.id ? 'bg-red-600/30 border border-red-500' : 'bg-slate-700/30'}`}>
+                            <div className="flex justify-between items-center">
+                              <span className="text-slate-200 font-medium">{enemy.name}</span>
+                              <span className="text-slate-300 text-sm">HP: {enemy.hp || 0}/{enemy.maxHp || 0}</span>
+                            </div>
+                            {enemy.id === currentCombatant?.id && (
+                              <div className="text-red-400 text-xs mt-1">Current Turn</div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                  
+                  {/* Combat Actions */}
+                  {currentCombatant && !currentCombatant.id.startsWith('enemy_') && (
+                    // Show actions if it's the current user's turn OR if we can't determine the user match
+                    (currentCombatant.userId === user?.uid || !currentCombatant.userId) && (
+                    <div className="bg-slate-800/50 rounded-lg p-4">
+                      <h4 className="text-blue-400 font-semibold mb-3">Actions for {currentCombatant.name}</h4>
+                      {processingCombatAction && (
+                        <div className="mb-3 p-2 bg-blue-600/30 border border-blue-500 rounded text-blue-200 text-sm">
+                          ⚔️ Processing combat action...
+                        </div>
+                      )}
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                        {Object.entries(combatService.actionTypes).map(([actionKey, action]) => (
+                          <button
+                            key={actionKey}
+                            onClick={() => setSelectedAction(actionKey)}
+                            disabled={processingCombatAction}
+                            className={`p-2 rounded text-sm transition-colors ${
+                              selectedAction === actionKey 
+                                ? 'bg-blue-600 text-white' 
+                                : 'bg-slate-700 hover:bg-slate-600 text-slate-200'
+                            } disabled:opacity-50 disabled:cursor-not-allowed`}
+                          >
+                            {action.name}
+                          </button>
+                        ))}
+                      </div>
+                      
+                      {selectedAction && (
+                        <div className="mt-4">
+                          <h5 className="text-slate-300 font-medium mb-2">Select Target:</h5>
+                          <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                            {combatSession.combatants?.filter(c => c.id !== currentCombatant.id).map((target) => (
+                              <button
+                                key={target.id}
+                                onClick={() => executeCombatAction(selectedAction, target.id)}
+                                disabled={processingCombatAction}
+                                className="p-2 rounded bg-slate-700 hover:bg-slate-600 text-slate-200 text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                {processingCombatAction ? 'Processing...' : target.name}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                  
+                  {/* Fallback Combat Actions - Show for any player character during combat */}
+                  {combatState === 'active' && currentCombatant && !currentCombatant.id.startsWith('enemy_') && 
+                   currentCombatant.userId !== user?.uid && currentCombatant.userId && (
+                    <div className="bg-slate-800/50 rounded-lg p-4">
+                      <h4 className="text-orange-400 font-semibold mb-3">⚠️ Fallback Actions for {currentCombatant.name}</h4>
+                      <p className="text-slate-300 text-sm mb-3">User ID mismatch detected. Showing actions anyway.</p>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                        {Object.entries(combatService.actionTypes).map(([actionKey, action]) => (
+                          <button
+                            key={actionKey}
+                            onClick={() => setSelectedAction(actionKey)}
+                            disabled={processingCombatAction}
+                            className={`p-2 rounded text-sm transition-colors ${
+                              selectedAction === actionKey 
+                                ? 'bg-orange-600 text-white' 
+                                : 'bg-slate-700 hover:bg-slate-600 text-slate-200'
+                            } disabled:opacity-50 disabled:cursor-not-allowed`}
+                          >
+                            {action.name}
+                          </button>
+                        ))}
+                      </div>
+                      
+                      {selectedAction && (
+                        <div className="mt-4">
+                          <h5 className="text-slate-300 font-medium mb-2">Select Target:</h5>
+                          <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                            {combatSession.combatants?.filter(c => c.id !== currentCombatant.id).map((target) => (
+                              <button
+                                key={target.id}
+                                onClick={() => executeCombatAction(selectedAction, target.id)}
+                                disabled={processingCombatAction}
+                                className="p-2 rounded bg-slate-700 hover:bg-slate-600 text-slate-200 text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                {processingCombatAction ? 'Processing...' : target.name}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  
+                  {/* Debug Panel for Combat Issues */}
+                  {combatState === 'active' && (
+                    <div className="bg-slate-900/50 rounded-lg p-4 mt-4">
+                      <h4 className="text-yellow-400 font-semibold mb-3">🐛 Combat Debug Info</h4>
+                      <div className="text-xs text-slate-300 space-y-1">
+                        <div>Combat State: {combatState}</div>
+                        <div>Current Combatant: {currentCombatant?.name || 'None'} (ID: {currentCombatant?.id || 'None'})</div>
+                        <div>Current User: {user?.uid || 'None'}</div>
+                        <div>Combatant User ID: {currentCombatant?.userId || 'None'}</div>
+                        <div>Is Enemy: {currentCombatant?.id?.startsWith('enemy_') ? 'Yes' : 'No'}</div>
+                        <div>User Match: {currentCombatant?.userId === user?.uid ? 'Yes' : 'No'}</div>
+                        <div>Should Show Actions: {currentCombatant && !currentCombatant.id.startsWith('enemy_') && currentCombatant.userId === user?.uid ? 'Yes' : 'No'}</div>
+                        <div>Combat Session: {combatSession ? 'Active' : 'None'}</div>
+                        <div>Current Turn: {combatSession?.currentTurn || 'None'}</div>
+                        <div>Total Combatants: {combatSession?.combatants?.length || 0}</div>
+                      </div>
+                      
+                      {/* Manual Action Trigger */}
+                      {currentCombatant && !currentCombatant.id.startsWith('enemy_') && (
+                        <div className="mt-4 pt-4 border-t border-slate-700">
+                          <h5 className="text-yellow-400 font-medium mb-2">Manual Action Trigger</h5>
+                          <div className="grid grid-cols-2 gap-2">
+                            <button
+                              onClick={() => {
+                                const enemies = combatSession.combatants.filter(c => c.id.startsWith('enemy_'));
+                                if (enemies.length > 0) {
+                                  executeCombatAction('attack', enemies[0].id);
+                                }
+                              }}
+                              disabled={processingCombatAction}
+                              className="p-2 rounded bg-red-700 hover:bg-red-600 text-white text-xs transition-colors disabled:opacity-50"
+                            >
+                              Attack First Enemy
+                            </button>
+                            <button
+                              onClick={() => {
+                                const allies = combatSession.combatants.filter(c => !c.id.startsWith('enemy_') && c.id !== currentCombatant.id);
+                                if (allies.length > 0) {
+                                  executeCombatAction('defend', allies[0].id);
+                                }
+                              }}
+                              disabled={processingCombatAction}
+                              className="p-2 rounded bg-blue-700 hover:bg-blue-600 text-white text-xs transition-colors disabled:opacity-50"
+                            >
+                              Defend Ally
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  
+                  {/* Player Turn Indicator - Show when it's a player's turn but not the current user's */}
+                  {currentCombatant && !currentCombatant.id.startsWith('enemy_') && currentCombatant.userId !== user?.uid && (
+                    <div className="bg-blue-800/30 rounded-lg p-4 text-center">
+                      <div className="text-blue-300 font-medium">Player Turn: {currentCombatant.name}</div>
+                      <div className="text-blue-400 text-sm mt-1">Waiting for {currentCombatant.name} to take their action...</div>
+                    </div>
+                  )}
+                  
+                  {/* Enemy Turn Indicator */}
+                  {currentCombatant && currentCombatant.id.startsWith('enemy_') && (
+                    <div className="bg-red-800/30 rounded-lg p-4 text-center">
+                      <div className="text-red-300 font-medium">Enemy Turn: {currentCombatant.name}</div>
+                      <div className="text-red-400 text-sm mt-1">Processing enemy action...</div>
+                    </div>
+                  )}
+                  
+                  {/* Battle Log */}
+                  {battleLog.length > 0 && (
+                    <div className="bg-slate-900/50 rounded-lg p-4 mt-4">
+                      <h4 className="text-yellow-400 font-semibold mb-3">📜 Battle Log</h4>
+                      <div className="max-h-40 overflow-y-auto space-y-2">
+                        {battleLog.slice(-10).map((entry) => (
+                          <div key={entry.id} className={`text-sm p-2 rounded ${
+                            entry.type === 'damage' ? 'bg-red-800/30 border-l-4 border-red-500' :
+                            entry.type === 'healing' ? 'bg-green-800/30 border-l-4 border-green-500' :
+                            entry.type === 'combat_start' ? 'bg-blue-800/30 border-l-4 border-blue-500' :
+                            entry.type === 'enemy_death' ? 'bg-purple-800/30 border-l-4 border-purple-500' :
+                            entry.type === 'combat_end' ? 'bg-yellow-800/30 border-l-4 border-yellow-500' :
+                            'bg-slate-800/30 border-l-4 border-slate-500'
+                          }`}>
+                            <div className="flex justify-between items-start">
+                              <span className="text-slate-200">{entry.message}</span>
+                              <span className="text-slate-400 text-xs ml-2">{entry.timestamp}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Current Speaker Response */}
+              {story?.currentSpeaker && combatState !== 'active' ? (
+                <div className="bg-gradient-to-br from-slate-800/50 to-slate-700/50 border border-slate-600 rounded-lg p-6 mb-6">
+                  <h3 className="font-bold text-slate-200 mb-4">Current Speaker: {story.currentSpeaker.name}</h3>
+                  
+                  {(story?.currentSpeaker?.userId === user?.uid) || (story?.currentSpeaker?.id === 'dm' && user?.uid === party?.dmId) ? (
+                    <div className="space-y-4">
+                      <textarea
                         value={playerResponse}
                         onChange={(e) => setPlayerResponse(e.target.value)}
-                        placeholder={`What does ${story.currentSpeaker.name} do?`}
-                        className="fantasy-input flex-1"
-                        onKeyPress={(e) => e.key === 'Enter' && handleSendResponse()}
+                        placeholder={story?.currentSpeaker?.id === 'dm' ? "Continue the story or describe what happens next..." : `What does ${story.currentSpeaker.name} do?`}
+                        className="w-full bg-slate-800/50 border border-slate-600 text-slate-100 px-4 py-3 rounded-lg focus:border-slate-500 focus:outline-none transition-colors min-h-[120px] resize-none"
+                        rows={4}
                       />
+                      <div className="flex space-x-3">
                       <button
                         onClick={handleSendResponse}
-                        disabled={!playerResponse.trim()}
-                        className="fantasy-button"
+                          disabled={!playerResponse.trim() || loading}
+                          className="bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-700 hover:to-blue-600 text-white px-6 py-3 rounded-lg font-semibold transition-all duration-200 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                        Send
+                          {loading ? 'Processing...' : story?.currentSpeaker?.id === 'dm' ? 'Continue Story' : 'Send Response'}
                       </button>
                     </div>
                   </div>
                 ) : (
-                  <div className="bg-blue-900/20 border border-blue-600 rounded-lg p-4">
-                    <h3 className="font-bold text-blue-200 mb-3">Waiting for {story.currentSpeaker.name} to respond</h3>
-                    <div className="flex items-center space-x-3">
-                      <div className="w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center">
-                        <span className="text-blue-100 font-bold">
-                          {story.currentSpeaker.name.charAt(0)}
-                        </span>
-                      </div>
-                      <div>
-                        <div className="font-medium text-blue-200">{story.currentSpeaker.name}</div>
-                        <div className="text-sm text-blue-300">
-                          {story.currentSpeaker.race} {story.currentSpeaker.class}
+                    <p className="text-slate-300">Waiting for {story.currentSpeaker.name} to respond...</p>
+                  )}
+                </div>
+              ) : (
+                /* DM Response Box - Only show when no current speaker AND combat is not active AND user is DM */
+                combatState !== 'active' && user?.uid === party?.dmId && (
+                  <div className="bg-gradient-to-br from-slate-800/50 to-slate-700/50 border border-slate-600 rounded-lg p-6 mb-6">
+                    <h3 className="font-bold text-slate-200 mb-4">Dungeon Master Response</h3>
+                    
+                    <div className="space-y-4">
+                      <textarea
+                        value={playerResponse}
+                        onChange={(e) => setPlayerResponse(e.target.value)}
+                        placeholder="Continue the story or describe what happens next..."
+                        className="w-full bg-slate-800/50 border border-slate-600 text-slate-100 px-4 py-3 rounded-lg focus:border-slate-500 focus:outline-none transition-colors min-h-[120px] resize-none"
+                        rows={4}
+                      />
+                      <div className="flex space-x-3">
+                          <button
+                          onClick={handleSendResponse}
+                          disabled={!playerResponse.trim() || loading}
+                          className="bg-gradient-to-r from-green-600 to-green-500 hover:from-green-700 hover:to-green-600 text-white px-6 py-3 rounded-lg font-semibold transition-all duration-200 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {loading ? 'Processing...' : 'Continue Story'}
+                          </button>
                         </div>
                       </div>
                     </div>
-                    <p className="text-blue-200 mt-2">
-                      {story.currentSpeaker.name} is currently speaking. Please wait for their response.
-                    </p>
-                  </div>
-                )}
+                )
+              )}
 
-                {/* Let someone else speak - Show to current speaker and controller */}
-                {(story?.currentSpeaker?.userId === user?.uid || story?.currentController === user?.uid) && (
-                  <div className="bg-gray-700 border border-gray-600 rounded-lg p-4">
-                    <h4 className="font-bold text-gray-100 mb-3 text-center">Let someone else speak</h4>
-                    <div className="flex justify-center">
-                      <div className="grid grid-cols-2 md:grid-cols-3 gap-4 w-full max-w-4xl">
-                        {getSortedCharacters().map(character => {
-                          const isCurrentUser = character.userId === user?.uid;
-                          
-                          return (
-                        <button
-                          key={character.id}
-                          onClick={async () => {
-                            await setCurrentSpeaker(story.id, character);
-                            await setCurrentController(story.id, character.userId);
-                          }}
-                          disabled={character.id === story?.currentSpeaker?.id}
-                              className={`p-4 rounded-lg border-2 transition-colors text-center ${
-                            character.id === story?.currentSpeaker?.id
-                              ? 'border-gray-500 bg-gray-600 text-gray-400 cursor-not-allowed'
-                              : 'border-gray-600 bg-gray-700 hover:border-gray-500 text-gray-200'
-                          }`}
-                        >
-                              <div className="font-medium mb-1">
-                                <span>{character.name}</span>
-                                {isCurrentUser && (
-                                  <span className="text-blue-400 text-xs font-medium ml-1">(you)</span>
-                                )}
-                              </div>
-                          <div className="text-sm opacity-75">
-                            {character.race} {character.class}
-                          </div>
-                        </button>
-                          );
-                        })}
+              {/* Party Members Selection - Mobile Side by Side */}
+              <div className="lg:hidden bg-gradient-to-br from-slate-800/50 to-slate-700/50 border border-slate-600 rounded-lg p-4 mb-6">
+                <h3 className="font-bold text-slate-200 mb-3">Party Members</h3>
+                <div className="grid grid-cols-2 gap-2">
+                  {getSortedCharacters().map((character) => {
+                    const isCurrentSpeaker = story?.currentSpeaker?.userId === character.userId;
+                    const isCurrentUser = user?.uid === character.userId;
+                    // Check if this character is the current combatant during combat
+                    const isCurrentCombatant = combatState === 'active' && combatSession?.combatants?.[combatSession.currentTurn]?.userId === character.userId;
+                    
+                    // Allow selection if the current user is the current speaker OR if DM is speaking and user is DM OR if no speaker and user is DM
+                    // BUT only if combat is not active
+                    const canBeSelected = combatState !== 'active' && (
+                      (story?.currentSpeaker?.userId === user?.uid) || 
+                      (story?.currentSpeaker?.id === 'dm' && user?.uid === party?.dmId) ||
+                      (!story?.currentSpeaker && user?.uid === party?.dmId)
+                    ) && !isCurrentSpeaker; // Prevent selecting yourself as speaker (redundant)
+                    return (
+                      <div 
+                        key={character.id}
+                        className={`p-2 rounded transition-colors ${
+                          isCurrentSpeaker
+                            ? 'bg-blue-600/30 border border-blue-500' 
+                            : canBeSelected
+                              ? 'bg-slate-700/50 hover:bg-slate-600/50 cursor-pointer'
+                              : 'bg-slate-700/30 opacity-60 cursor-not-allowed'
+                        }`}
+                        onClick={canBeSelected ? () => handleSetSpeaker(character) : undefined}
+                      >
+                        <div className="font-semibold text-slate-200 text-xs">{character.name}</div>
+                        <div className="text-slate-400 text-xs">{character.race} {character.class}</div>
+                        {combatState === 'active' ? (
+                          isCurrentCombatant ? (
+                            <div className="text-yellow-400 text-xs mt-1">🎲 Current Turn</div>
+                          ) : (
+                            <div className="text-red-400 text-xs mt-1">⚔️ Combat Active</div>
+                          )
+                        ) : (
+                          isCurrentSpeaker && (
+                            <div className="text-blue-400 text-xs mt-1">Currently Speaking</div>
+                          )
+                        )}
+                        {!canBeSelected && !isCurrentSpeaker && combatState !== 'active' && (
+                          <div className="text-slate-500 text-xs mt-1">Waiting for turn...</div>
+                        )}
+                        {canBeSelected && !isCurrentSpeaker && (
+                          <div className="text-green-400 text-xs mt-1">Click to select</div>
+                        )}
                       </div>
-                    </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Story Messages History */}
+              {story?.storyMessages && story.storyMessages.length > 0 && combatState !== 'active' && (
+                <div className="bg-gradient-to-br from-slate-800/50 to-slate-700/50 border border-slate-600 rounded-lg p-6 mt-8 shadow-lg">
+                  <div className="mb-6">
+                    <h3 className="text-xl font-bold text-slate-100 mb-2 border-b border-slate-600 pb-3">
+                      📜 Story History
+                    </h3>
+                  </div>
+                  <div className="space-y-4 max-h-80 overflow-y-auto">
+                    {story.storyMessages.map((message, index) => (
+                      <div key={index} className="border-l-4 border-slate-500 pl-4 py-2 bg-slate-800/30 rounded-r-lg">
+                        <div className="text-slate-300 text-sm font-semibold mb-2 flex items-center">
+                          <span className="mr-2">👤</span>
+                          {message.speaker || 'Narrator'}
+                </div>
+                        <div 
+                          className="text-slate-400 text-sm leading-6 pl-6 border-l border-slate-600"
+                          dangerouslySetInnerHTML={{ __html: highlightKeywords(message.content) }}
+                        />
+                </div>
+                    ))}
+                  </div>
+          </div>
+        )}
+
+        {/* Error Display */}
+        {error && (
+          <div className="bg-gradient-to-r from-red-900/50 to-red-800/50 border border-red-600 rounded-lg p-4 mb-6">
+            <div className="flex items-start space-x-3">
+              <div className="text-red-400 text-xl">⚠️</div>
+              <div className="flex-1">
+                <h3 className="font-semibold text-red-200 mb-2">Notice</h3>
+                <p className="text-red-100 text-sm mb-3">{error}</p>
+                {error.includes('AI service') && (
+                  <div className="bg-red-800/30 border border-red-600 rounded p-3">
+                    <p className="text-red-200 text-xs mb-2">
+                      <strong>What this means:</strong> The AI storytelling service is temporarily unavailable.
+                    </p>
+                    <p className="text-red-200 text-xs mb-2">
+                      <strong>You can still:</strong>
+                    </p>
+                    <ul className="text-red-200 text-xs list-disc list-inside space-y-1">
+                      <li>Continue the story manually by typing your responses</li>
+                      <li>Use the predefined plot options if available</li>
+                      <li>Wait a few minutes and try again</li>
+                    </ul>
                   </div>
                 )}
               </div>
-            ) : (
-              // Show character selection when no one is speaking
-              (party?.dmId === user?.uid || story?.currentController === user?.uid) ? (
-                <div className="bg-gray-700 border border-gray-600 rounded-lg p-4">
-                  <h3 className="font-bold text-gray-100 mb-3 text-center">
-                    Choose who speaks
-                  </h3>
-                  <div className="flex justify-center">
-                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4 w-full max-w-4xl">
-                      {getSortedCharacters().map(character => {
-                        const isCurrentUser = character.userId === user?.uid;
-                        
-                        return (
-                      <button
-                        key={character.id}
-                        onClick={async () => {
-                          await setCurrentSpeaker(story.id, character);
-                          await setCurrentController(story.id, character.userId);
-                        }}
-                            className="p-4 rounded-lg border-2 border-gray-600 bg-gray-700 hover:border-gray-500 text-gray-200 transition-colors text-center"
-                          >
-                            <div className="font-medium mb-1">
-                              <span>{character.name}</span>
-                              {isCurrentUser && (
-                                <span className="text-blue-400 text-xs font-medium ml-1">(you)</span>
-                              )}
-                            </div>
-                        <div className="text-sm opacity-75">
-                          {character.race} {character.class}
-                        </div>
-                      </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <div className="bg-blue-900/20 border border-blue-600 rounded-lg p-4">
-                  <h3 className="font-bold text-blue-200 mb-3">
-                    {story.storyMessages.length > 0 ? 'Waiting for next speaker' : 'Waiting for the story to begin'}
-                  </h3>
-                  <p className="text-blue-200">
-                    {story.storyMessages.length > 0 
-                      ? 'The Dungeon Master is choosing who will speak next. Please wait.'
-                      : 'The Dungeon Master is choosing who will speak first. Please wait.'
-                    }
-                  </p>
-                </div>
-              )
-            )}
+              <button
+                onClick={() => setError('')}
+                className="text-red-400 hover:text-red-200 transition-colors"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+        )}
 
-            {/* Campaign Summary - Only show during storytelling */}
-            {story?.status === 'storytelling' && renderCampaignSummary()}
+        {/* Debug Panel */}
+        {showDebug && (
+          <div className="bg-gradient-to-br from-slate-900/50 to-slate-800/50 border border-slate-600 rounded-lg p-6 mb-6">
+            <h3 className="font-bold text-slate-200 mb-4">🐛 Debug Information</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+              <div>
+                <h4 className="text-slate-300 font-semibold mb-2">Story State</h4>
+                <div className="space-y-1 text-slate-400">
+                  <div>Story ID: {story?.id || 'None'}</div>
+                  <div>Status: {story?.status || 'None'}</div>
+                  <div>Phase: {story?.storyMetadata?.phaseStatus || 'None'}</div>
+                  <div>Ready Players: {story?.readyPlayers?.length || 0}/{partyMembers.length}</div>
+                  <div>Current Speaker: {story?.currentSpeaker?.name || 'None'}</div>
+                </div>
+              </div>
+              <div>
+                <h4 className="text-slate-300 font-semibold mb-2">User State</h4>
+                <div className="space-y-1 text-slate-400">
+                  <div>User ID: {user?.uid || 'None'}</div>
+                  <div>Is DM: {user?.uid === party?.dmId ? 'Yes' : 'No'}</div>
+                  <div>Is Ready: {isReady ? 'Yes' : 'No'}</div>
+                  <div>All Ready: {allPlayersReady ? 'Yes' : 'No'}</div>
+                  <div>Combat State: {combatState}</div>
+                  <div>Combat Loading: {combatLoading ? 'Yes' : 'No'}</div>
+                  <div>Has Navigated: {hasNavigatedToCombat ? 'Yes' : 'No'}</div>
+                </div>
+              </div>
+            </div>
+            
+            {/* Manual Combat Trigger for DM */}
+            {user?.uid === party?.dmId && (
+              <div className="mt-4 pt-4 border-t border-slate-600">
+                <h4 className="text-slate-300 font-semibold mb-2">⚔️ Manual Combat Controls</h4>
+                <div className="flex space-x-2">
+                  <button
+                    onClick={() => {
+                      console.log('🎮 DM manually triggering combat...');
+                      setHasNavigatedToCombat(true);
+                      setCombatLoading(true);
+                      
+                      // Deep clean and validate party members data for manual trigger
+                      console.log('🔍 Debugging party members for manual combat:', partyMembers);
+                      console.log('🔍 Debugging party characters for manual combat:', partyCharacters);
+                      
+                      // Use partyCharacters (actual character objects) instead of partyMembers (user IDs)
+                      const charactersToUse = partyCharacters.length > 0 ? partyCharacters : partyMembers;
+                      
+                      const validatedPartyMembers = charactersToUse.map((member, index) => {
+                        console.log(`🔍 Validating member ${index} for manual combat:`, member);
+                        
+                        // If member is a string (user ID), create a basic character object
+                        if (typeof member === 'string') {
+                          console.log(`⚠️ Member ${index} is a user ID string, creating basic character object for manual combat`);
+                          const basicCharacter = {
+                            id: `member_${index}`,
+                            name: `Player ${index + 1}`,
+                            userId: member,
+                            race: 'Unknown',
+                            class: 'Unknown',
+                            level: 1,
+                            initiative: Math.floor(Math.random() * 20) + 1,
+                            hp: 10,
+                            maxHp: 10,
+                            ac: 10
+                          };
+                          console.log(`✅ Created basic character for user ID in manual combat:`, basicCharacter);
+                          return basicCharacter;
+                        }
+                        
+                        // If member is an object, validate and clean it
+                        const cleanMember = {
+                          id: member.id || `member_${index}`,
+                          name: member.name || `Unknown Member ${index}`,
+                          userId: member.userId || null,
+                          race: member.race || 'Unknown',
+                          class: member.class || 'Unknown',
+                          level: member.level || 1,
+                          // Combat stats with fallbacks
+                          initiative: member.initiative || Math.floor(Math.random() * 20) + 1,
+                          hp: member.hp || member.maxHp || 10,
+                          maxHp: member.maxHp || member.hp || 10,
+                          ac: member.ac || 10,
+                          // Remove any undefined values
+                          ...Object.fromEntries(
+                            Object.entries(member).filter(([key, value]) => 
+                              value !== undefined && 
+                              value !== null && 
+                              key !== 'id' && 
+                              key !== 'name' && 
+                              key !== 'userId' && 
+                              key !== 'race' && 
+                              key !== 'class' && 
+                              key !== 'level' && 
+                              key !== 'initiative' && 
+                              key !== 'hp' && 
+                              key !== 'maxHp' && 
+                              key !== 'ac'
+                            )
+                          )
+                        };
+                        
+                        console.log(`✅ Cleaned member ${index} for manual combat:`, cleanMember);
+                        return cleanMember;
+                      });
+                      
+                      console.log('✅ Final validated party members for manual combat:', validatedPartyMembers);
+                      
+                      const basicCombatSession = {
+                        partyId: partyId,
+                        partyMembers: validatedPartyMembers,
+                        enemies: [],
+                        storyContext: story?.currentContent || 'Manual combat encounter',
+                        combatState: 'initialized',
+                        currentTurn: 0,
+                        round: 1,
+                        environmentalFeatures: [],
+                        teamUpOpportunities: [],
+                        narrativeElements: []
+                      };
+                      
+                      console.log('✅ Final combat session object for manual combat:', basicCombatSession);
+                      
+                      createCombatSession(partyId, basicCombatSession).then(() => {
+                        console.log('⚔️ Manual combat session created, navigating...');
+                        navigate(`/combat/${partyId}`);
+                      }).catch(error => {
+                        console.error('❌ Failed to create manual combat session:', error);
+                        setCombatLoading(false);
+                        setHasNavigatedToCombat(false);
+                      });
+                    }}
+                    disabled={combatLoading || hasNavigatedToCombat}
+                    className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {combatLoading ? 'Loading...' : 'Trigger Combat'}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setHasNavigatedToCombat(false);
+                      setCombatLoading(false);
+                      console.log('🔄 Reset combat navigation state');
+                    }}
+                    className="bg-slate-600 hover:bg-slate-700 text-white px-4 py-2 rounded text-sm font-medium transition-colors"
+                  >
+                    Reset State
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
+      </div>
+        )}
 
-      {/* Action Validation Modal */}
-      {showActionValidation && currentValidation && (
+        {/* Modals */}
+        {showActionValidation && (
         <ActionValidationDisplay
-          validation={currentValidation}
+            validation={actionValidation}
           onClose={handleActionValidationClose}
           onProceed={handleActionProceed}
           onRevise={handleActionRevise}
-          context="campaign"
         />
       )}
 
-      {/* Dice Roll Modal */}
-      {showDiceRoll && currentDiceResult && (
+        {showDiceRoll && (
         <DiceRollDisplay
-          diceResult={currentDiceResult}
+            diceResult={diceResult}
           onClose={handleDiceRollClose}
-          onProceed={async () => {
-            handleDiceRollClose();
-            if (currentValidation) {
-              const userCharacter = partyCharacters.find(char => char.userId === user.uid);
-              if (userCharacter) {
-                await processStoryResponse(playerResponse, userCharacter, storyState, currentValidation);
-              }
-            }
-          }}
-          context="campaign"
-        />
-      )}
+          />
+        )}
+      </div>
     </div>
   );
 } 

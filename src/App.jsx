@@ -1,5 +1,5 @@
 import React from 'react';
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import Navbar from './components/Navbar';
 import VersionDisplay from './components/VersionDisplay';
 import Home from './pages/Home';
@@ -14,9 +14,27 @@ import Combat from './pages/Combat';
 import PartyManagement from './pages/PartyManagement';
 import './index.css';
 
+// Component to handle old route redirects and logging
+function OldRouteRedirect() {
+  const location = useLocation();
+  const partyId = location.pathname.split('/campaign-story/')[1];
+  
+  console.log('Old route detected:', location.pathname);
+  console.log('PartyId extracted:', partyId);
+  console.log('Redirecting to:', `/campaign/${partyId}`);
+  
+  return <Navigate to={`/campaign/${partyId}`} replace />;
+}
+
 function App() {
   return (
-    <Router basename="/DND-V1">
+    <Router 
+      basename="/DND-V1"
+      future={{
+        v7_startTransition: true,
+        v7_relativeSplatPath: true
+      }}
+    >
       <div className="min-h-screen flex flex-col">
         <Navbar />
         <main className="flex-grow">
@@ -27,10 +45,16 @@ function App() {
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/test-environment" element={<TestEnvironment />} />
             <Route path="/campaign-management" element={<CampaignManagement />} />
-            <Route path="/character-creation" element={<CharacterCreation />} />
+            <Route path="/character-creation/:partyId" element={<CharacterCreation />} />
             <Route path="/campaign/:partyId" element={<CampaignStory />} />
-            <Route path="/combat" element={<Combat />} />
+            <Route path="/combat/:partyId" element={<Combat />} />
             <Route path="/party-management" element={<PartyManagement />} />
+            
+            {/* Redirect old campaign-story routes to new campaign routes */}
+            <Route path="/campaign-story/:partyId" element={<OldRouteRedirect />} />
+            
+            {/* Catch-all route for any unmatched paths */}
+            <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>
         </main>
         <VersionDisplay />

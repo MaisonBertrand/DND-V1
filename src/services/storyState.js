@@ -129,7 +129,17 @@ export class StoryStateService {
 
   // Update story state based on AI response and player action
   updateStoryState(currentState, aiResponse, playerResponse, characterId) {
-    const newState = { ...currentState };
+    // Ensure we have a valid current state with all required properties
+    const newState = { 
+      ...this.defaultState, 
+      ...currentState,
+      activePlotThreads: currentState?.activePlotThreads || [],
+      activeNPCs: currentState?.activeNPCs || {},
+      characterArcs: currentState?.characterArcs || {},
+      worldState: { ...this.defaultState.worldState, ...currentState?.worldState },
+      storyMetadata: { ...this.defaultState.storyMetadata, ...currentState?.storyMetadata }
+    };
+    
     const extractedInfo = this.extractStoryElements(aiResponse);
     
     // Update NPC relationships and dispositions
@@ -174,7 +184,7 @@ export class StoryStateService {
     }
 
     // Update character development
-    if (characterId && newState.characterArcs[characterId]) {
+    if (characterId && newState.characterArcs && newState.characterArcs[characterId]) {
       const characterArc = newState.characterArcs[characterId];
       
       // Extract character development from player response
@@ -212,6 +222,13 @@ export class StoryStateService {
     }
 
     // Update world state
+    if (!newState.worldState) {
+      newState.worldState = { ...this.defaultState.worldState };
+    }
+    if (!newState.worldState.recentEvents) {
+      newState.worldState.recentEvents = [];
+    }
+    
     newState.worldState.recentEvents = [
       ...newState.worldState.recentEvents.slice(-4), // Keep last 5 events
       {

@@ -7,6 +7,24 @@ import {
 } from 'firebase/auth';
 import { auth } from './config';
 import { createUserProfile, checkUsernameAvailability } from './database';
+import { useState, useEffect } from 'react';
+
+// Custom hook for authentication state
+export const useAuth = () => {
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setUser(user);
+      setLoading(false);
+    });
+
+    return unsubscribe;
+  }, []);
+
+  return { user, loading };
+};
 
 export const registerUser = async (email, password, username) => {
   try {

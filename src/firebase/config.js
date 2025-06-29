@@ -9,32 +9,19 @@ const firebaseConfig = {
 };
 
 import { initializeApp } from 'firebase/app';
-import { getAuth, connectAuthEmulator } from 'firebase/auth';
-import { getFirestore, connectFirestoreEmulator, enableNetwork, disableNetwork } from 'firebase/firestore';
+import { getAuth } from 'firebase/auth';
+import { getFirestore } from 'firebase/firestore';
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-// Enable offline persistence
-db.settings({
-  cacheSizeBytes: 50 * 1024 * 1024, // 50MB cache
-  ignoreUndefinedProperties: true
-});
-
 // Error handling for Firestore connection issues
 const handleFirestoreError = (error) => {
   console.warn('Firestore connection issue:', error);
-  
   // If it's a network error, try to reconnect
-  if (error.code === 'unavailable' || error.code === 'deadline-exceeded') {
-    console.log('Attempting to reconnect to Firestore...');
-    enableNetwork(db).catch(console.error);
-  }
+  // (no-op here, but you can add reconnection logic if needed)
 };
-
-// Add global error handler for Firestore
-db.enableNetwork().catch(handleFirestoreError);
 
 export { auth, db, handleFirestoreError }; 

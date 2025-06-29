@@ -602,13 +602,14 @@ export default function TestEnvironment() {
     if (specificEnemyName === 'Drowned Priest' || (isBoss && enemyType === 'priest')) {
       const minionCount = 2; // Add 2 undead minions
       for (let i = 0; i < minionCount; i++) {
+        const minionHp = 15 + Math.floor(Math.random() * 8);
         generatedEnemies.push({
           id: `enemy_minion_${i}`,
           name: `Undead Minion ${i + 1}`,
           type: 'Skeleton',
           class: 'undead',
-          hp: 15 + Math.floor(Math.random() * 8),
-          maxHp: 15 + Math.floor(Math.random() * 8),
+          hp: minionHp,
+          maxHp: minionHp, // Ensure HP and maxHP are the same
           ac: 12 + Math.floor(Math.random() * 3),
           level: 1,
           // Include all necessary attributes
@@ -905,10 +906,11 @@ export default function TestEnvironment() {
           <div className="space-y-6">
             {/* Character Class Selection */}
             <div>
-              <label className="block text-sm font-medium text-gray-200 mb-2">
+              <label htmlFor="character-class" className="block text-sm font-medium text-gray-200 mb-2">
                 Character Class
               </label>
               <select
+                id="character-class"
                 value={selectedClass}
                 onChange={(e) => setSelectedClass(e.target.value)}
                 className="fantasy-input"
@@ -942,10 +944,10 @@ export default function TestEnvironment() {
 
             {/* Test Scenarios */}
             <div>
-              <label className="block text-sm font-medium text-gray-200 mb-2">
+              <label htmlFor="test-scenarios" className="block text-sm font-medium text-gray-200 mb-2">
                 Quick Test Scenarios
               </label>
-              <div className="space-y-2">
+              <div id="test-scenarios" className="space-y-2">
                 {testScenarios.map((scenario, index) => (
                   <button
                     key={index}
@@ -962,10 +964,11 @@ export default function TestEnvironment() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-200 mb-2">
+              <label htmlFor="story-context" className="block text-sm font-medium text-gray-200 mb-2">
                 Story Context
               </label>
               <textarea
+                id="story-context"
                 value={storyContext}
                 onChange={(e) => setStoryContext(e.target.value)}
                 placeholder="Describe the environment, NPCs, and circumstances. For example: 'In a dark, misty swamp, a Drowned Priest emerges from the water, chanting dark spells. The air is thick with malevolence.'"
@@ -974,10 +977,11 @@ export default function TestEnvironment() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-200 mb-2">
+              <label htmlFor="character-action" className="block text-sm font-medium text-gray-200 mb-2">
                 Character Action
               </label>
               <textarea
+                id="character-action"
                 value={testInput}
                 onChange={(e) => setTestInput(e.target.value)}
                 placeholder="Describe any action your character would take. The system will analyze it for skill checks, combat actions, or story interactions."

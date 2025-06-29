@@ -267,10 +267,11 @@ export default function PartyManagement() {
             <h2 className="text-xl font-bold text-gray-100 mb-4">Create New Party</h2>
             <form onSubmit={handleCreateParty} className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-200 mb-2">
+                <label htmlFor="party-name" className="block text-sm font-medium text-gray-200 mb-2">
                   Party Name
                 </label>
                 <input
+                  id="party-name"
                   type="text"
                   value={newParty.name}
                   onChange={(e) => setNewParty(prev => ({ ...prev, name: e.target.value }))}
@@ -280,10 +281,11 @@ export default function PartyManagement() {
               </div>
               
               <div>
-                <label className="block text-sm font-medium text-gray-200 mb-2">
+                <label htmlFor="party-theme" className="block text-sm font-medium text-gray-200 mb-2">
                   Theme
                 </label>
                 <textarea
+                  id="party-theme"
                   value={newParty.description}
                   onChange={(e) => setNewParty(prev => ({ ...prev, description: e.target.value }))}
                   className="fantasy-input"
@@ -294,10 +296,11 @@ export default function PartyManagement() {
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-200 mb-2">
+                  <label htmlFor="max-players" className="block text-sm font-medium text-gray-200 mb-2">
                     Max Players
                   </label>
                   <input
+                    id="max-players"
                     type="number"
                     min="2"
                     max="10"
@@ -400,11 +403,12 @@ export default function PartyManagement() {
                   
                   {party.dmId === user.uid && (
                     <div className="mb-4">
-                      <label className="block text-sm font-medium text-gray-200 mb-2">
+                      <label htmlFor={`invite-code-${party.id}`} className="block text-sm font-medium text-gray-200 mb-2">
                         Invite Code
                       </label>
                       <div className="flex items-center space-x-2">
                         <input
+                          id={`invite-code-${party.id}`}
                           type="text"
                           value={party.inviteCode}
                           readOnly
@@ -424,7 +428,7 @@ export default function PartyManagement() {
                     {party.members?.includes(user?.uid) ? (
                       <>
                         <button
-                          onClick={() => navigate(`/campaign-story/${party.id}`)}
+                          onClick={() => navigate(`/campaign/${party.id}`)}
                           className="fantasy-button"
                         >
                           Campaign
@@ -513,11 +517,12 @@ export default function PartyManagement() {
                   
                   {party.dmId === user.uid && (
                     <div className="mb-4">
-                      <label className="block text-sm font-medium text-gray-200 mb-2">
+                      <label htmlFor={`invite-code-${party.id}`} className="block text-sm font-medium text-gray-200 mb-2">
                         Invite Code
                       </label>
                       <div className="flex items-center space-x-2">
                         <input
+                          id={`invite-code-${party.id}`}
                           type="text"
                           value={party.inviteCode}
                           readOnly
@@ -555,6 +560,7 @@ export default function PartyManagement() {
           <div className="fantasy-card bg-amber-900/20 border-amber-600">
             <div className="flex items-center space-x-4">
               <input
+                id="join-code"
                 type="text"
                 placeholder="Enter invite code"
                 value={joinCode}

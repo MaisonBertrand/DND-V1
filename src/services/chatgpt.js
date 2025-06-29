@@ -4,17 +4,35 @@ const BACKEND_URL = 'https://dnd-v1-backend.onrender.com';
 // Import dice rolling and action validation services
 import DiceRollingService from './diceRolling.js';
 import ActionValidationService from './actionValidation.js';
+import { CombatService } from './combat.js';
 
 // Helper function to call the backend proxy
 const callBackendAPI = async (messages, model = 'gpt-4', max_tokens = 1000, temperature = 0.8) => {
   try {
+    // Validate messages array to ensure all messages have proper role and content
+    const validatedMessages = messages.filter(msg => {
+      if (!msg || typeof msg !== 'object') {
+        console.warn('Invalid message object:', msg);
+        return false;
+      }
+      if (!msg.role || !msg.content) {
+        console.warn('Message missing role or content:', msg);
+        return false;
+      }
+      return true;
+    });
+
+    if (validatedMessages.length === 0) {
+      throw new Error('No valid messages to send to API');
+    }
+
     const response = await fetch(`${BACKEND_URL}/api/openai`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        messages,
+        messages: validatedMessages,
         model,
         max_tokens,
         temperature,
@@ -22,8 +40,25 @@ const callBackendAPI = async (messages, model = 'gpt-4', max_tokens = 1000, temp
     });
 
     if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.error || 'Backend API request failed');
+      let errorMessage = 'Backend API request failed';
+      try {
+        const errorData = await response.json();
+        errorMessage = errorData.error || errorMessage;
+      } catch (parseError) {
+        // If we can't parse the error response, use the status text
+        errorMessage = `${response.status}: ${response.statusText}`;
+      }
+      
+      // Provide more specific error messages based on status code
+      if (response.status === 500) {
+        errorMessage = `AI service error: ${errorMessage}. This might be due to missing API key, rate limiting, or network issues.`;
+      } else if (response.status === 404) {
+        errorMessage = 'AI service endpoint not found. Please check the backend configuration.';
+      } else if (response.status === 503) {
+        errorMessage = 'AI service temporarily unavailable. Please try again later.';
+      }
+      
+      throw new Error(errorMessage);
     }
 
     const data = await response.json();
@@ -39,7 +74,7 @@ export class DungeonMasterService {
     this.systemPrompt = `You are an experienced Dungeon Master for Dungeons & Dragons 5th Edition. You excel at:
 - Creating engaging storylines and plot hooks
 - Developing detailed character descriptions and backstories
-- Generating multiple story options and summarizing them
+- Generating multiple story options when specifically requested
 - Providing atmospheric descriptions and immersive storytelling
 - Balancing combat encounters and managing game mechanics
 - Creating memorable NPCs and villains
@@ -47,11 +82,14 @@ export class DungeonMasterService {
 - Maintaining story consistency and character development
 - Building upon established relationships and plot threads
 
+IMPORTANT: Only generate multiple options when explicitly requested. When asked to generate a single story introduction, campaign goal, or other content, provide ONLY ONE response.
+
 Always respond in character as a Dungeon Master, providing rich, descriptive content that enhances the gaming experience. Maintain consistency with previous story elements, character relationships, and established plot threads.`;
 
     // Initialize dice rolling and action validation services
     this.diceService = new DiceRollingService();
     this.actionValidationService = new ActionValidationService();
+    this.combatService = new CombatService();
   }
 
   async generateStoryPlots(partyCharacters, campaignSetting = '', partyInfo = null) {
@@ -71,21 +109,37 @@ Always respond in character as a Dungeon Master, providing rich, descriptive con
 Party Composition: ${characterDetails}${partyContext}
 Campaign Setting: ${campaignSetting || 'Generic fantasy world'}
 
-For each plot option, provide:
-1. A compelling title
-2. A brief summary (2-3 sentences)
-3. The main conflict or challenge
-4. Potential story hooks for the party
-5. Estimated campaign length (short, medium, or long)
+IMPORTANT: You MUST format your response EXACTLY as follows for each plot option:
 
-Important Guidelines:
+**Plot Option 1:**
+1. Title: "[Plot Title Here]"
+2. Summary: [2-3 sentence summary of the plot]
+3. Main Conflict: [The main challenge or conflict the party will face]
+4. Story Hooks: [How the party gets involved and what motivates them]
+5. Estimated Campaign Length: [short/medium/long]
+
+**Plot Option 2:**
+1. Title: "[Plot Title Here]"
+2. Summary: [2-3 sentence summary of the plot]
+3. Main Conflict: [The main challenge or conflict the party will face]
+4. Story Hooks: [How the party gets involved and what motivates them]
+5. Estimated Campaign Length: [short/medium/long]
+
+**Plot Option 3:**
+1. Title: "[Plot Title Here]"
+2. Summary: [2-3 sentence summary of the plot]
+3. Main Conflict: [The main challenge or conflict the party will face]
+4. Story Hooks: [How the party gets involved and what motivates them]
+5. Estimated Campaign Length: [short/medium/long]
+
+Guidelines for the plots:
 - Use the party theme to influence the plot lines and atmosphere
 - Incorporate themes and elements from the party theme to create a cohesive narrative
 - Consider how the party's background and composition might influence the plot
 - Make each plot distinct and appealing to different play styles
 - Focus on the characters and their individual stories
 
-Make each plot distinct and appealing to different play styles. Consider the party composition when crafting these options.`;
+CRITICAL: Do not deviate from this exact format. Each plot must start with "**Plot Option X:**" and use the numbered format exactly as shown above.`;
 
       const response = await callBackendAPI([
         { role: "system", content: this.systemPrompt },
@@ -503,8 +557,10 @@ Make each plot distinct and appealing to different play styles.`;
       const prompt = `As a Dungeon Master, create an engaging story introduction for the beginning of this campaign.
 
 Party: ${characterDetails}${partyContext}
-Selected Plot: Plot ${selectedPlot}
-Plot Details: ${plotContent}
+Selected Plot: ${plotContent}
+Plot Number: ${selectedPlot}
+
+IMPORTANT: Generate ONLY ONE story introduction for the selected plot above. Do NOT generate introductions for multiple plots or options.
 
 Create an introduction that includes:
 1. A vivid description of the starting town/settlement where the party begins
@@ -519,6 +575,7 @@ Important Guidelines:
 - Consider how the party's background and composition might influence the starting situation
 - Focus on the characters and their individual stories
 - The story should feel cohesive with the established theme
+- Generate ONLY ONE introduction for the selected plot
 
 Make this feel like the opening of an epic adventure. Set the tone, establish the setting, and give the party a clear starting point. End with a situation that requires the party to make a choice or take action.
 
@@ -543,10 +600,13 @@ Keep the introduction engaging but concise (3-4 paragraphs maximum).`;
         `${char.name} - Level ${char.level} ${char.race} ${char.class}`
       ).join(', ');
 
-      const conversationHistory = storyHistory.map(msg => ({
-        role: msg.role,
-        content: msg.content
-      }));
+      // Validate and filter conversation history to ensure all messages have proper role and content
+      const conversationHistory = storyHistory
+        .filter(msg => msg && typeof msg === 'object' && msg.role && msg.content)
+        .map(msg => ({
+          role: msg.role,
+          content: msg.content
+        }));
 
       let partyContext = '';
       if (partyInfo) {
@@ -595,24 +655,56 @@ CRITICAL CONSISTENCY REQUIREMENTS:
 9. Build upon existing plot threads rather than introducing new unrelated elements
 10. Consider character relationships when determining NPC reactions
 
-Please provide a compelling continuation that:
-1. Acknowledges the player's action in context of the current situation and location
-2. References relevant NPCs and their established relationships with the party
-3. Continues or advances active plot threads appropriately
-4. Updates character relationships based on the action
-5. Maintains location and atmosphere consistency
-6. Ends with a clear situation that invites the next player to respond
-7. Encourages character interaction and roleplay
-8. Provides multiple possible directions for the party to explore
-9. Builds upon the established story state and character development
+ENEMY INFORMATION REQUIREMENTS (when in Conflict phase):
+If the story involves combat or enemies, provide detailed enemy information in the following format:
 
-Keep your response engaging but concise (2-3 paragraphs maximum). Remember that only one player responds at a time, so end with a situation that gives the next player something meaningful to react to.`;
+**ENEMY_DETAILS:**
+[For each enemy present, provide:]
+Name: [Enemy name if humanoid, or descriptive name like "Alpha Wolf"]
+Type: [Enemy type: humanoid, beast, undead, etc.]
+Level: [Enemy level relative to party]
+HP: [Hit points]
+AC: [Armor class]
+Basic Attack: [Description of basic attack and damage]
+Special Ability: [Description of special ability or attack]
+Stats: [Brief description of key stats like "Strong and aggressive" or "Quick and stealthy"]
+
+IMPORTANT: You MUST format your response EXACTLY as follows:
+
+**STORY_CONTENT:**
+[Your main story continuation here - 2-3 paragraphs that acknowledge the player's action, continue the plot, and set up the next situation]
+
+**CURRENT_LOCATION:**
+[Updated location description or "No change" if location remains the same]
+
+**ACTIVE_NPCS:**
+[List of NPCs currently present or relevant to the scene, separated by commas]
+
+**PLOT_DEVELOPMENTS:**
+[Key plot developments or revelations from this response]
+
+**CHARACTER_REACTIONS:**
+[How NPCs react to the player's action, if applicable]
+
+**NEXT_ACTIONS:**
+[2-3 clear options or directions the party can take next]
+
+**STORY_TONE:**
+[The current mood/atmosphere: tense, mysterious, hopeful, dangerous, etc.]
+
+**PHASE_STATUS:**
+[Current story phase: investigation, conflict, or resolution]
+
+**ENEMY_DETAILS:** (only include if enemies are present)
+[Detailed enemy information as specified above]
+
+Keep your response engaging but concise. Remember that only one player responds at a time, so end with a situation that gives the next player something meaningful to react to.`;
 
       const response = await callBackendAPI([
         { role: "system", content: this.systemPrompt },
         ...conversationHistory,
         { role: "user", content: prompt }
-      ], 'gpt-4', 800, 0.8);
+      ], 'gpt-4', 1000, 0.8);
 
       return response.choices[0].message.content;
     } catch (error) {
@@ -703,10 +795,13 @@ Make this feel rewarding and meaningful.`;
         `${char.name} - Level ${char.level} ${char.race} ${char.class}`
       ).join(', ');
 
-      const conversationHistory = storyHistory.map(msg => ({
-        role: msg.role,
-        content: msg.content
-      }));
+      // Validate and filter conversation history to ensure all messages have proper role and content
+      const conversationHistory = storyHistory
+        .filter(msg => msg && typeof msg === 'object' && msg.role && msg.content)
+        .map(msg => ({
+          role: msg.role,
+          content: msg.content
+        }));
 
       let partyContext = '';
       if (partyInfo) {
@@ -759,7 +854,9 @@ Keep your response engaging but concise (2-3 paragraphs maximum).`;
       const prompt = `As a Dungeon Master, create a clear campaign goal based on the selected plot.
 
 Party: ${characterDetails}${partyContext}
-Plot Content: ${plotContent}
+Selected Plot: ${plotContent}
+
+IMPORTANT: Generate ONLY ONE campaign goal for the selected plot above. Do NOT generate multiple goals or options.
 
 Create a campaign goal that:
 1. Is clear and achievable
@@ -767,8 +864,9 @@ Create a campaign goal that:
 3. Involves all party members
 4. Has multiple possible paths to completion
 5. Creates meaningful stakes and consequences
+6. Is specific to the selected plot only
 
-Make this goal compelling and motivating for the party.`;
+Make this goal compelling and motivating for the party. Generate ONLY ONE goal.`;
 
       const response = await callBackendAPI([
         { role: "system", content: this.systemPrompt },
