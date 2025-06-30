@@ -355,7 +355,7 @@ export default function CampaignStory() {
           console.log('⚔️ Combat session state:', updatedCombatSession.combatState);
           console.log('⚔️ Combat session ID:', updatedCombatSession.id);
           
-          // Check if this update is overriding local damage
+          // Check if this update is overriding local changes
           if (combatSession) {
             const localEnemies = combatSession.combatants.filter(c => c.id.startsWith('enemy_'));
             const dbEnemies = updatedCombatSession.enemies || [];
@@ -406,9 +406,22 @@ export default function CampaignStory() {
           
           console.log('⚔️ Reconstructed session from database:', reconstructedSession);
           console.log('⚔️ Reconstructed session combatants:', reconstructedSession.combatants.map(c => `${c.name}: ${c.hp}/${c.maxHp}`));
+          console.log('⚔️ Database currentTurn:', updatedCombatSession.currentTurn);
+          console.log('⚔️ Next combatant from database:', reconstructedSession.combatants[updatedCombatSession.currentTurn]?.name);
           
           setCombatSession(reconstructedSession);
-          setCurrentCombatant(reconstructedSession.combatants[updatedCombatSession.currentTurn]);
+          
+          // Only update currentCombatant if the turn has actually changed
+          const newCurrentCombatant = reconstructedSession.combatants[updatedCombatSession.currentTurn];
+          if (newCurrentCombatant && (!currentCombatant || currentCombatant.id !== newCurrentCombatant.id)) {
+            console.log('🔄 Updating currentCombatant from database:', newCurrentCombatant.name);
+            setCurrentCombatant(newCurrentCombatant);
+          } else if (newCurrentCombatant) {
+            console.log('🔄 CurrentCombatant unchanged:', newCurrentCombatant.name);
+          } else {
+            console.log('⚠️ No valid currentCombatant found in database update');
+          }
+          
           setCombatState(updatedCombatSession.combatState);
         } else {
           console.log('⚔️ Combat session ended or not found');
@@ -422,13 +435,25 @@ export default function CampaignStory() {
       
       return () => unsubscribe();
     }
-  }, [combatSessionId]);
+  }, [combatSessionId, currentCombatant]);
 
   // Log current combatant changes
   useEffect(() => {
     if (currentCombatant && combatSession) {
       console.log('🔄 Turn changed to:', currentCombatant.name, 'at index:', combatSession.currentTurn);
       console.log('🔄 Full turn order:', combatSession.combatants.map((c, i) => `${i}: ${c.name} (${c.initiative})`));
+      console.log('🔄 Current combatant details:', {
+        id: currentCombatant.id,
+        name: currentCombatant.name,
+        hp: currentCombatant.hp,
+        maxHp: currentCombatant.maxHp,
+        isEnemy: currentCombatant.id.startsWith('enemy_'),
+        userId: currentCombatant.userId
+      });
+    } else if (!currentCombatant && combatSession) {
+      console.log('⚠️ No currentCombatant set but combatSession exists');
+      console.log('⚠️ Combat session currentTurn:', combatSession.currentTurn);
+      console.log('⚠️ Available combatants:', combatSession.combatants.map(c => c.name));
     }
   }, [currentCombatant, combatSession]);
 
@@ -555,7 +580,15 @@ export default function CampaignStory() {
             
             // Update current combatant based on the new turn
             const nextCombatant = updatedSession.combatants[updatedSession.currentTurn];
-            setCurrentCombatant(nextCombatant);
+            console.log('🔄 About to update currentCombatant to:', nextCombatant?.name);
+            console.log('🔄 Current currentCombatant:', currentCombatant?.name);
+            console.log('🔄 Will change:', currentCombatant?.id !== nextCombatant?.id);
+            
+            // Add a small delay to ensure combatSession is updated first
+            setTimeout(() => {
+              setCurrentCombatant(nextCombatant);
+              console.log('🔄 Turn advanced to:', nextCombatant?.name);
+            }, 50);
             
             // Check if combat should end
             const combatResult = combatService.checkCombatEnd(updatedSession);
@@ -1625,8 +1658,15 @@ What would you like to do?`;
       
       // Update current combatant based on the new turn
       const nextCombatant = updatedSession.combatants[updatedSession.currentTurn];
-      setCurrentCombatant(nextCombatant);
-      console.log('🔄 Turn advanced to:', nextCombatant?.name);
+      console.log('🔄 About to update currentCombatant to:', nextCombatant?.name);
+      console.log('🔄 Current currentCombatant:', currentCombatant?.name);
+      console.log('🔄 Will change:', currentCombatant?.id !== nextCombatant?.id);
+      
+      // Add a small delay to ensure combatSession is updated first
+      setTimeout(() => {
+        setCurrentCombatant(nextCombatant);
+        console.log('🔄 Turn advanced to:', nextCombatant?.name);
+      }, 50);
       
       // Update combat session in database for real-time synchronization
       if (combatSessionId) {
