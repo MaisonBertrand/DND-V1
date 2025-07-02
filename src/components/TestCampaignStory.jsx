@@ -133,7 +133,7 @@ export default function TestCampaignStory() {
             // Check if we're already on the combat page
             if (!currentPath.includes('/combat/')) {
               // Combat has been initiated, redirect all players to combat screen
-              navigate(`/combat/${partyId}`);
+              navigate(`/combat/${combatSession.id}`);
             }
           }
         });

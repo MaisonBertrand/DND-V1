@@ -154,6 +154,206 @@ export class CombatService {
     };
   }
 
+  // Centralized combat session creation with existing session check
+  async createCombatSession(partyId, partyMembers, enemies, storyContext) {
+    try {
+      // Import database functions dynamically to avoid circular dependencies
+      const { createCombatSession: dbCreateCombatSession } = await import('../firebase/database');
+      
+      // Check for existing active combat session
+      const existingSession = await this.getExistingCombatSession(partyId);
+      if (existingSession) {
+        console.log('🎯 Found existing combat session:', existingSession.id);
+        return existingSession;
+      }
+
+      // Prepare party members with proper stats
+      const preparedPartyMembers = this.preparePartyMembers(partyMembers);
+      
+      // Prepare enemies with proper stats
+      const preparedEnemies = this.prepareEnemies(enemies);
+      
+      // Initialize combat
+      const combatSession = this.initializeCombat(
+        preparedPartyMembers,
+        preparedEnemies,
+        storyContext
+      );
+
+      // Create database session
+      const dbSession = await dbCreateCombatSession(partyId, {
+        storyContext: combatSession.storyContext,
+        partyMembers: combatSession.combatants.filter(c => !c.id.startsWith('enemy_')),
+        enemies: combatSession.combatants.filter(c => c.id.startsWith('enemy_')),
+        combatants: combatSession.combatants, // Add the full combatants array
+        initiative: combatSession.combatants.map(c => ({ id: c.id, name: c.name, initiative: c.initiative })),
+        currentTurn: combatSession.currentTurn,
+        round: combatSession.round,
+        combatState: combatSession.combatState,
+        environmentalFeatures: combatSession.environmentalFeatures,
+        teamUpOpportunities: combatSession.teamUpOpportunities,
+        narrativeElements: combatSession.narrativeElements
+      });
+
+      console.log('⚔️ Created new combat session:', dbSession.id);
+      return dbSession;
+    } catch (error) {
+      console.error('❌ Error creating combat session:', error);
+      throw error;
+    }
+  }
+
+  // Check for existing combat session
+  async getExistingCombatSession(partyId) {
+    try {
+      const { collection, query, where, getDocs } = await import('firebase/firestore');
+      const { db } = await import('../firebase/config');
+      
+      const combatSessionsRef = collection(db, 'combatSessions');
+      const q = query(
+        combatSessionsRef,
+        where('partyId', '==', partyId),
+        where('status', '==', 'active')
+      );
+      
+      const querySnapshot = await getDocs(q);
+      if (!querySnapshot.empty) {
+        const existingSession = querySnapshot.docs[0];
+        console.log('🎯 Found existing combat session:', existingSession.id);
+        return { id: existingSession.id, ...existingSession.data() };
+      }
+      return null;
+    } catch (error) {
+      console.error('Error checking for existing combat session:', error);
+      return null;
+    }
+  }
+
+  // Prepare party members with proper stats
+  preparePartyMembers(partyMembers) {
+    return partyMembers.map(character => {
+      // Calculate HP if not present
+      let hp = character.hp;
+      let maxHp = character.maxHp;
+      
+      if (!hp || !maxHp) {
+        const hitDieSizes = {
+          'Barbarian': 12, 'Fighter': 10, 'Paladin': 10, 'Ranger': 10,
+          'Cleric': 8, 'Druid': 8, 'Monk': 8, 'Rogue': 8, 'Bard': 8,
+          'Sorcerer': 6, 'Warlock': 8, 'Wizard': 6
+        };
+        
+        const hitDie = hitDieSizes[character.class] || 8;
+        const constitution = character.assignedScores?.constitution || 10;
+        const constitutionMod = Math.floor((constitution - 10) / 2);
+        const calculatedHp = Math.max(1, (hitDie + constitutionMod) * (character.level || 1));
+        
+        hp = calculatedHp;
+        maxHp = calculatedHp;
+      }
+      
+      // Calculate AC if not present
+      let ac = character.ac;
+      if (!ac) {
+        const baseAC = 10;
+        const dexterity = character.assignedScores?.dexterity || 10;
+        const dexterityMod = Math.floor((dexterity - 10) / 2);
+        const classACBonuses = {
+          'Barbarian': 3, 'Monk': 2, 'Fighter': 4, 'Paladin': 4, 'Cleric': 4,
+          'Ranger': 3, 'Rogue': 2, 'Bard': 2, 'Druid': 2, 'Sorcerer': 0,
+          'Warlock': 0, 'Wizard': 0
+        };
+        const classBonus = classACBonuses[character.class] || 0;
+        ac = Math.max(10, baseAC + dexterityMod + classBonus);
+      }
+      
+      return {
+        ...character,
+        hp: hp,
+        maxHp: maxHp,
+        ac: ac,
+        initiative: Math.floor(Math.random() * 20) + 1,
+        // Map assignedScores to direct attributes
+        strength: character.assignedScores?.strength || 10,
+        dexterity: character.assignedScores?.dexterity || 10,
+        constitution: character.assignedScores?.constitution || 10,
+        intelligence: character.assignedScores?.intelligence || 10,
+        wisdom: character.assignedScores?.wisdom || 10,
+        charisma: character.assignedScores?.charisma || 10,
+        // Add combat-specific properties
+        statusEffects: [],
+        cooldowns: {},
+        lastAction: null,
+        turnCount: 0
+      };
+    });
+  }
+
+  // Prepare enemies with proper stats
+  prepareEnemies(enemies) {
+    if (!enemies || enemies.length === 0) {
+      // Fallback enemy details
+      return [
+        {
+          id: 'enemy_0',
+          name: 'Gnoll Pack',
+          hp: 20,
+          maxHp: 20,
+          ac: 12,
+          level: 1,
+          class: 'enemy',
+          race: 'unknown',
+          initiative: Math.floor(Math.random() * 20) + 1,
+          strength: 12,
+          dexterity: 10,
+          constitution: 12,
+          intelligence: 8,
+          wisdom: 8,
+          charisma: 6
+        },
+        {
+          id: 'enemy_1',
+          name: 'Gnoll Pack-Leader',
+          hp: 25,
+          maxHp: 25,
+          ac: 14,
+          level: 2,
+          class: 'enemy',
+          race: 'unknown',
+          initiative: Math.floor(Math.random() * 20) + 1,
+          strength: 14,
+          dexterity: 12,
+          constitution: 14,
+          intelligence: 10,
+          wisdom: 10,
+          charisma: 8
+        }
+      ];
+    }
+
+    return enemies.map((enemy, index) => ({
+      id: enemy.id || `enemy_${index}`,
+      name: enemy.name || `Enemy ${index + 1}`,
+      hp: enemy.hp || 20,
+      maxHp: enemy.maxHp || enemy.hp || 20,
+      ac: enemy.ac || 12,
+      level: enemy.level || 1,
+      class: enemy.class || 'enemy',
+      race: enemy.race || 'unknown',
+      initiative: enemy.initiative || Math.floor(Math.random() * 20) + 1,
+      strength: enemy.strength || 12,
+      dexterity: enemy.dexterity || 10,
+      constitution: enemy.constitution || 12,
+      intelligence: enemy.intelligence || 8,
+      wisdom: enemy.wisdom || 8,
+      charisma: enemy.charisma || 6,
+      statusEffects: [],
+      cooldowns: {},
+      lastAction: null,
+      turnCount: 0
+    }));
+  }
+
   // Calculate initiative with class and status modifiers
   calculateInitiative(combatant) {
     let initiative = Math.floor(Math.random() * 20) + 1;
@@ -957,14 +1157,12 @@ export class CombatService {
   // Choose enemy action
   chooseEnemyAction(enemy, combatSession) {
     const availableActions = this.getAvailableActions(enemy);
-    const validTargets = this.getValidTargets(enemy, 'attack', combatSession);
     
     console.log(`Enemy ${enemy.name} available actions:`, availableActions);
-    console.log(`Enemy ${enemy.name} valid targets:`, validTargets.map(t => t.name));
     
-    // If no valid targets, default to defend
-    if (validTargets.length === 0) {
-      console.log(`No valid targets for ${enemy.name}, defaulting to defend`);
+    // If no available actions, default to defend
+    if (availableActions.length === 0) {
+      console.log(`No available actions for ${enemy.name}, defaulting to defend`);
       return {
         action: 'defend',
         target: null,
@@ -974,7 +1172,7 @@ export class CombatService {
       };
     }
     
-    return this.makeEnemyDecision(enemy, availableActions, validTargets, combatSession);
+    return this.makeEnemyDecision(enemy, availableActions, combatSession);
   }
 
   // Get available actions for enemy
@@ -1071,25 +1269,33 @@ export class CombatService {
   }
 
   // Make enemy decision based on situation
-  makeEnemyDecision(enemy, availableActions, validTargets, combatSession) {
+  makeEnemyDecision(enemy, availableActions, combatSession) {
     // If no available actions, default to defend
     if (availableActions.length === 0) {
       console.log('No available actions for enemy, defaulting to defend');
       return { 
         action: 'defend', 
-        targetId: enemy.id,
+        target: null,
         specialAttack: 'Defensive Stance',
         damageType: 'defense',
         attribute: 'dexterity'
       };
     }
     
-    // If no valid targets, default to defend
+    // Choose a random action from available actions
+    const chosenAction = availableActions[Math.floor(Math.random() * availableActions.length)];
+    
+    // Get valid targets for the chosen action
+    const validTargets = this.getValidTargets(enemy, chosenAction, combatSession);
+    
+    console.log(`Valid targets for ${enemy.name} (${chosenAction}):`, validTargets.map(t => t.name));
+    
+    // If no valid targets for this action, default to defend
     if (validTargets.length === 0) {
-      console.log('No valid targets for enemy, defaulting to defend');
+      console.log(`No valid targets for ${enemy.name} with action ${chosenAction}, defaulting to defend`);
       return { 
         action: 'defend', 
-        targetId: enemy.id,
+        target: null,
         specialAttack: 'Defensive Stance',
         damageType: 'defense',
         attribute: 'dexterity'
@@ -1111,7 +1317,7 @@ export class CombatService {
       if (healthPercentage < 0.4 && availableActions.includes('spell')) {
         return { 
           action: 'spell', 
-          targetId: enemy.id, 
+          target: enemy.id, 
           spellType: 'healing',
           specialAttack: 'Divine Healing',
           damageType: 'healing',
@@ -1121,7 +1327,7 @@ export class CombatService {
       if (availableActions.includes('spell')) {
         return { 
           action: 'spell', 
-          targetId: target.id, 
+          target: target.id, 
           spellType: 'divine',
           specialAttack: 'Divine Smite',
           damageType: 'radiant',
@@ -1137,7 +1343,7 @@ export class CombatService {
         const spellType = spells[Math.floor(Math.random() * spells.length)];
         return { 
           action: 'spell', 
-          targetId: target.id, 
+          target: target.id, 
           spellType: spellType,
           specialAttack: `${spellType.charAt(0).toUpperCase() + spellType.slice(1)} Spell`,
           damageType: spellType === 'fireball' ? 'fire' : spellType === 'lightning' ? 'lightning' : spellType === 'ice' ? 'cold' : 'arcane',
@@ -1151,7 +1357,7 @@ export class CombatService {
       if (availableActions.includes('special')) {
         return { 
           action: 'special', 
-          targetId: target.id, 
+          target: target.id, 
           specialAttack: 'Devastating Strike',
           damageType: 'physical',
           attribute: 'strength',
@@ -1165,7 +1371,7 @@ export class CombatService {
       if (availableActions.includes('spell')) {
         return { 
           action: 'spell', 
-          targetId: target.id, 
+          target: target.id, 
           spellType: 'necrotic',
           specialAttack: 'Death Touch',
           damageType: 'necrotic',
@@ -1179,7 +1385,7 @@ export class CombatService {
       if (availableActions.includes('item')) {
         return { 
           action: 'item', 
-          targetId: enemy.id, 
+          target: enemy.id, 
           itemType: 'healing',
           specialAttack: 'Use Healing Potion',
           damageType: 'healing',
@@ -1189,7 +1395,7 @@ export class CombatService {
       if (availableActions.includes('defend')) {
         return { 
           action: 'defend', 
-          targetId: enemy.id,
+          target: enemy.id,
           specialAttack: 'Defensive Stance',
           damageType: 'defense',
           attribute: 'dexterity'
@@ -1205,7 +1411,7 @@ export class CombatService {
     if (lowHealthAllies.length > 1 && availableActions.includes('spell')) {
       return { 
         action: 'spell', 
-        targetId: target.id, 
+        target: target.id, 
         spellType: 'area',
         specialAttack: 'Area Attack',
         damageType: 'mixed',
@@ -1217,7 +1423,7 @@ export class CombatService {
     if (availableActions.includes('attack')) {
       return { 
         action: 'attack', 
-        targetId: target.id,
+        target: target.id,
         specialAttack: 'Standard Attack',
         damageType: 'physical',
         attribute: 'strength'
@@ -1228,7 +1434,7 @@ export class CombatService {
     const action = availableActions[Math.floor(Math.random() * availableActions.length)];
     return { 
       action, 
-      targetId: target.id,
+      target: target.id,
       specialAttack: 'Basic Action',
       damageType: 'physical',
       attribute: 'strength'
@@ -1247,8 +1453,8 @@ export class CombatService {
       attribute: decision.attribute
     });
     
-    if (decision.targetId) {
-      return await this.executeAction(combatSession, enemy.id, decision.action, decision.targetId, {
+    if (decision.target) {
+      return await this.executeAction(combatSession, enemy.id, decision.action, decision.target, {
         itemType: decision.itemType,
         spellType: decision.spellType,
         specialAttack: decision.specialAttack,

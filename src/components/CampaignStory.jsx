@@ -11,7 +11,6 @@ import {
   getPartyById,
   getPartyCharacters,
   subscribeToParty,
-  createCombatSession,
   updateCombatSession,
   subscribeToCombatSession,
   createCampaignStory
@@ -67,6 +66,8 @@ export default function CampaignStory() {
   const actionValidationService = new ActionValidationService();
   const combatService = new CombatService();
 
+
+
   // Helper functions - moved to top to avoid hoisting issues
   const getReadyCount = () => story?.readyPlayers?.length || 0;
   const getTotalPlayers = () => partyMembers.length;
@@ -118,7 +119,7 @@ export default function CampaignStory() {
   useEffect(() => {
     if (story?.id) {
       console.log('📡 Setting up real-time subscription for story:', story.id);
-      const unsubscribe = subscribeToCampaignStory(story.id, (updatedStory) => {
+      const unsubscribe = subscribeToCampaignStory(story.id, async (updatedStory) => {
         if (updatedStory) {
           console.log('📡 Story update received:', updatedStory);
           setStory(updatedStory);
@@ -174,141 +175,24 @@ export default function CampaignStory() {
                 console.log('Waiting for character data to load...');
                 return;
               }
-              
-              // Use partyCharacters (actual character objects) instead of partyMembers (user IDs)
-              const charactersToUse = partyCharacters.length > 0 ? partyCharacters : partyMembers;
-              
-              // Deep clean and validate party members data
-              const validatedPartyMembers = charactersToUse.map((member, index) => {
-                // If member is a string (user ID), create a basic character object
-                if (typeof member === 'string') {
-                  const basicCharacter = {
-                    id: `member_${index}`,
-                    name: `Player ${index + 1}`,
-                    userId: member,
-                    race: 'Unknown',
-                    class: 'Unknown',
-                    level: 1,
-                    initiative: Math.floor(Math.random() * 20) + 1,
-                    hp: 10,
-                    maxHp: 10,
-                    ac: 10
-                  };
-                  return basicCharacter;
-                }
+
+              // Use centralized combat service to create or find existing session
+              try {
+                const combatSession = await combatService.createCombatSession(
+                  partyId,
+                  partyCharacters.length > 0 ? partyCharacters : partyMembers,
+                  updatedStory.storyMetadata?.enemies || [],
+                  updatedStory.currentContent || 'Combat encounter'
+                );
                 
-                // If member is an object, validate and clean it
-                const cleanMember = {
-                  id: member.id || `member_${index}`,
-                  name: member.name || `Unknown Member ${index}`,
-                  userId: member.userId || null,
-                  race: member.race || 'Unknown',
-                  class: member.class || 'Unknown',
-                  level: member.level || 1,
-                  // Combat stats with fallbacks
-                  initiative: member.initiative || Math.floor(Math.random() * 20) + 1,
-                  hp: member.hp || member.maxHp || 10,
-                  maxHp: member.maxHp || member.hp || 10,
-                  ac: member.ac || 10,
-                  // Remove any undefined values
-                  ...Object.fromEntries(
-                    Object.entries(member).filter(([key, value]) => 
-                      value !== undefined && 
-                      value !== null && 
-                      key !== 'id' && 
-                      key !== 'name' && 
-                      key !== 'userId' && 
-                      key !== 'race' && 
-                      key !== 'class' && 
-                      key !== 'level' && 
-                      key !== 'initiative' && 
-                      key !== 'hp' && 
-                      key !== 'maxHp' && 
-                      key !== 'ac'
-                    )
-                  )
-                };
-                
-                return cleanMember;
-              });
-              
-              // Verify we have all party members
-              if (validatedPartyMembers.length !== members.length) {
-                console.warn('Party member count mismatch:', validatedPartyMembers.length, 'vs', members.length);
-                return;
-              }
-              
-              // Extract enemies from story content
-              let extractedEnemies = [];
-              
-              // First, try to get enemies from story metadata
-              if (updatedStory.storyMetadata?.enemyDetails && updatedStory.storyMetadata.enemyDetails.length > 0) {
-                extractedEnemies = convertEnemyDetailsToCombatEnemies(updatedStory.storyMetadata.enemyDetails);
-              }
-              
-              // If no enemies found in metadata, try parsing the story content
-              if (extractedEnemies.length === 0 && updatedStory.currentContent) {
-                const parsedResponse = parseStructuredResponse(updatedStory.currentContent);
-                if (parsedResponse.enemyDetails && parsedResponse.enemyDetails.length > 0) {
-                  extractedEnemies = convertEnemyDetailsToCombatEnemies(parsedResponse.enemyDetails);
-                }
-              }
-              
-              // If still no enemies found, use fallback enemies
-              if (extractedEnemies.length === 0) {
-                extractedEnemies = [
-                  {
-                    id: 'enemy_0',
-                    name: 'Dire Wolf',
-                    hp: 15,
-                    maxHp: 15,
-                    ac: 14,
-                    level: 1,
-                    class: 'beast',
-                    race: 'wolf',
-                    initiative: Math.floor(Math.random() * 20) + 1,
-                    strength: 16,
-                    dexterity: 14,
-                    constitution: 13,
-                    intelligence: 3,
-                    wisdom: 12,
-                    charisma: 6,
-                    statusEffects: [],
-                    cooldowns: {},
-                    lastAction: null,
-                    turnCount: 0,
-                    basicAttack: 'Bite (1d6 + 3 piercing damage)',
-                    specialAbility: 'Pack Tactics (The wolf has advantage on attack rolls against a creature if at least one of the wolf\'s allies is within 5 feet of the creature and the ally isn\'t incapacitated.)'
-                  }
-                ];
-              }
-              
-              // Create a basic combat session with the party members and enemies
-              const basicCombatSession = {
-                partyId,
-                partyMembers: validatedPartyMembers,
-                enemies: extractedEnemies,
-                storyContext: updatedStory.currentContent || 'Combat encounter',
-                combatState: 'initialized',
-                currentTurn: 0,
-                round: 1,
-                initiative: [],
-                environmentalFeatures: updatedStory.storyMetadata?.environmentalFeatures || [],
-                teamUpOpportunities: updatedStory.storyMetadata?.teamUpOpportunities || [],
-                narrativeElements: updatedStory.storyMetadata?.narrativeElements || []
-              };
-              
-              // Store the basic session in the database
-              createCombatSession(partyId, basicCombatSession).then((createdSession) => {
                 setCombatLoading(false);
                 setHasNavigatedToCombat(true);
-                // Use the Firestore session ID for navigation
-                navigate(`/combat/${createdSession.id}`);
-              }).catch(error => {
+                navigate(`/combat/${combatSession.id}`);
+              } catch (error) {
                 console.error('Failed to create combat session:', error);
                 setCombatLoading(false);
                 setHasNavigatedToCombat(false);
-              });
+              }
               
               // Add a timeout to prevent infinite loading
               setTimeout(() => {
@@ -354,6 +238,7 @@ export default function CampaignStory() {
           console.log('⚔️ Current local combat session state:', combatSession);
           console.log('⚔️ Combat session state:', updatedCombatSession.combatState);
           console.log('⚔️ Combat session ID:', updatedCombatSession.id);
+          console.log('⚔️ Local combat state:', combatState);
           
           // Check if this update is overriding local changes
           if (combatSession) {
@@ -363,6 +248,7 @@ export default function CampaignStory() {
             console.log('⚔️ Comparing local vs database enemy HP:');
             let hasLocalDamage = false;
             let hasLocalTurnChange = false;
+            let hasLocalCombatStateChange = false;
             
             localEnemies.forEach(localEnemy => {
               const dbEnemy = dbEnemies.find(e => e.id === localEnemy.id);
@@ -382,8 +268,14 @@ export default function CampaignStory() {
               hasLocalTurnChange = true;
             }
             
-            // If we have local damage or turn changes that haven't been saved to DB yet, don't override
-            if (hasLocalDamage || hasLocalTurnChange) {
+            // Check if local combat state is different from database
+            if (combatState !== updatedCombatSession.combatState) {
+              console.log(`⚠️ Combat state mismatch: Local=${combatState}, DB=${updatedCombatSession.combatState}`);
+              hasLocalCombatStateChange = true;
+            }
+            
+            // If we have local damage, turn changes, or combat state changes that haven't been saved to DB yet, don't override
+            if (hasLocalDamage || hasLocalTurnChange || hasLocalCombatStateChange) {
               console.log('🛡️ Skipping database update to preserve local changes');
               return;
             }
@@ -422,7 +314,11 @@ export default function CampaignStory() {
             console.log('⚠️ No valid currentCombatant found in database update');
           }
           
-          setCombatState(updatedCombatSession.combatState);
+          // Update combat state from database
+          if (updatedCombatSession.combatState !== combatState) {
+            console.log('🔄 Updating combat state from database:', updatedCombatSession.combatState);
+            setCombatState(updatedCombatSession.combatState);
+          }
         } else {
           console.log('⚔️ Combat session ended or not found');
           console.log('⚔️ Clearing combat state...');
@@ -435,7 +331,7 @@ export default function CampaignStory() {
       
       return () => unsubscribe();
     }
-  }, [combatSessionId, currentCombatant]);
+  }, [combatSessionId, currentCombatant, combatState]);
 
   // Log current combatant changes
   useEffect(() => {
@@ -456,6 +352,17 @@ export default function CampaignStory() {
       console.log('⚠️ Available combatants:', combatSession.combatants.map(c => c.name));
     }
   }, [currentCombatant, combatSession]);
+
+  // Log combat state changes
+  useEffect(() => {
+    console.log('🔄 Combat state changed to:', combatState);
+    console.log('🔄 Combat session exists:', !!combatSession);
+    console.log('🔄 Combat session ID:', combatSessionId);
+    if (combatSession) {
+      console.log('🔄 Combat session state:', combatSession.combatState);
+      console.log('🔄 Combat session combatants:', combatSession.combatants?.length || 0);
+    }
+  }, [combatState, combatSession, combatSessionId]);
 
   // Auto-process enemy turns
   useEffect(() => {
@@ -1381,173 +1288,7 @@ What would you like to do?`;
     console.log('📜 Battle Log Entry:', logEntry);
   }, []);
 
-  // Initialize combat when conflict phase is detected
-  const initializeCombat = useCallback(async (storyData) => {
-    try {
-      console.log('⚔️ Initializing combat...');
-      
-      // In initializeCombat, robust fallback for enemies
-      let extractedEnemies = [];
-      if (Array.isArray(storyData.storyMetadata?.enemies) && storyData.storyMetadata.enemies.length > 0) {
-        extractedEnemies = [...storyData.storyMetadata.enemies];
-      } else {
-        // Fallback enemy details
-        extractedEnemies = [
-          {
-            id: 'enemy_0',
-            name: 'Gnoll Pack',
-            hp: 20,
-            maxHp: 20,
-            ac: 12,
-            level: 1,
-            class: 'enemy',
-            race: 'unknown',
-            initiative: Math.floor(Math.random() * 20) + 1,
-            strength: 12,
-            dexterity: 10,
-            constitution: 12,
-            intelligence: 8,
-            wisdom: 8,
-            charisma: 6
-          },
-          {
-            id: 'enemy_1',
-            name: 'Gnoll Pack-Leader',
-            hp: 25,
-            maxHp: 25,
-            ac: 14,
-            level: 2,
-            class: 'enemy',
-            race: 'unknown',
-            initiative: Math.floor(Math.random() * 20) + 1,
-            strength: 14,
-            dexterity: 12,
-            constitution: 14,
-            intelligence: 10,
-            wisdom: 10,
-            charisma: 8
-          }
-        ];
-        console.log('⚔️ Using fallback enemy details:', extractedEnemies);
-      }
-      setEnemies(extractedEnemies);
-      
-      // Add combat start entry to battle log
-      addBattleLogEntry({
-        type: 'combat_start',
-        message: `Combat begins! ${extractedEnemies.length} enemies appear.`,
-        enemies: extractedEnemies.map(e => e.name)
-      });
-      
-      // Prepare party characters with proper stats
-      const preparedPartyCharacters = partyCharacters.map(character => {
-        // Calculate HP if not present
-        let hp = character.hp;
-        let maxHp = character.maxHp;
-        
-        if (!hp || !maxHp) {
-          const hitDieSizes = {
-            'Barbarian': 12, 'Fighter': 10, 'Paladin': 10, 'Ranger': 10,
-            'Cleric': 8, 'Druid': 8, 'Monk': 8, 'Rogue': 8, 'Bard': 8,
-            'Sorcerer': 6, 'Warlock': 8, 'Wizard': 6
-          };
-          
-          const hitDie = hitDieSizes[character.class] || 8;
-          const constitution = character.assignedScores?.constitution || 10;
-          const constitutionMod = Math.floor((constitution - 10) / 2);
-          const calculatedHp = Math.max(1, (hitDie + constitutionMod) * (character.level || 1));
-          
-          hp = calculatedHp;
-          maxHp = calculatedHp;
-        }
-        
-        // Calculate AC if not present
-        let ac = character.ac;
-        if (!ac) {
-          const baseAC = 10;
-          const dexterity = character.assignedScores?.dexterity || 10;
-          const dexterityMod = Math.floor((dexterity - 10) / 2);
-          const classACBonuses = {
-            'Barbarian': 3, 'Monk': 2, 'Fighter': 4, 'Paladin': 4, 'Cleric': 4,
-            'Ranger': 3, 'Rogue': 2, 'Bard': 2, 'Druid': 2, 'Sorcerer': 0,
-            'Warlock': 0, 'Wizard': 0
-          };
-          const classBonus = classACBonuses[character.class] || 0;
-          ac = Math.max(10, baseAC + dexterityMod + classBonus);
-        }
-        
-        // Map assignedScores to direct attributes for combat system
-        const mappedCharacter = {
-          ...character,
-          hp: hp,
-          maxHp: maxHp,
-          ac: ac,
-          initiative: Math.floor(Math.random() * 20) + 1,
-          // Map assignedScores to direct attributes
-          strength: character.assignedScores?.strength || 10,
-          dexterity: character.assignedScores?.dexterity || 10,
-          constitution: character.assignedScores?.constitution || 10,
-          intelligence: character.assignedScores?.intelligence || 10,
-          wisdom: character.assignedScores?.wisdom || 10,
-          charisma: character.assignedScores?.charisma || 10,
-          // Add combat-specific properties
-          statusEffects: [],
-          cooldowns: {},
-          lastAction: null,
-          turnCount: 0
-        };
-        
-        console.log('⚔️ Prepared character for combat:', {
-          name: mappedCharacter.name,
-          class: mappedCharacter.class,
-          strength: mappedCharacter.strength,
-          dexterity: mappedCharacter.dexterity,
-          constitution: mappedCharacter.constitution,
-          hp: mappedCharacter.hp,
-          maxHp: mappedCharacter.maxHp,
-          ac: mappedCharacter.ac
-        });
-        
-        return mappedCharacter;
-      });
-      
-      console.log('⚔️ Prepared party characters:', preparedPartyCharacters);
-      
-      // Initialize combat session
-      const session = combatService.initializeCombat(
-        preparedPartyCharacters,
-        extractedEnemies,
-        storyData.currentContent || 'Combat encounter'
-      );
-      
-      console.log('⚔️ Combat initialized with turn order:', session.combatants.map((c, i) => `${i}: ${c.name} (initiative: ${c.initiative})`));
-      
-      // Store combat session in database for real-time synchronization
-      const dbCombatSession = await createCombatSession(partyId, {
-        storyContext: session.storyContext,
-        partyMembers: session.combatants.filter(c => !c.id.startsWith('enemy_')),
-        enemies: session.combatants.filter(c => c.id.startsWith('enemy_')),
-        initiative: session.combatants.map(c => ({ id: c.id, name: c.name, initiative: c.initiative })),
-        currentTurn: session.currentTurn,
-        round: session.round,
-        combatState: session.combatState,
-        environmentalFeatures: session.environmentalFeatures,
-        teamUpOpportunities: session.teamUpOpportunities,
-        narrativeElements: session.narrativeElements
-      });
-      
-      console.log('⚔️ Combat session stored in database:', dbCombatSession);
-      
-      setCombatSession(session);
-      setCombatSessionId(dbCombatSession.id);
-      setCombatState('active');
-      setCurrentCombatant(session.combatants[0]);
-      
-      console.log('⚔️ Combat initialized:', session);
-    } catch (error) {
-      console.error('❌ Error initializing combat:', error);
-    }
-  }, [partyCharacters, combatService, addBattleLogEntry, partyId]);
+
 
   // Execute combat action
   const executeCombatAction = useCallback(async (actionType, targetId) => {
@@ -2734,101 +2475,27 @@ What would you like to do?`;
                 <h4 className="text-slate-300 font-semibold mb-2">⚔️ Manual Combat Controls</h4>
                 <div className="flex space-x-2">
                   <button
-                    onClick={() => {
+                    onClick={async () => {
                       console.log('🎮 DM manually triggering combat...');
                       setHasNavigatedToCombat(true);
                       setCombatLoading(true);
                       
-                      // Deep clean and validate party members data for manual trigger
-                      console.log('🔍 Debugging party members for manual combat:', partyMembers);
-                      console.log('🔍 Debugging party characters for manual combat:', partyCharacters);
-                      
-                      // Use partyCharacters (actual character objects) instead of partyMembers (user IDs)
-                      const charactersToUse = partyCharacters.length > 0 ? partyCharacters : partyMembers;
-                      
-                      const validatedPartyMembers = charactersToUse.map((member, index) => {
-                        console.log(`🔍 Validating member ${index} for manual combat:`, member);
+                      try {
+                        const combatSession = await combatService.createCombatSession(
+                          partyId,
+                          partyCharacters.length > 0 ? partyCharacters : partyMembers,
+                          [], // No enemies for manual combat
+                          story?.currentContent || 'Manual combat encounter'
+                        );
                         
-                        // If member is a string (user ID), create a basic character object
-                        if (typeof member === 'string') {
-                          console.log(`⚠️ Member ${index} is a user ID string, creating basic character object for manual combat`);
-                          const basicCharacter = {
-                            id: `member_${index}`,
-                            name: `Player ${index + 1}`,
-                            userId: member,
-                            race: 'Unknown',
-                            class: 'Unknown',
-                            level: 1,
-                            initiative: Math.floor(Math.random() * 20) + 1,
-                            hp: 10,
-                            maxHp: 10,
-                            ac: 10
-                          };
-                          console.log(`✅ Created basic character for user ID in manual combat:`, basicCharacter);
-                          return basicCharacter;
-                        }
-                        
-                        // If member is an object, validate and clean it
-                        const cleanMember = {
-                          id: member.id || `member_${index}`,
-                          name: member.name || `Unknown Member ${index}`,
-                          userId: member.userId || null,
-                          race: member.race || 'Unknown',
-                          class: member.class || 'Unknown',
-                          level: member.level || 1,
-                          // Combat stats with fallbacks
-                          initiative: member.initiative || Math.floor(Math.random() * 20) + 1,
-                          hp: member.hp || member.maxHp || 10,
-                          maxHp: member.maxHp || member.hp || 10,
-                          ac: member.ac || 10,
-                          // Remove any undefined values
-                          ...Object.fromEntries(
-                            Object.entries(member).filter(([key, value]) => 
-                              value !== undefined && 
-                              value !== null && 
-                              key !== 'id' && 
-                              key !== 'name' && 
-                              key !== 'userId' && 
-                              key !== 'race' && 
-                              key !== 'class' && 
-                              key !== 'level' && 
-                              key !== 'initiative' && 
-                              key !== 'hp' && 
-                              key !== 'maxHp' && 
-                              key !== 'ac'
-                            )
-                          )
-                        };
-                        
-                        console.log(`✅ Cleaned member ${index} for manual combat:`, cleanMember);
-                        return cleanMember;
-                      });
-                      
-                      console.log('✅ Final validated party members for manual combat:', validatedPartyMembers);
-                      
-                      const basicCombatSession = {
-                        partyId: partyId,
-                        partyMembers: validatedPartyMembers,
-                        enemies: [],
-                        storyContext: story?.currentContent || 'Manual combat encounter',
-                        combatState: 'initialized',
-                        currentTurn: 0,
-                        round: 1,
-                        environmentalFeatures: [],
-                        teamUpOpportunities: [],
-                        narrativeElements: []
-                      };
-                      
-                      console.log('✅ Final combat session object for manual combat:', basicCombatSession);
-                      
-                      createCombatSession(partyId, basicCombatSession).then(() => {
-                        console.log('⚔️ Manual combat session created, navigating...');
-                        navigate(`/combat/${partyId}`);
-                      }).catch(error => {
+                        setCombatLoading(false);
+                        setHasNavigatedToCombat(true);
+                        navigate(`/combat/${combatSession.id}`);
+                      } catch (error) {
                         console.error('❌ Failed to create manual combat session:', error);
                         setCombatLoading(false);
                         setHasNavigatedToCombat(false);
-                      });
+                      }
                     }}
                     disabled={combatLoading || hasNavigatedToCombat}
                     className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"

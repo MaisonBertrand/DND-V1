@@ -1,10 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { onAuthChange } from '../firebase/auth';
 import { 
   getCombatSession, 
   updateCombatSession, 
   updateCombatSessionWithNarrative,
+  addToCombatBattleLog,
   subscribeToCombatSession,
   updateCampaignStory,
   getPartyCharacters,
@@ -41,6 +42,9 @@ export default function Combat() {
   const [battleLog, setBattleLog] = useState([]);
   const [combatReady, setCombatReady] = useState(false);
   
+  // Ref to track if subscription is already set up
+  const subscriptionRef = useRef(null);
+  
   // Check if this is a test combat session
   const isTestCombat = location.state?.isTestCombat;
   const testData = location.state;
@@ -66,48 +70,68 @@ export default function Combat() {
 
   useEffect(() => {
     if (sessionId && !isTestCombat) {
+      // Clean up existing subscription if it exists
+      if (subscriptionRef.current) {
+        console.log('🔗 Cleaning up existing subscription');
+        subscriptionRef.current();
+        subscriptionRef.current = null;
+      }
+      
+      console.log('🔗 Setting up combat session subscription for:', sessionId);
       const unsubscribe = subscribeToCombatSession(sessionId, (session) => {
+        console.log('🔄 Combat session update received:', {
+          currentTurn: session?.currentTurn,
+          lastProcessedTurn,
+          combatState: session?.combatState,
+          combatants: session?.combatants?.map(c => ({ name: c.name, hp: c.hp, isEnemy: c.id.startsWith('enemy_') }))
+        });
+        
         setCombatSession(session);
         setLoading(false);
         
         if (session) {
+          // Load battle log from database
+          if (session.battleLog && session.battleLog.length > 0) {
+            setBattleLog(session.battleLog);
+          }
+          
           updateAvailableActions(session);
           setEnvironmentalFeatures(session.environmentalFeatures || []);
           setTeamUpOpportunities(session.teamUpOpportunities || []);
           
           checkPlayerDeath();
-          
-          const currentCombatant = session.combatants?.[session.currentTurn];
-          if (currentCombatant && 
-              currentCombatant.id.startsWith('enemy_') && 
-              session.combatState === 'active' &&
-              session.currentTurn !== lastProcessedTurn &&
-              !processingTurn &&
-              !isEnemyTurn) {
-            
-            setTimeout(() => {
-              processEnemyTurn();
-            }, 1000);
-          }
         }
       });
+      
+      subscriptionRef.current = unsubscribe;
+      
       return () => {
-        unsubscribe();
+        console.log('🔗 Component unmounting, cleaning up subscription');
+        if (subscriptionRef.current) {
+          subscriptionRef.current();
+          subscriptionRef.current = null;
+        }
       };
     }
-  }, [sessionId, lastProcessedTurn, processingTurn, isEnemyTurn, isTestCombat]);
+  }, [sessionId, isTestCombat]);
 
+  // Handle enemy turn processing for both test and co-op modes
   useEffect(() => {
-    if (isTestCombat && combatSession && combatSession.combatState === 'active') {
+    if (combatSession && combatSession.combatState === 'active') {
       const currentCombatant = getCurrentCombatant();
-      if (currentCombatant && currentCombatant.id.startsWith('enemy_')) {
+      if (currentCombatant && 
+          currentCombatant.id.startsWith('enemy_') && 
+          combatSession.currentTurn !== lastProcessedTurn &&
+          !processingTurn &&
+          !isEnemyTurn) {
+        
         const timer = setTimeout(() => {
           processEnemyTurn();
-        }, 2000);
+        }, isTestCombat ? 2000 : 1000);
         return () => clearTimeout(timer);
       }
     }
-  }, [combatSession?.currentTurn, isTestCombat]);
+  }, [combatSession?.currentTurn, lastProcessedTurn, processingTurn, isEnemyTurn, isTestCombat]);
 
   useEffect(() => {
     if (combatSession && enemyTurnComplete && areAllPartyMembersReady()) {
@@ -127,7 +151,7 @@ export default function Combat() {
 
   // Auto-check for combat end conditions
   useEffect(() => {
-    if (combatSession && combatSession.combatState === 'active') {
+    if (combatSession && combatSession.combatState === 'active' && combatSession.combatants) {
       const partyMembers = combatSession.combatants.filter(c => !c.id.startsWith('enemy_'));
       const enemies = combatSession.combatants.filter(c => c.id.startsWith('enemy_'));
       
@@ -283,36 +307,36 @@ export default function Combat() {
         return;
       }
       
+      // Always ensure combatants array is properly constructed
+      let combatants = session.combatants || [];
+      
+      if (combatants.length === 0) {
+        // Combine party members and enemies into combatants
+        const partyCombatants = (session.partyMembers || []).map(member => ({
+          ...member,
+          isEnemy: false,
+          userId: member.userId,
+          cooldowns: member.cooldowns || {},
+          statusEffects: member.statusEffects || [],
+          hp: member.hp ?? member.maxHp ?? 10,
+          maxHp: member.maxHp ?? member.hp ?? 10,
+        }));
+
+        const enemyCombatants = (session.enemies || []).map(enemy => ({
+          ...enemy,
+          isEnemy: true,
+          userId: null,
+          cooldowns: enemy.cooldowns || {},
+          statusEffects: enemy.statusEffects || [],
+          hp: enemy.hp ?? enemy.maxHp ?? 10,
+          maxHp: enemy.maxHp ?? enemy.hp ?? 10,
+        }));
+
+        combatants = [...partyCombatants, ...enemyCombatants];
+      }
+      
       // If combat session is in 'initialized' state, automatically initialize it properly
       if (session.combatState === 'initialized') {
-        // Create combatants array if it doesn't exist
-        let combatants = session.combatants || [];
-        
-        if (combatants.length === 0) {
-          // Combine party members and enemies into combatants
-          const partyCombatants = (session.partyMembers || []).map(member => ({
-            ...member,
-            isEnemy: false,
-            userId: member.userId,
-            cooldowns: member.cooldowns || {},
-            statusEffects: member.statusEffects || [],
-            hp: member.hp ?? member.maxHp ?? 10,
-            maxHp: member.maxHp ?? member.hp ?? 10,
-          }));
-
-          const enemyCombatants = (session.enemies || []).map(enemy => ({
-            ...enemy,
-            isEnemy: true,
-            userId: null,
-            cooldowns: enemy.cooldowns || {},
-            statusEffects: enemy.statusEffects || [],
-            hp: enemy.hp ?? enemy.maxHp ?? 10,
-            maxHp: enemy.maxHp ?? enemy.hp ?? 10,
-          }));
-
-          combatants = [...partyCombatants, ...enemyCombatants];
-        }
-        
         // Update the session to be active
         const activeSession = {
           ...session,
@@ -331,11 +355,15 @@ export default function Combat() {
         setEnvironmentalFeatures(activeSession.environmentalFeatures || []);
         setTeamUpOpportunities(activeSession.teamUpOpportunities || []);
       } else {
-        // Session is already in a proper state, just set it
-        setCombatSession(session);
-        updateAvailableActions(session);
-        setEnvironmentalFeatures(session.environmentalFeatures || []);
-        setTeamUpOpportunities(session.teamUpOpportunities || []);
+        // Session is already in a proper state, ensure combatants are set
+        const sessionWithCombatants = {
+          ...session,
+          combatants: combatants
+        };
+        setCombatSession(sessionWithCombatants);
+        updateAvailableActions(sessionWithCombatants);
+        setEnvironmentalFeatures(sessionWithCombatants.environmentalFeatures || []);
+        setTeamUpOpportunities(sessionWithCombatants.teamUpOpportunities || []);
       }
     } catch (error) {
       console.error('Error loading combat data:', error);
@@ -400,7 +428,7 @@ export default function Combat() {
     setAvailableActions(actions);
   };
 
-  const addToBattleLog = (entry) => {
+  const addToBattleLog = async (entry) => {
     const timestamp = new Date().toLocaleTimeString();
     const logEntry = {
       id: `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
@@ -409,7 +437,18 @@ export default function Combat() {
       turn: combatSession?.currentTurn || 0,
       ...entry
     };
+    
+    // Update local battle log
     setBattleLog(prev => [...prev, logEntry]);
+    
+    // Save to database for co-op mode
+    if (!isTestCombat && sessionId) {
+      try {
+        await addToCombatBattleLog(sessionId, logEntry);
+      } catch (error) {
+        console.error('Failed to save battle log to database:', error);
+      }
+    }
   };
 
   const startCombat = async () => {
@@ -434,7 +473,7 @@ export default function Combat() {
         await updateCombatSession(sessionId, updatedSession);
       }
       
-      addToBattleLog({
+      await addToBattleLog({
         type: 'combat_start',
         description: 'Combat is ready to begin!'
       });
@@ -464,7 +503,7 @@ export default function Combat() {
         await updateCombatSession(sessionId, updatedSession);
       }
       
-      addToBattleLog({
+      await addToBattleLog({
         type: 'combat_begin',
         description: 'Fight!'
       });
@@ -479,40 +518,19 @@ export default function Combat() {
   };
 
   const executeAction = async (actionType, targetId, additionalData = {}) => {
+    console.log('🎯 executeAction called:', {
+      actionType,
+      targetId,
+      isCurrentUserTurn: isCurrentUserTurn(),
+      currentTurn: combatSession?.currentTurn,
+      currentCombatant: getCurrentCombatant()?.name
+    });
+    
     if (!combatSession || !isCurrentUserTurn()) return;
     
     try {
       setProcessingTurn(true);
       
-      // Clear battle log for new combat
-      setBattleLog([]);
-      
-      const updatedSession = {
-        ...combatSession,
-        combatState: 'ready',
-        currentTurn: 0,
-        round: 1
-      };
-
-      if (isTestCombat) {
-        setCombatSession(updatedSession);
-        updateAvailableActions(updatedSession);
-      } else {
-        await updateCombatSession(sessionId, updatedSession);
-      }
-      
-      // Add combat start entry to battle log
-      addToBattleLog({
-        type: 'combat_start',
-        description: 'Combat begins!'
-      });
-      
-      // Add combat begin entry to battle log
-      addToBattleLog({
-        type: 'combat_begin',
-        description: 'The battle is joined!'
-      });
-
       // Execute the action
       const currentCombatant = getCurrentCombatant();
       const target = combatSession.combatants.find(c => c.id === targetId);
@@ -525,7 +543,7 @@ export default function Combat() {
         additionalData
       );
 
-      // Update combat session with results
+      // Update combat session with results from the combat service
       const resultSession = {
         ...combatSession,
         currentTurn: result.updatedSession.currentTurn,
@@ -533,28 +551,43 @@ export default function Combat() {
         combatants: result.updatedSession.combatants
       };
 
+      console.log('⚔️ Action executed, updating session:', {
+        oldTurn: combatSession.currentTurn,
+        newTurn: result.updatedSession.currentTurn,
+        isTestCombat,
+        sessionId
+      });
+      
       if (isTestCombat) {
         setCombatSession(resultSession);
       } else {
-        await updateCombatSession(sessionId, resultSession);
+        // Only update the specific fields that changed
+        const updates = {
+          currentTurn: result.updatedSession.currentTurn,
+          round: result.updatedSession.round,
+          combatants: result.updatedSession.combatants
+        };
+        console.log('💾 Sending database update:', updates);
+        await updateCombatSession(sessionId, updates);
+        console.log('💾 Database update completed');
       }
 
       // Add to battle log
-      addToBattleLog({
+      await addToBattleLog({
         type: result.success ? 'action' : 'action_failed',
         description: result.narrative
       });
 
       // Add damage/healing to battle log if applicable
       if (result.damage > 0 && target) {
-        addToBattleLog({
+        await addToBattleLog({
           type: 'damage',
           description: `${target.name} takes ${result.damage} damage!`
         });
       }
 
       if (result.healing > 0 && target) {
-        addToBattleLog({
+        await addToBattleLog({
           type: 'healing',
           description: `${target.name} is healed for ${result.healing} HP!`
         });
@@ -587,10 +620,8 @@ export default function Combat() {
         setEnemyTurnComplete(true);
         setEnemyTurnMessage(result.narrative);
         setEnemyTurnNarrative(result.description);
-      } else {
-        // Player turn - advance to next turn
-        advanceTurn();
       }
+      // Note: Don't call advanceTurn() here because the combat service already advanced the turn
 
       // Show damage animation
       if (result.damage > 0 && target) {
@@ -629,14 +660,22 @@ export default function Combat() {
   };
 
   const processEnemyTurn = async () => {
+    console.log('🎯 processEnemyTurn called');
     if (!combatSession || combatSession.combatState !== 'active') {
+      console.log('🎯 Combat not active, returning');
       return;
     }
     
     const currentCombatant = getCurrentCombatant();
+    console.log('🎯 Current combatant:', currentCombatant);
     if (!currentCombatant || !currentCombatant.id.startsWith('enemy_')) {
+      console.log('🎯 Not enemy turn, returning');
       return;
     }
+    
+    // Update lastProcessedTurn to prevent duplicate processing
+    setLastProcessedTurn(combatSession.currentTurn);
+    console.log('🎯 Processing enemy turn for:', currentCombatant.name);
     
     try {
     setProcessingTurn(true);
@@ -648,8 +687,11 @@ export default function Combat() {
         description: `${currentCombatant.name}'s turn begins`
       });
 
+      console.log('🎯 Choosing enemy action for:', currentCombatant.name);
       const selectedAction = combatService.chooseEnemyAction(currentCombatant, combatSession);
+      console.log('🎯 Selected action:', selectedAction);
       if (!selectedAction) {
+        console.log('🎯 No action selected, advancing turn');
         setTimeout(() => {
           advanceTurn();
         }, 1000);
@@ -682,6 +724,12 @@ export default function Combat() {
         description: `${currentCombatant.name} uses ${actionType}${target ? ` on ${target.name}` : ''}`
       });
 
+      console.log('🎯 Executing enemy action:', {
+        combatant: currentCombatant.name,
+        action: actionType,
+        target: targetId,
+        additionalData: selectedAction
+      });
       const result = await combatService.executeAction(
         combatSession,
         currentCombatant.id,
@@ -689,15 +737,28 @@ export default function Combat() {
         targetId,
         selectedAction
       );
+      console.log('🎯 Action result:', result);
 
       if (result.success) {
+        // Update combat session with results from the combat service
         const updatedSession = {
           ...combatSession,
-          ...(result.updatedSession || {}),
-          currentTurn: (result.updatedSession?.currentTurn !== undefined) 
-            ? result.updatedSession.currentTurn 
-            : combatSession.currentTurn
+          currentTurn: result.updatedSession.currentTurn,
+          round: result.updatedSession.round,
+          combatants: result.updatedSession.combatants
         };
+
+        if (isTestCombat) {
+          setCombatSession(updatedSession);
+        } else {
+          // Only update the specific fields that changed
+          const updates = {
+            currentTurn: result.updatedSession.currentTurn,
+            round: result.updatedSession.round,
+            combatants: result.updatedSession.combatants
+          };
+          await updateCombatSession(sessionId, updates);
+        }
 
         if (result.damage) {
           addToBattleLog({
@@ -739,8 +800,6 @@ export default function Combat() {
             description: `${target?.name || 'self'} has been defeated!`
           });
         }
-
-        setCombatSession(updatedSession);
 
         if (result.damage && target) {
           setDamageAnimation({
@@ -806,9 +865,7 @@ export default function Combat() {
           return;
         }
 
-        setTimeout(() => {
-          advanceTurn();
-        }, 1000);
+        // Note: Don't call advanceTurn() here because the combat service already advanced the turn
 
       } else {
         console.error('Enemy action execution failed:', result.error);
@@ -819,6 +876,7 @@ export default function Combat() {
           description: `${currentCombatant.name}'s ${actionType} failed`
         });
         
+        // Only advance turn if the action failed and didn't already advance
         setTimeout(() => {
           advanceTurn();
         }, 1000);
@@ -913,24 +971,52 @@ export default function Combat() {
       return;
     }
 
-    // Update session with new turn
-    const updatedSession = {
-      ...combatSession,
+    // Prepare updates - only send the specific fields that need to be updated
+    const updates = {
       currentTurn: nextTurn
     };
     
     // Increment round if we've completed a full cycle
     if (nextTurn === 0) {
-      updatedSession.round = combatSession.round + 1;
+      updates.round = combatSession.round + 1;
     }
     
+    console.log('🔄 Advancing turn:', {
+      currentTurn: combatSession.currentTurn,
+      nextTurn,
+      updates,
+      isTestCombat,
+      sessionId
+    });
+    
     if (isTestCombat) {
-      setCombatSession(updatedSession);
+      setCombatSession(prevSession => ({
+        ...prevSession,
+        ...updates
+      }));
     } else {
-      await updateCombatSession(sessionId, updatedSession);
+      console.log('💾 Sending advanceTurn database update:', updates);
+      await updateCombatSession(sessionId, updates);
+      console.log('💾 AdvanceTurn database update completed');
+    }
+
+    // Update lastProcessedTurn to track the new turn
+    setLastProcessedTurn(nextTurn);
+
+    // Add turn advancement to battle log
+    const nextCombatant = combatSession.combatants[nextTurn];
+    if (nextCombatant) {
+      await addToBattleLog({
+        type: 'turn_advance',
+        description: `🎲 ${nextCombatant.name}'s turn begins`
+      });
     }
 
     // Update available actions for the new current combatant
+    const updatedSession = {
+      ...combatSession,
+      ...updates
+    };
     updateAvailableActions(updatedSession);
   };
 
@@ -976,6 +1062,7 @@ export default function Combat() {
       const updatedCombatants = combatSession.combatants.map(combatant => 
         combatant.id === combatantId ? { ...combatant, hp: clampedHp } : combatant
       );
+      
       if (isTestCombat) {
         setCombatSession(prevSession => ({
           ...prevSession,
@@ -988,12 +1075,6 @@ export default function Combat() {
           combatants: updatedCombatants
         });
       }
-      
-      setCombatSession(prevSession => ({
-        ...prevSession,
-        enemies: updatedEnemies,
-        combatants: updatedCombatants
-      }));
     } else {
       const updatedPartyMembers = combatSession.partyMembers.map(member => 
         member.id === combatantId ? { ...member, hp: clampedHp } : member
@@ -1001,6 +1082,7 @@ export default function Combat() {
       const updatedCombatants = combatSession.combatants.map(combatant => 
         combatant.id === combatantId ? { ...combatant, hp: clampedHp } : combatant
       );
+      
       if (isTestCombat) {
         setCombatSession(prevSession => ({
           ...prevSession,
@@ -1013,12 +1095,6 @@ export default function Combat() {
           combatants: updatedCombatants
         });
       }
-      
-      setCombatSession(prevSession => ({
-        ...prevSession,
-        partyMembers: updatedPartyMembers,
-        combatants: updatedCombatants
-      }));
     }
   };
 
@@ -1039,14 +1115,28 @@ export default function Combat() {
 
   const isCurrentUserTurn = () => {
     const currentCombatant = getCurrentCombatant();
-    if (!currentCombatant) return false;
+    if (!currentCombatant) {
+      console.log('❌ No current combatant found');
+      return false;
+    }
     
     if (isTestCombat) {
       const result = !currentCombatant.isEnemy;
+      console.log('🎲 Test mode turn check:', { 
+        currentCombatant: currentCombatant.name, 
+        isEnemy: currentCombatant.isEnemy, 
+        isCurrentUserTurn: result 
+      });
       return result;
     }
     
     const result = currentCombatant.userId === user?.uid;
+    console.log('🎲 Co-op mode turn check:', { 
+      currentCombatant: currentCombatant.name, 
+      currentCombatantUserId: currentCombatant.userId, 
+      currentUserId: user?.uid, 
+      isCurrentUserTurn: result 
+    });
     return result;
   };
 
@@ -1288,30 +1378,80 @@ export default function Combat() {
   return (
     <div className="min-h-screen bg-gray-900 text-gray-100 p-4">
       <div className="fantasy-container py-4">
-        <div className="flex justify-between items-center mb-6">
-          <h1 className="fantasy-title mb-0">⚔️ Combat Arena</h1>
+        {/* Header with turn information */}
+        <div className="mb-6">
+          <div className="flex justify-between items-center mb-4">
+            <h1 className="fantasy-title mb-0">⚔️ Combat Arena</h1>
+            {currentCombatant && (
+              <div className="text-right">
+                <div className="text-2xl font-bold text-amber-400">
+                  🎲 {currentCombatant.name}'s Turn
+                </div>
+                <div className="text-sm text-gray-400">
+                  Round {combatSession?.round || 1} • Turn {(combatSession?.currentTurn || 0) + 1}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {combatSession.storyContext && (
+            <div className="fantasy-card mb-4 bg-gray-800/50 border-gray-600">
+              <h3 className="font-bold text-gray-100 mb-2">📖 Story Context</h3>
+              <p className="text-gray-300 italic">{combatSession.storyContext}</p>
+            </div>
+          )}
         </div>
 
-        {combatSession.storyContext && (
-          <div className="fantasy-card mb-6">
-            <h3 className="font-bold text-gray-100 mb-2">Story Context</h3>
-            <p className="text-gray-300 italic text-sm">{combatSession.storyContext}</p>
-          </div>
-        )}
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+          {/* Left Sidebar - Compact */}
+          <div className="lg:col-span-1 space-y-4">
+            {/* Turn Order - Compact */}
+            {safeCombatants.length > 0 && (
+              <div className="fantasy-card">
+                <h3 className="font-bold text-gray-100 mb-3 text-sm">🎯 Turn Order</h3>
+                <div className="space-y-1">
+                  {safeCombatants.map((combatant, index) => (
+                    <div
+                      key={combatant.id}
+                      className={`p-2 rounded border transition-colors text-xs ${
+                        combatant.id === safeCombatants[combatSession.currentTurn]?.id
+                          ? 'border-amber-500 bg-amber-900/20'
+                          : combatant.hp <= 0
+                          ? 'border-red-600 bg-red-900/20 opacity-50'
+                          : 'border-gray-600 bg-gray-700'
+                      }`}
+                    >
+                      <div className="flex justify-between items-center">
+                        <div className="flex-1 min-w-0">
+                          <div className="font-medium text-gray-100 truncate">
+                            {combatant.name}
+                            {combatant.id === safeCombatants[combatSession.currentTurn]?.id && (
+                              <span className="ml-1 text-amber-400">🎲</span>
+                            )}
+                          </div>
+                          <div className="text-gray-400">
+                            {combatant.hp}/{combatant.maxHp} HP
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
-        <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">
-          <div className="xl:col-span-1 space-y-6">
-            <div className="fantasy-card h-96">
-              <h3 className="text-lg font-semibold mb-4 text-yellow-400">Battle Log</h3>
-              <div className="space-y-2 h-80 overflow-y-auto">
+            {/* Battle Log - Compact */}
+            <div className="fantasy-card h-64">
+              <h3 className="text-sm font-semibold mb-3 text-yellow-400">📜 Battle Log</h3>
+              <div className="space-y-1 h-52 overflow-y-auto text-xs">
                 {battleLog.length === 0 ? (
-                  <p className="text-gray-400 text-sm">No actions recorded yet...</p>
+                  <p className="text-gray-400">No actions recorded yet...</p>
                 ) : (
-                  battleLog.map((entry) => (
-                    <div key={entry.id} className="text-sm border-l-2 border-gray-600 pl-3 py-1">
+                  battleLog.slice(-10).map((entry) => (
+                    <div key={entry.id} className="border-l-2 border-gray-600 pl-2 py-1">
                       <div className="flex justify-between items-start mb-1">
-                        <span className="text-gray-400 text-xs">{entry.timestamp}</span>
-                        <span className="text-blue-400 text-xs">R{entry.round} T{entry.turn}</span>
+                        <span className="text-gray-400">{entry.timestamp}</span>
+                        <span className="text-blue-400">R{entry.round}</span>
                       </div>
                       <div className={`${
                         entry.type === 'damage' ? 'text-red-400' :
@@ -1329,132 +1469,43 @@ export default function Combat() {
                 )}
               </div>
             </div>
-
-            <div className="fantasy-card">
-              <h3 className="font-bold text-gray-100 mb-3">Combat Status</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <h4 className="font-semibold text-blue-300 mb-2">Party Members</h4>
-                  <div className="space-y-2">
-                    {safeCombatants.filter(c => !c.id.startsWith('enemy_')).map(combatant => (
-                      <div key={combatant.id} className={`p-2 rounded border ${
-                        combatant.hp <= 0 ? 'bg-red-900/20 border-red-600' :
-                        combatant.hp < combatant.maxHp * 0.5 ? 'bg-yellow-900/20 border-yellow-600' :
-                        'bg-blue-900/20 border-blue-600'
-                      } ${currentCombatant?.id === combatant.id ? 'ring-2 ring-amber-400' : ''}`}>
-                        <div className="flex justify-between items-center">
-                          <span className="font-medium text-gray-100">
-                            {combatant.name}
-                            {currentCombatant?.id === combatant.id && (
-                              <span className="ml-2 text-amber-400">🎲</span>
-                            )}
-                          </span>
-                          <span className={`text-sm ${
-                            combatant.hp <= 0 ? 'text-red-400' :
-                            combatant.hp < combatant.maxHp * 0.5 ? 'text-yellow-400' :
-                            'text-green-400'
-                          }`}>
-                            {combatant.hp}/{combatant.maxHp} HP
-                          </span>
-                        </div>
-                        {combatant.hp <= 0 && (
-                          <div className="text-xs text-red-400 mt-1">💀 Defeated</div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div>
-                  <h4 className="font-semibold text-red-300 mb-2">Enemies</h4>
-                  <div className="space-y-2">
-                    {safeCombatants.filter(c => c.id.startsWith('enemy_')).map(combatant => (
-                      <div key={combatant.id} className={`p-2 rounded border ${
-                        combatant.hp <= 0 ? 'bg-red-900/20 border-red-600' :
-                        combatant.hp < combatant.maxHp * 0.5 ? 'bg-yellow-900/20 border-yellow-600' :
-                        'bg-red-900/20 border-red-600'
-                      } ${currentCombatant?.id === combatant.id ? 'ring-2 ring-amber-400' : ''}`}>
-                        <div className="flex justify-between items-center">
-                          <span className="font-medium text-gray-100">
-                            {combatant.name}
-                            {currentCombatant?.id === combatant.id && (
-                              <span className="ml-2 text-amber-400">🎲</span>
-                            )}
-                          </span>
-                          <span className={`text-sm ${
-                            combatant.hp <= 0 ? 'text-red-400' :
-                            combatant.hp < combatant.maxHp * 0.5 ? 'text-yellow-400' :
-                            'text-red-400'
-                          }`}>
-                            {combatant.hp}/{combatant.maxHp} HP
-                          </span>
-                        </div>
-                        {combatant.hp <= 0 && (
-                          <div className="text-xs text-red-400 mt-1">💀 Defeated</div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {environmentalFeatures.length > 0 && (
-              <div className="fantasy-card">
-                <h3 className="font-bold text-blue-300 mb-2">🌍 Environmental Features</h3>
-                <div className="flex flex-wrap gap-2">
-                  {environmentalFeatures.map((feature, index) => (
-                    <span key={index} className="px-3 py-1 bg-blue-900 text-blue-200 rounded-full text-sm">
-                      {feature}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {teamUpOpportunities.length > 0 && (
-              <div className="fantasy-card">
-                <h3 className="font-bold text-purple-300 mb-2">🤝 Team Up Opportunities</h3>
-                <div className="space-y-2">
-                  {teamUpOpportunities.map((opportunity, index) => (
-                    <div key={index} className="text-purple-200 text-sm">
-                      <strong>{opportunity.classes.join(' + ')}:</strong> {opportunity.description}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
 
-          <div className="xl:col-span-2 space-y-6">
+          {/* Main Content Area - Larger and more prominent */}
+          <div className="lg:col-span-3 space-y-6">
             {(() => {
               const shouldShowTurnOptions = currentCombatant && safeCombatants.length > 0;
               return shouldShowTurnOptions;
             })() && (
-              <div className="fantasy-card">
-                <h3 className="font-bold text-gray-100 mb-3">
-                  🎲 {currentCombatant.name}'s Turn
-                </h3>
+              <div className="fantasy-card bg-gray-800/50 border-gray-600">
+                <div className="text-center mb-4">
+                  <h2 className="text-xl font-bold text-amber-400 mb-1">
+                    🎲 {currentCombatant.name}'s Turn
+                  </h2>
+                  <p className="text-gray-300 text-sm">
+                    {isCurrentUserTurn() ? 'Select your action below' : 'Waiting for this player to act'}
+                  </p>
+                </div>
                 
                 {isCurrentUserTurn() ? (
-                  <div className="space-y-4">
+                  <div className="space-y-6">
                     <div>
-                      <h4 className="font-semibold text-gray-200 mb-2">Available Actions:</h4>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <h3 className="text-lg font-bold text-gray-100 mb-3 text-center">⚔️ Available Actions</h3>
+                      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
                         {availableActions.map((action, index) => (
                           <button
                             key={index}
                             onClick={() => setSelectedAction(action)}
-                            className={`p-3 rounded-lg border-2 transition-colors text-left ${
+                            className={`p-3 rounded-lg border-2 transition-all duration-200 text-left hover:scale-105 ${
                               selectedAction?.type === action.type
-                                ? 'border-amber-500 bg-amber-900/20'
-                                : 'border-gray-600 bg-gray-700 hover:border-gray-500'
+                                ? 'border-amber-500 bg-amber-900/30 shadow-lg shadow-amber-500/20'
+                                : 'border-gray-600 bg-gray-700 hover:border-gray-500 hover:bg-gray-600'
                             }`}
                           >
-                            <div className="font-medium text-gray-100">{action.name}</div>
-                            <div className="text-sm text-gray-300">{action.description}</div>
-                            <div className="text-xs text-gray-400 mt-1">
-                              Priority: {action.priority}
+                            <div className="font-bold text-sm text-gray-100 mb-1">{action.name}</div>
+                            <div className="text-xs text-gray-300 mb-1">{action.description}</div>
+                            <div className="text-xs text-gray-400 bg-gray-800 px-1 py-0.5 rounded inline-block">
+                              {action.priority}
                             </div>
                           </button>
                         ))}
@@ -1463,30 +1514,34 @@ export default function Combat() {
 
                     {selectedAction && (
                       <div>
-                        <h4 className="font-semibold text-gray-200 mb-2">Select Target:</h4>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <h3 className="text-lg font-bold text-gray-100 mb-3 text-center">🎯 Select Target</h3>
+                        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
                           {getValidTargetsForAction(selectedAction.type).map(target => (
                             <button
                               key={target.id}
                               onClick={() => setSelectedTarget(target)}
-                              className={`p-3 rounded-lg border-2 transition-colors ${
+                              className={`p-3 rounded-lg border-2 transition-all duration-200 hover:scale-105 ${
                                 selectedTarget?.id === target.id
-                                  ? 'border-red-500 bg-red-900/20'
-                                  : 'border-gray-600 bg-gray-700 hover:border-gray-500'
+                                  ? 'border-red-500 bg-red-900/30 shadow-lg shadow-red-500/20'
+                                  : 'border-gray-600 bg-gray-700 hover:border-gray-500 hover:bg-gray-600'
                               }`}
                             >
-                              <div className="font-medium text-gray-100">{target.name}</div>
-                              <div className="text-sm text-gray-300">
+                              <div className="font-bold text-sm text-gray-100 mb-1">{target.name}</div>
+                              <div className="text-xs text-gray-300 mb-1">
                                 HP: {target.hp}/{target.maxHp} | AC: {target.ac}
                               </div>
-                              <div className="text-xs text-gray-400">
-                                {target.id.startsWith('enemy_') ? 'Enemy' : 'Ally'}
+                              <div className={`text-xs px-1 py-0.5 rounded inline-block ${
+                                target.id.startsWith('enemy_') 
+                                  ? 'bg-red-900 text-red-200' 
+                                  : 'bg-blue-900 text-blue-200'
+                              }`}>
+                                {target.id.startsWith('enemy_') ? '👹 Enemy' : '🛡️ Ally'}
                               </div>
                             </button>
                           ))}
                         </div>
                         {getValidTargetsForAction(selectedAction.type).length === 0 && (
-                          <div className="text-center p-4 bg-gray-700 border border-gray-600 rounded">
+                          <div className="text-center p-4 bg-gray-700 border border-gray-600 rounded-lg">
                             <p className="text-gray-300">No valid targets for this action.</p>
                           </div>
                         )}
@@ -1494,25 +1549,26 @@ export default function Combat() {
                     )}
 
                     {selectedAction && selectedTarget && (
-                      <div className="text-center">
+                      <div className="text-center pt-6">
                         <button
                           onClick={() => executeAction(selectedAction.type, selectedTarget.id)}
                           disabled={processingTurn}
-                          className="fantasy-button bg-amber-600 hover:bg-amber-700"
+                          className="fantasy-button bg-amber-600 hover:bg-amber-700 text-xl font-bold px-8 py-4 shadow-lg hover:scale-105 transition-all duration-200"
                         >
-                          {processingTurn ? 'Executing...' : `Execute ${selectedAction.name}`}
+                          {processingTurn ? '⚡ Executing...' : `⚔️ Execute ${selectedAction.name}`}
                         </button>
                       </div>
                     )}
                   </div>
                 ) : (
-                  <div className="bg-blue-900/20 border border-blue-700 rounded-lg p-4">
-                    <h4 className="font-bold text-blue-300 mb-2">
+                  <div className="bg-blue-900/20 border border-blue-700 rounded-lg p-8 text-center">
+                    <div className="text-6xl mb-4">⏳</div>
+                    <h3 className="text-2xl font-bold text-blue-300 mb-4">
                       Waiting for {currentCombatant.name} to act
-                    </h4>
-                    <p className="text-blue-200">
+                    </h3>
+                    <p className="text-blue-200 text-lg">
                       {currentCombatant.userId === user?.uid 
-                        ? 'It\'s your turn! Please select an action.'
+                        ? 'It\'s your turn! Please select an action above.'
                         : 'Please wait for the current player to make their move.'
                       }
                     </p>
@@ -1669,50 +1725,94 @@ export default function Combat() {
             )}
           </div>
 
-          <div className="xl:col-span-1 space-y-6">
-            {safeCombatants.length > 0 && (
-              <div className="fantasy-card">
-                <h3 className="font-bold text-gray-100 mb-3">🎯 Turn Order</h3>
-                <div className="space-y-2">
-                  {safeCombatants.map((combatant) => (
-                    <div
-                      key={combatant.id}
-                      className={`p-3 rounded-lg border-2 transition-colors ${
-                        combatant.id === safeCombatants[combatSession.currentTurn]?.id
-                          ? 'border-amber-500 bg-amber-900/20'
-                          : combatant.hp <= 0
-                          ? 'border-red-600 bg-red-900/20 opacity-50'
-                          : 'border-gray-600 bg-gray-700'
-                      }`}
-                    >
-                      <div className="flex justify-between items-center">
-                        <div>
-                          <div className="font-medium text-gray-100">
+          {/* Right Sidebar - Combat Status */}
+          <div className="lg:col-span-1 space-y-4">
+            {/* Combat Status - Compact */}
+            <div className="fantasy-card">
+              <h3 className="font-bold text-gray-100 mb-3 text-sm">⚔️ Combat Status</h3>
+              <div className="space-y-3">
+                <div>
+                  <h4 className="font-semibold text-blue-300 mb-2 text-xs">🛡️ Party</h4>
+                  <div className="space-y-1">
+                    {safeCombatants.filter(c => !c.id.startsWith('enemy_')).map(combatant => (
+                      <div key={combatant.id} className={`p-2 rounded border text-xs ${
+                        combatant.hp <= 0 ? 'bg-red-900/20 border-red-600' :
+                        combatant.hp < combatant.maxHp * 0.5 ? 'bg-yellow-900/20 border-yellow-600' :
+                        'bg-blue-900/20 border-blue-600'
+                      } ${currentCombatant?.id === combatant.id ? 'ring-1 ring-amber-400' : ''}`}>
+                        <div className="flex justify-between items-center">
+                          <span className="font-medium text-gray-100 truncate">
                             {combatant.name}
-                            {combatant.id === safeCombatants[combatSession.currentTurn]?.id && (
-                              <span className="ml-2 text-amber-400">← Current Turn</span>
+                            {currentCombatant?.id === combatant.id && (
+                              <span className="ml-1 text-amber-400">🎲</span>
                             )}
-                            {combatant.hp <= 0 && (
-                              <span className="ml-2 text-red-400">💀 Defeated</span>
-                            )}
-                          </div>
-                          <div className="text-sm text-gray-400">
-                            Initiative: {combatant.initiative || 'N/A'}
-                          </div>
-                        </div>
-                        <div className="text-right">
-                          <div className={`text-sm font-medium ${
+                          </span>
+                          <span className={`text-xs ${
                             combatant.hp <= 0 ? 'text-red-400' :
                             combatant.hp < combatant.maxHp * 0.5 ? 'text-yellow-400' :
                             'text-green-400'
                           }`}>
-                            {combatant.hp}/{combatant.maxHp} HP
-                          </div>
-                          <div className="text-xs text-gray-500">
-                            AC: {combatant.ac || 'N/A'}
-                          </div>
+                            {combatant.hp}/{combatant.maxHp}
+                          </span>
                         </div>
                       </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <h4 className="font-semibold text-red-300 mb-2 text-xs">👹 Enemies</h4>
+                  <div className="space-y-1">
+                    {safeCombatants.filter(c => c.id.startsWith('enemy_')).map(combatant => (
+                      <div key={combatant.id} className={`p-2 rounded border text-xs ${
+                        combatant.hp <= 0 ? 'bg-red-900/20 border-red-600' :
+                        combatant.hp < combatant.maxHp * 0.5 ? 'bg-yellow-900/20 border-yellow-600' :
+                        'bg-red-900/20 border-red-600'
+                      } ${currentCombatant?.id === combatant.id ? 'ring-1 ring-amber-400' : ''}`}>
+                        <div className="flex justify-between items-center">
+                          <span className="font-medium text-gray-100 truncate">
+                            {combatant.name}
+                            {currentCombatant?.id === combatant.id && (
+                              <span className="ml-1 text-amber-400">🎲</span>
+                            )}
+                          </span>
+                          <span className={`text-xs ${
+                            combatant.hp <= 0 ? 'text-red-400' :
+                            combatant.hp < combatant.maxHp * 0.5 ? 'text-yellow-400' :
+                            'text-red-400'
+                          }`}>
+                            {combatant.hp}/{combatant.maxHp}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Environmental Features - Compact */}
+            {environmentalFeatures.length > 0 && (
+              <div className="fantasy-card">
+                <h3 className="font-bold text-blue-300 mb-2 text-sm">🌍 Environment</h3>
+                <div className="flex flex-wrap gap-1">
+                  {environmentalFeatures.map((feature, index) => (
+                    <span key={index} className="px-2 py-1 bg-blue-900 text-blue-200 rounded text-xs">
+                      {feature}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Team Up Opportunities - Compact */}
+            {teamUpOpportunities.length > 0 && (
+              <div className="fantasy-card">
+                <h3 className="font-bold text-purple-300 mb-2 text-sm">🤝 Team Up</h3>
+                <div className="space-y-1">
+                  {teamUpOpportunities.map((opportunity, index) => (
+                    <div key={index} className="text-purple-200 text-xs">
+                      <strong>{opportunity.classes.join('+')}:</strong> {opportunity.description}
                     </div>
                   ))}
                 </div>

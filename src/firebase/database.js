@@ -856,6 +856,7 @@ export const createCombatSession = async (partyId, combatData) => {
       storyContext: combatData.storyContext,
       partyMembers: combatData.partyMembers,
       enemies: combatData.enemies,
+      combatants: combatData.combatants, // Add the full combatants array
       initiative: combatData.initiative,
       currentTurn: combatData.currentTurn || 0,
       round: combatData.round || 1,
@@ -863,6 +864,7 @@ export const createCombatSession = async (partyId, combatData) => {
       environmentalFeatures: combatData.environmentalFeatures,
       teamUpOpportunities: combatData.teamUpOpportunities,
       narrativeElements: combatData.narrativeElements,
+      battleLog: combatData.battleLog || [], // Add battle log storage
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp()
     };
@@ -1193,6 +1195,34 @@ export const updateCombatSessionWithNarrative = async (combatId, updates) => {
     });
   } catch (error) {
     handleDatabaseError(error, 'updateCombatSessionWithNarrative');
+  }
+};
+
+export const addToCombatBattleLog = async (combatId, logEntry) => {
+  try {
+    console.log('📜 Adding to combat battle log:', {
+      combatId,
+      logEntry
+    });
+    
+    const combatRef = doc(db, 'combatSessions', combatId);
+    const docSnap = await getDoc(combatRef);
+    
+    if (docSnap.exists()) {
+      const currentData = docSnap.data();
+      const currentBattleLog = currentData.battleLog || [];
+      const updatedBattleLog = [...currentBattleLog, logEntry];
+      
+      await updateDoc(combatRef, {
+        battleLog: updatedBattleLog,
+        lastUpdated: serverTimestamp()
+      });
+      
+      console.log('📜 Battle log updated successfully');
+    }
+  } catch (error) {
+    console.error('❌ Error in addToCombatBattleLog:', error);
+    handleDatabaseError(error, 'addToCombatBattleLog');
   }
 };
 
