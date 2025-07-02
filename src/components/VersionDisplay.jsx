@@ -1,6 +1,6 @@
 import React from 'react';
 
-const version = import.meta.env.VITE_APP_VERSION || '3.1.2';
+const version = import.meta.env.VITE_APP_VERSION || '3.1.4';
 
 export default function VersionDisplay() {
   return (

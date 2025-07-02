@@ -79,12 +79,14 @@ export default function Combat() {
       
       console.log('🔗 Setting up combat session subscription for:', sessionId);
       const unsubscribe = subscribeToCombatSession(sessionId, (session) => {
-        console.log('🔄 Combat session update received:', {
-          currentTurn: session?.currentTurn,
-          lastProcessedTurn,
-          combatState: session?.combatState,
-          combatants: session?.combatants?.map(c => ({ name: c.name, hp: c.hp, isEnemy: c.id.startsWith('enemy_') }))
-        });
+              console.log('🔄 Combat session update received:', {
+        currentTurn: session?.currentTurn,
+        lastProcessedTurn,
+        combatState: session?.combatState,
+        combatants: session?.combatants?.map(c => ({ name: c.name, hp: c.hp, isEnemy: c.id.startsWith('enemy_') })),
+        sessionId: sessionId,
+        isTestCombat: isTestCombat
+      });
         
         setCombatSession(session);
         setLoading(false);
@@ -117,14 +119,43 @@ export default function Combat() {
 
   // Handle enemy turn processing for both test and co-op modes
   useEffect(() => {
+    console.log('🎲 Co-op mode turn check:', {
+      combatSession: combatSession ? {
+        currentTurn: combatSession.currentTurn,
+        combatState: combatSession.combatState,
+        combatants: combatSession.combatants?.map(c => ({ name: c.name, hp: c.hp, isEnemy: c.id.startsWith('enemy_') }))
+      } : null,
+      lastProcessedTurn,
+      processingTurn,
+      isEnemyTurn,
+      isTestCombat
+    });
+    
     if (combatSession && combatSession.combatState === 'active') {
       const currentCombatant = getCurrentCombatant();
+      console.log('🎲 Current combatant check:', {
+        currentCombatant: currentCombatant ? {
+          name: currentCombatant.name,
+          id: currentCombatant.id,
+          isEnemy: currentCombatant.id.startsWith('enemy_'),
+          hp: currentCombatant.hp
+        } : null,
+        currentTurn: combatSession.currentTurn,
+        lastProcessedTurn,
+        shouldProcess: currentCombatant && 
+          currentCombatant.id.startsWith('enemy_') && 
+          combatSession.currentTurn !== lastProcessedTurn &&
+          !processingTurn &&
+          !isEnemyTurn
+      });
+      
       if (currentCombatant && 
           currentCombatant.id.startsWith('enemy_') && 
           combatSession.currentTurn !== lastProcessedTurn &&
           !processingTurn &&
           !isEnemyTurn) {
         
+        console.log('🎲 Scheduling enemy turn processing for:', currentCombatant.name);
         const timer = setTimeout(() => {
           processEnemyTurn();
         }, isTestCombat ? 2000 : 1000);
