@@ -694,15 +694,24 @@ export class CombatService {
     });
     
     const combatant = combatSession.combatants.find(c => c.id === combatantId);
-    const target = combatSession.combatants.find(c => c.id === targetId);
+    let target = combatSession.combatants.find(c => c.id === targetId);
+    
+    // For defend actions, target should be the combatant themselves
+    if (actionType === 'defend' && !target) {
+      target = combatant;
+    }
     
     console.log('⚔️ Found combatant and target:', {
       combatant: combatant ? { name: combatant.name, hp: combatant.hp, maxHp: combatant.maxHp } : null,
       target: target ? { name: target.name, hp: target.hp, maxHp: target.maxHp } : null
     });
     
-    if (!combatant || !target) {
-      throw new Error('Invalid combatant or target');
+    if (!combatant) {
+      throw new Error('Invalid combatant');
+    }
+    
+    if (!target && actionType !== 'defend') {
+      throw new Error('Invalid target');
     }
 
     // Check cooldowns
@@ -1506,7 +1515,7 @@ export class CombatService {
           attribute: 'wisdom'
         };
       }
-      if (availableActions.includes('spell')) {
+      if (availableActions.includes('spell') && target) {
         return { 
           action: 'spell', 
           target: target.id, 
@@ -1577,7 +1586,7 @@ export class CombatService {
       if (availableActions.includes('defend')) {
         return { 
           action: 'defend', 
-          target: enemy.id,
+          target: null,
           specialAttack: 'Defensive Stance',
           damageType: 'defense',
           attribute: 'dexterity'
@@ -1625,6 +1634,15 @@ export class CombatService {
 
   // Execute enemy turn automatically
   async executeEnemyTurn(combatSession, enemy) {
+    // Check if enemy is still alive
+    if (enemy.hp <= 0) {
+      console.log('Enemy is dead, skipping turn:', enemy.name);
+      return {
+        success: false,
+        message: `${enemy.name} is already defeated`
+      };
+    }
+    
     const decision = this.chooseEnemyAction(enemy, combatSession);
     
     console.log('Enemy decision details:', {
@@ -1634,6 +1652,15 @@ export class CombatService {
       damageType: decision.damageType,
       attribute: decision.attribute
     });
+    
+    if (!decision) {
+      console.log('No decision made for enemy, defaulting to defend');
+      return await this.executeAction(combatSession, enemy.id, 'defend', enemy.id, {
+        specialAttack: 'Defensive Stance',
+        damageType: 'defense',
+        attribute: 'dexterity'
+      });
+    }
     
     if (decision.target) {
       return await this.executeAction(combatSession, enemy.id, decision.action, decision.target, {

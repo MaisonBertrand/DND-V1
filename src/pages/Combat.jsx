@@ -218,14 +218,16 @@ export default function Combat() {
         return () => clearTimeout(timer);
       }
       
-      // Safety check: if we're stuck on an enemy turn and not processing, force update lastProcessedTurn
+      // Safety check: if we're stuck on an enemy turn for too long, force advance
       if (currentCombatant && 
           currentCombatant.id.startsWith('enemy_') && 
           combatSession.currentTurn === lastProcessedTurn &&
           !processingTurn &&
           !isEnemyTurn) {
-        console.log('🎲 Safety check: Enemy turn appears stuck, updating lastProcessedTurn');
-        setLastProcessedTurn(combatSession.currentTurn);
+        console.log('🎲 Safety check: Enemy turn appears stuck, forcing turn advance');
+        setTimeout(() => {
+          advanceTurn();
+        }, 3000);
       }
     }
   }, [combatSession?.currentTurn, lastProcessedTurn, processingTurn, isEnemyTurn, isTestCombat, combatSession?.combatants]);
@@ -780,8 +782,6 @@ export default function Combat() {
       return;
     }
     
-    // Update lastProcessedTurn to prevent duplicate processing
-    setLastProcessedTurn(combatSession.currentTurn);
     console.log('🎯 Processing enemy turn for:', currentCombatant.name);
     
     try {
@@ -972,6 +972,9 @@ export default function Combat() {
           return;
         }
 
+        // Update lastProcessedTurn after successful action execution
+        setLastProcessedTurn(combatSession.currentTurn);
+        
         // Note: Don't call advanceTurn() here because the combat service already advanced the turn
 
       } else {
