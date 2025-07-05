@@ -9,7 +9,8 @@ import {
   deleteCharacterPreset,
   updateCharacter,
   getUserCharacters,
-  deleteCharacter
+  deleteCharacter,
+  getPartyById
 } from '../firebase/database';
 
 export default function CharacterCreation() {
@@ -78,6 +79,8 @@ export default function CharacterCreation() {
   const [hasRolled, setHasRolled] = useState(false);
   const [weaponChoices, setWeaponChoices] = useState({});
   const [spellChoices, setSpellChoices] = useState([]);
+  const [party, setParty] = useState(null);
+  const [isDM, setIsDM] = useState(false);
 
   useEffect(() => {
     const unsubscribe = onAuthChange((user) => {
@@ -87,6 +90,7 @@ export default function CharacterCreation() {
       }
       setUser(user);
       if (partyId) {
+        loadPartyInfo(partyId, user.uid);
         checkExistingCharacter(user.uid, partyId).catch(error => {
           // Silently handle errors
         });
@@ -97,6 +101,21 @@ export default function CharacterCreation() {
     });
     return () => unsubscribe();
   }, [navigate, partyId]);
+
+  const loadPartyInfo = async (partyId, userId) => {
+    try {
+      const partyData = await getPartyById(partyId);
+      setParty(partyData);
+      setIsDM(partyData.dmId === userId);
+      
+      // If user is DM and it's a manual campaign, redirect to lobby
+      if (partyData.dmId === userId && partyData.campaignType === 'manual') {
+        navigate(`/lobby/${partyId}`);
+      }
+    } catch (error) {
+      console.error('Error loading party info:', error);
+    }
+  };
 
   // If editing, load character data into form
   useEffect(() => {
@@ -653,9 +672,28 @@ export default function CharacterCreation() {
       setCharacter(newCharacter);
       setMessage('Character saved successfully!');
       
-      // Navigate back to campaign lobby
+      // Check if this is a new character after death
+      const isNewCharacterAfterDeath = !existingCharacter;
+      
+      // Navigate based on campaign type
       setTimeout(() => {
-        navigate(`/campaign/${partyId}`);
+        if (isNewCharacterAfterDeath) {
+          // Show a message about rejoining the story
+          setMessage('Character created! You will rejoin the story where it left off...');
+          setTimeout(() => {
+            if (party?.campaignType === 'ai-assist') {
+              navigate(`/campaign/${partyId}`);
+            } else {
+              navigate(`/lobby/${partyId}`);
+            }
+          }, 2000);
+        } else {
+          if (party?.campaignType === 'ai-assist') {
+            navigate(`/campaign/${partyId}`);
+          } else {
+            navigate(`/lobby/${partyId}`);
+          }
+        }
       }, 1000);
     } catch (error) {
       setError('Failed to save character');
@@ -905,6 +943,21 @@ export default function CharacterCreation() {
       <div className="fantasy-container py-8">
         <div className="fantasy-card">
           <h1 className="fantasy-title text-center">Create Your Character</h1>
+          
+          {/* DM in Manual Campaign Notice */}
+          {isDM && party?.campaignType === 'manual' && (
+            <div className="mb-6 p-4 bg-amber-500/20 border border-amber-500/30 rounded-lg">
+              <div className="flex items-center justify-center mb-2">
+                <span className="text-amber-400 text-lg mr-2">👑</span>
+                <h3 className="text-amber-300 font-semibold">Dungeon Master Notice</h3>
+              </div>
+              <p className="text-center text-amber-200 text-sm">
+                As the Dungeon Master in a Manual Campaign, you don't need to create a character. 
+                You'll be redirected to the campaign lobby where you can manage the story and encounters.
+              </p>
+            </div>
+          )}
+          
           <p className="text-center text-gray-300 mb-6">
             {existingCharacter 
               ? "Edit your character below. When you're ready, click 'Ready Up & Join Campaign' at the bottom!"
@@ -918,7 +971,13 @@ export default function CharacterCreation() {
               <button
                 type="button"
                 className="fantasy-button bg-blue-600 hover:bg-blue-700"
-                onClick={() => navigate(`/campaign/${partyId}`)}
+                onClick={() => {
+                  if (party?.campaignType === 'ai-assist') {
+                    navigate(`/campaign/${partyId}`);
+                  } else {
+                    navigate(`/lobby/${partyId}`);
+                  }
+                }}
               >
                 ← Back to Campaign
               </button>
@@ -1136,7 +1195,7 @@ export default function CharacterCreation() {
               <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                 {['strength', 'dexterity', 'constitution', 'intelligence', 'wisdom', 'charisma'].map(ability => {
                   const assignedScore = assignedScores[ability];
-                  const currentValue = character[ability] || 10;
+                  const currentValue = assignedScore || character[ability] || 10;
                   
                   return (
                     <div key={ability} className="border border-gray-600 rounded-lg p-4">

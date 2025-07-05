@@ -9,9 +9,12 @@ import {
   subscribeToCombatSession,
   updateCampaignStory,
   getPartyCharacters,
-  updatePartyCharacterStats
+  updatePartyCharacterStats,
+  getCampaignStory
 } from '../firebase/database';
 import { combatService } from '../services/combat';
+import PlayerDeath from '../components/PlayerDeath';
+import CampaignDefeat from '../components/CampaignDefeat';
 
 export default function Combat() {
   const { sessionId } = useParams();
@@ -34,6 +37,11 @@ export default function Combat() {
   const [processingTurn, setProcessingTurn] = useState(false);
   const [playerDied, setPlayerDied] = useState(false);
   const [deadPlayer, setDeadPlayer] = useState(null);
+  const [campaignDefeated, setCampaignDefeated] = useState(false);
+  const [deadCharacters, setDeadCharacters] = useState([]);
+  const [combatSummary, setCombatSummary] = useState(null);
+  const [story, setStory] = useState(null);
+  const [spectating, setSpectating] = useState(false);
   const [lastProcessedTurn, setLastProcessedTurn] = useState(-1);
   const [damageAnimation, setDamageAnimation] = useState(null);
   const [showDamageAnimation, setShowDamageAnimation] = useState(false);
@@ -64,9 +72,41 @@ export default function Combat() {
     if (isTestCombat && testData) {
       initializeTestCombat();
     } else if (sessionId) {
-      loadCombatData();
+      // Force refresh combat data to prevent caching issues
+      const refreshCombatData = async () => {
+        console.log('🔄 Force refreshing combat data for session:', sessionId);
+        await loadCombatData();
+      };
+      refreshCombatData();
     }
   }, [isTestCombat, testData, sessionId]);
+
+  // Listen for help button events from VersionDisplay
+  useEffect(() => {
+    const handleRefreshCombat = async () => {
+      console.log('🔄 Help button: Force refreshing combat session...');
+      await loadCombatData();
+    };
+
+    const handleCleanupCombat = async () => {
+      if (combatSession?.partyId) {
+        console.log('🧹 Help button: Force cleaning up all combat sessions...');
+        await combatService.forceCleanupCombatSessions(combatSession.partyId);
+        // Wait a moment then refresh
+        setTimeout(async () => {
+          await loadCombatData();
+        }, 1000);
+      }
+    };
+
+    window.addEventListener('refreshCombatSession', handleRefreshCombat);
+    window.addEventListener('cleanupCombatSessions', handleCleanupCombat);
+
+    return () => {
+      window.removeEventListener('refreshCombatSession', handleRefreshCombat);
+      window.removeEventListener('cleanupCombatSessions', handleCleanupCombat);
+    };
+  }, [combatSession?.partyId]);
 
   useEffect(() => {
     if (sessionId && !isTestCombat) {
@@ -90,6 +130,20 @@ export default function Combat() {
         
         setCombatSession(session);
         setLoading(false);
+        
+        // Update lastProcessedTurn when session updates to prevent stuck enemy turns
+        if (session?.currentTurn !== undefined) {
+          // Only update if we're not currently processing a turn or if the turn has actually changed
+          if (lastProcessedTurn !== session.currentTurn && !processingTurn) {
+            console.log('🔄 Updating lastProcessedTurn from', lastProcessedTurn, 'to', session.currentTurn);
+            setLastProcessedTurn(session.currentTurn);
+          } else if (processingTurn && lastProcessedTurn === session.currentTurn) {
+            // If we're processing a turn and the session turn matches our lastProcessedTurn,
+            // it means the turn was completed successfully, so we can update
+            console.log('🔄 Turn processing completed, updating lastProcessedTurn to', session.currentTurn);
+            setLastProcessedTurn(session.currentTurn);
+          }
+        }
         
         if (session) {
           // Load battle log from database
@@ -149,20 +203,32 @@ export default function Combat() {
           !isEnemyTurn
       });
       
-      if (currentCombatant && 
-          currentCombatant.id.startsWith('enemy_') && 
-          combatSession.currentTurn !== lastProcessedTurn &&
-          !processingTurn &&
-          !isEnemyTurn) {
-        
+      // Check if we need to process an enemy turn
+      const shouldProcessEnemyTurn = currentCombatant && 
+        currentCombatant.id.startsWith('enemy_') && 
+        combatSession.currentTurn !== lastProcessedTurn &&
+        !processingTurn &&
+        !isEnemyTurn;
+      
+      if (shouldProcessEnemyTurn) {
         console.log('🎲 Scheduling enemy turn processing for:', currentCombatant.name);
         const timer = setTimeout(() => {
           processEnemyTurn();
         }, isTestCombat ? 2000 : 1000);
         return () => clearTimeout(timer);
       }
+      
+      // Safety check: if we're stuck on an enemy turn and not processing, force update lastProcessedTurn
+      if (currentCombatant && 
+          currentCombatant.id.startsWith('enemy_') && 
+          combatSession.currentTurn === lastProcessedTurn &&
+          !processingTurn &&
+          !isEnemyTurn) {
+        console.log('🎲 Safety check: Enemy turn appears stuck, updating lastProcessedTurn');
+        setLastProcessedTurn(combatSession.currentTurn);
+      }
     }
-  }, [combatSession?.currentTurn, lastProcessedTurn, processingTurn, isEnemyTurn, isTestCombat]);
+  }, [combatSession?.currentTurn, lastProcessedTurn, processingTurn, isEnemyTurn, isTestCombat, combatSession?.combatants]);
 
   useEffect(() => {
     if (combatSession && enemyTurnComplete && areAllPartyMembersReady()) {
@@ -190,7 +256,7 @@ export default function Combat() {
       const enemiesAlive = enemies.some(enemy => enemy.hp > 0);
       
       if (!partyAlive) {
-        // Party defeated
+        // Party defeated - campaign ends
         if (isTestCombat) {
           navigate('/test-environment', { 
             state: { 
@@ -199,7 +265,7 @@ export default function Combat() {
             } 
           });
         } else {
-          endCombat('defeat');
+          handleCampaignDefeat();
         }
       } else if (!enemiesAlive) {
         // Enemies defeated
@@ -308,7 +374,17 @@ export default function Combat() {
     try {
       setLoading(true);
       
-      const session = await getCombatSession(sessionId);
+      // Add cache-busting parameter to ensure fresh data
+      const cacheBuster = Date.now();
+      console.log(`🔄 Loading combat data with cache buster: ${cacheBuster}`);
+      
+      // Load both combat session and story data
+      const [session, storyData] = await Promise.all([
+        getCombatSession(sessionId),
+        getCampaignStory(sessionId)
+      ]);
+      
+      setStory(storyData);
       
       if (!session) {
         console.error('No combat session found with ID:', sessionId);
@@ -1051,6 +1127,29 @@ export default function Combat() {
     updateAvailableActions(updatedSession);
   };
 
+  const handleCampaignDefeat = async () => {
+    if (!combatSession || !story) return;
+    
+    const summary = combatService.generateCombatSummary(combatSession, 'defeat');
+    const deadChars = combatSession.partyMembers.filter(member => member.hp <= 0);
+    
+    setCombatSummary(summary);
+    setDeadCharacters(deadChars);
+    setCampaignDefeated(true);
+    
+    // Update combat session and story
+    await updateCombatSessionWithNarrative(sessionId, {
+      status: 'ended',
+      combatState: 'ended',
+      summary: summary
+    });
+    
+    await updateCampaignStory(sessionId, {
+      status: 'defeated',
+      currentCombat: null
+    });
+  };
+
   const endCombat = async (result = 'victory') => {
     if (!combatSession) return;
     
@@ -1072,12 +1171,39 @@ export default function Combat() {
         summary: summary
       });
       
-      await updateCampaignStory(sessionId, {
-        status: 'storytelling',
-        currentCombat: null
-      });
+      // Check if any players died during combat
+      const deadPlayers = combatSession.partyMembers.filter(member => member.hp <= 0);
       
-      navigate(`/campaign/${sessionId}`);
+      if (deadPlayers.length > 0) {
+        // Some players died but party won - they need to create new characters
+        await updateCampaignStory(sessionId, {
+          status: 'storytelling',
+          currentCombat: null,
+          deadPlayers: deadPlayers.map(player => ({
+            userId: player.userId,
+            name: player.name,
+            class: player.class,
+            level: player.level,
+            deathCause: 'Combat wounds'
+          }))
+        });
+        
+        // Navigate to character creation for dead players
+        const currentUserDead = deadPlayers.find(player => player.userId === user?.uid);
+        if (currentUserDead) {
+          navigate(`/character-creation/${combatSession.partyId}`);
+        } else {
+          navigate(`/campaign/${sessionId}`);
+        }
+      } else {
+        // No deaths - normal victory
+        await updateCampaignStory(sessionId, {
+          status: 'storytelling',
+          currentCombat: null
+        });
+        
+        navigate(`/campaign/${sessionId}`);
+      }
     }
   };
 
@@ -1206,9 +1332,14 @@ export default function Combat() {
     if (isTestCombat) {
       navigate('/dashboard');
     } else {
-      const partyId = combatSession?.partyId;
-      navigate(`/character-creation/${partyId}`);
+      // Player death - they need to wait for combat to end
+      // Don't navigate immediately, let them spectate
     }
+  };
+
+  const handleSpectateCombat = () => {
+    setSpectating(true);
+    setPlayerDied(false); // Hide death screen but keep dead player data
   };
 
   const handleProceedAfterEnemyTurn = () => {
@@ -1364,45 +1495,25 @@ export default function Combat() {
 
   const currentCombatant = getCurrentCombatant();
   
-  if (playerDied && deadPlayer) {
+  // Show campaign defeat screen
+  if (campaignDefeated) {
     return (
-      <div className="fantasy-container py-8">
-        <div className="fantasy-card bg-red-50 border-red-200">
-          <div className="text-center py-8">
-            <div className="text-6xl mb-4">💀</div>
-            <h1 className="text-3xl font-bold text-red-800 mb-4">Character Death</h1>
-            <div className="text-xl text-red-700 mb-6">
-              {deadPlayer.name} has fallen in battle...
-            </div>
-            <div className="bg-white p-6 rounded-lg border border-red-300 mb-6">
-              <h2 className="text-lg font-semibold text-stone-800 mb-2">Fallen Hero</h2>
-              <p className="text-stone-600 mb-2">
-                <strong>Name:</strong> {deadPlayer.name}
-              </p>
-              <p className="text-stone-600 mb-2">
-                <strong>Class:</strong> {deadPlayer.class}
-              </p>
-              <p className="text-stone-600 mb-2">
-                <strong>Level:</strong> {deadPlayer.level}
-              </p>
-              <p className="text-stone-600">
-                <strong>Final HP:</strong> {deadPlayer.hp}/{deadPlayer.maxHp}
-              </p>
-            </div>
-            <div className="space-y-3">
-              <p className="text-stone-600">
-                Your character has been defeated. You must create a new character to continue.
-              </p>
-              <button
-                onClick={handlePlayerDeath}
-                className="fantasy-button bg-red-600 hover:bg-red-700"
-              >
-                Create New Character
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
+      <CampaignDefeat 
+        story={story}
+        deadCharacters={deadCharacters}
+        combatSummary={combatSummary}
+      />
+    );
+  }
+
+  // Show individual player death screen
+  if (playerDied && deadPlayer && !spectating) {
+    return (
+      <PlayerDeath 
+        deadPlayer={deadPlayer}
+        combatSession={combatSession}
+        onSpectate={handleSpectateCombat}
+      />
     );
   }
 
@@ -1471,33 +1582,68 @@ export default function Combat() {
               </div>
             )}
 
-            {/* Battle Log - Compact */}
-            <div className="fantasy-card h-64">
-              <h3 className="text-sm font-semibold mb-3 text-yellow-400">📜 Battle Log</h3>
-              <div className="space-y-1 h-52 overflow-y-auto text-xs">
-                {battleLog.length === 0 ? (
-                  <p className="text-gray-400">No actions recorded yet...</p>
-                ) : (
-                  battleLog.slice(-10).map((entry) => (
-                    <div key={entry.id} className="border-l-2 border-gray-600 pl-2 py-1">
-                      <div className="flex justify-between items-start mb-1">
-                        <span className="text-gray-400">{entry.timestamp}</span>
-                        <span className="text-blue-400">R{entry.round}</span>
+            {/* Battle Log - Compact with Scroll */}
+            <div className="fantasy-card">
+              <h3 className="text-sm font-semibold mb-2 text-yellow-400">📜 Battle Log</h3>
+              <div className="relative">
+                {/* Scroll Up Button */}
+                <button 
+                  onClick={() => {
+                    const logContainer = document.getElementById('battle-log-container');
+                    if (logContainer) {
+                      logContainer.scrollTop -= 50;
+                    }
+                  }}
+                  className="absolute top-0 right-0 z-10 bg-gray-700 hover:bg-gray-600 text-gray-300 text-xs px-2 py-1 rounded-t transition-colors"
+                >
+                  ↑
+                </button>
+                
+                {/* Battle Log Content */}
+                <div 
+                  id="battle-log-container"
+                  className="h-32 overflow-y-auto space-y-1 text-xs pr-8 scrollbar-hide"
+                  style={{
+                    scrollbarWidth: 'none',
+                    msOverflowStyle: 'none'
+                  }}
+                >
+                  {battleLog.length === 0 ? (
+                    <p className="text-gray-400">No actions recorded yet...</p>
+                  ) : (
+                    battleLog.slice(-8).map((entry) => (
+                      <div key={entry.id} className="border-l-2 border-gray-600 pl-2 py-1">
+                        <div className="flex justify-between items-start mb-1">
+                          <span className="text-blue-400">R{entry.round}</span>
+                        </div>
+                        <div className={`${
+                          entry.type === 'damage' ? 'text-red-400' :
+                          entry.type === 'healing' ? 'text-green-400' :
+                          entry.type === 'death' ? 'text-red-500 font-semibold' :
+                          entry.type === 'status_effect' ? 'text-purple-400' :
+                          entry.type === 'action_failed' ? 'text-orange-400' :
+                          entry.type === 'error' ? 'text-red-500' :
+                          'text-gray-200'
+                        }`}>
+                          {entry.description}
+                        </div>
                       </div>
-                      <div className={`${
-                        entry.type === 'damage' ? 'text-red-400' :
-                        entry.type === 'healing' ? 'text-green-400' :
-                        entry.type === 'death' ? 'text-red-500 font-semibold' :
-                        entry.type === 'status_effect' ? 'text-purple-400' :
-                        entry.type === 'action_failed' ? 'text-orange-400' :
-                        entry.type === 'error' ? 'text-red-500' :
-                        'text-gray-200'
-                      }`}>
-                        {entry.description}
-                      </div>
-                    </div>
-                  ))
-                )}
+                    ))
+                  )}
+                </div>
+                
+                {/* Scroll Down Button */}
+                <button 
+                  onClick={() => {
+                    const logContainer = document.getElementById('battle-log-container');
+                    if (logContainer) {
+                      logContainer.scrollTop += 50;
+                    }
+                  }}
+                  className="absolute bottom-0 right-0 z-10 bg-gray-700 hover:bg-gray-600 text-gray-300 text-xs px-2 py-1 rounded-b transition-colors"
+                >
+                  ↓
+                </button>
               </div>
             </div>
           </div>

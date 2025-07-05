@@ -6,12 +6,13 @@ import Home from './pages/Home';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
-import TestEnvironment from './pages/TestEnvironment';
-import CampaignManagement from './pages/CampaignManagement';
+
 import CharacterCreation from './pages/CharacterCreation';
+import CampaignLobby from './pages/CampaignLobby';
 import CampaignStory from './components/CampaignStory';
+import ManualCampaign from './pages/ManualCampaign';
 import Combat from './pages/Combat';
-import PartyManagement from './pages/PartyManagement';
+
 import './index.css';
 
 // Component to handle old route redirects and logging
@@ -43,12 +44,13 @@ function App() {
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />
             <Route path="/dashboard" element={<Dashboard />} />
-            <Route path="/test-environment" element={<TestEnvironment />} />
-            <Route path="/campaign-management" element={<CampaignManagement />} />
+
             <Route path="/character-creation/:partyId" element={<CharacterCreation />} />
+            <Route path="/lobby/:partyId" element={<CampaignLobby />} />
             <Route path="/campaign/:partyId" element={<CampaignStory />} />
+            <Route path="/manual-campaign/:partyId" element={<ManualCampaign />} />
             <Route path="/combat/:sessionId" element={<Combat />} />
-            <Route path="/party-management" element={<PartyManagement />} />
+
             
             {/* Redirect old campaign-story routes to new campaign routes */}
             <Route path="/campaign-story/:partyId" element={<OldRouteRedirect />} />

@@ -160,6 +160,9 @@ export class CombatService {
       // Import database functions dynamically to avoid circular dependencies
       const { createCombatSession: dbCreateCombatSession } = await import('../firebase/database');
       
+      // Force cleanup before checking for existing sessions
+      await this.cleanupOldCombatSessions(partyId);
+      
       // Check for existing active combat session
       const existingSession = await this.getExistingCombatSession(partyId);
       if (existingSession) {
@@ -206,7 +209,7 @@ export class CombatService {
   // Check for existing combat session
   async getExistingCombatSession(partyId) {
     try {
-      const { collection, query, where, getDocs } = await import('firebase/firestore');
+      const { collection, query, where, getDocs, updateDoc, doc } = await import('firebase/firestore');
       const { db } = await import('../firebase/config');
       
       const combatSessionsRef = collection(db, 'combatSessions');
@@ -226,6 +229,173 @@ export class CombatService {
     } catch (error) {
       console.error('Error checking for existing combat session:', error);
       return null;
+    }
+  }
+
+  // Clean up old combat sessions to prevent duplicates
+  async cleanupOldCombatSessions(partyId) {
+    console.log(`🧹 Starting cleanup for party ${partyId}`);
+    try {
+      const { collection, query, where, getDocs, updateDoc, doc } = await import('firebase/firestore');
+      const { db } = await import('../firebase/config');
+      
+      // Clean up old combatSessions collection
+      const combatSessionsRef = collection(db, 'combatSessions');
+      const activeSessionsQuery = query(
+        combatSessionsRef,
+        where('partyId', '==', partyId),
+        where('status', '==', 'active')
+      );
+      
+      const activeSessionsSnapshot = await getDocs(activeSessionsQuery);
+      
+      if (activeSessionsSnapshot.size > 1) {
+        console.log(`🧹 Found ${activeSessionsSnapshot.size} active combat sessions for party ${partyId}, cleaning up...`);
+        
+        // Keep the most recent one, mark others as ended
+        const sessions = activeSessionsSnapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        }));
+        
+        // Sort by creation time, keep the most recent
+        sessions.sort((a, b) => {
+          const aTime = a.createdAt?.toDate?.() || a.createdAt || new Date(0);
+          const bTime = b.createdAt?.toDate?.() || b.createdAt || new Date(0);
+          return bTime - aTime;
+        });
+        
+        // Mark all but the most recent as ended
+        for (let i = 1; i < sessions.length; i++) {
+          const sessionRef = doc(db, 'combatSessions', sessions[i].id);
+          await updateDoc(sessionRef, {
+            status: 'ended',
+            combatState: 'ended',
+            endedAt: new Date(),
+            reason: 'cleanup_duplicate'
+          });
+          console.log(`🧹 Marked old session ${sessions[i].id} as ended`);
+        }
+      }
+      
+      // Also clean up any sessions that are older than 5 minutes (stuck sessions)
+      const allSessionsQuery = query(
+        combatSessionsRef,
+        where('partyId', '==', partyId),
+        where('status', '==', 'active')
+      );
+      
+      const allSessionsSnapshot = await getDocs(allSessionsQuery);
+      const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+      
+      for (const doc of allSessionsSnapshot.docs) {
+        const sessionData = doc.data();
+        const sessionTime = sessionData.createdAt?.toDate?.() || sessionData.createdAt || new Date(0);
+        
+        if (sessionTime < fiveMinutesAgo) {
+          const sessionRef = doc(db, 'combatSessions', doc.id);
+          await updateDoc(sessionRef, {
+            status: 'ended',
+            combatState: 'ended',
+            endedAt: new Date(),
+            reason: 'cleanup_stuck'
+          });
+          console.log(`🧹 Marked stuck session ${doc.id} as ended (older than 5 minutes)`);
+        }
+      }
+      
+      // Also clean up old combats collection (legacy)
+      const combatsRef = collection(db, 'combats');
+      const oldCombatsQuery = query(
+        combatsRef,
+        where('partyId', '==', partyId),
+        where('status', '==', 'active')
+      );
+      
+      const oldCombatsSnapshot = await getDocs(oldCombatsQuery);
+      
+      if (!oldCombatsSnapshot.empty) {
+        console.log(`🧹 Found ${oldCombatsSnapshot.size} old combat sessions in legacy collection, cleaning up...`);
+        
+        // Mark all old combats as ended
+        for (const doc of oldCombatsSnapshot.docs) {
+          const combatRef = doc(db, 'combats', doc.id);
+          await updateDoc(combatRef, {
+            status: 'ended',
+            endedAt: new Date(),
+            reason: 'cleanup_legacy'
+          });
+          console.log(`🧹 Marked legacy combat ${doc.id} as ended`);
+        }
+      }
+      
+    } catch (error) {
+      console.error('Error cleaning up old combat sessions:', error);
+    }
+  }
+
+  // Manual cleanup function for UI
+  async forceCleanupCombatSessions(partyId) {
+    console.log(`🧹 Force cleaning up all combat sessions for party ${partyId}`);
+    try {
+      const { collection, query, where, getDocs, updateDoc, doc } = await import('firebase/firestore');
+      const { db } = await import('../firebase/config');
+      
+      // Clean up ALL active combat sessions for this party
+      const combatSessionsRef = collection(db, 'combatSessions');
+      const allSessionsQuery = query(
+        combatSessionsRef,
+        where('partyId', '==', partyId),
+        where('status', '==', 'active')
+      );
+      
+      const allSessionsSnapshot = await getDocs(allSessionsQuery);
+      
+      if (!allSessionsSnapshot.empty) {
+        console.log(`🧹 Found ${allSessionsSnapshot.size} active combat sessions, marking all as ended`);
+        
+        // Mark ALL sessions as ended
+        for (const doc of allSessionsSnapshot.docs) {
+          const sessionRef = doc(db, 'combatSessions', doc.id);
+          await updateDoc(sessionRef, {
+            status: 'ended',
+            combatState: 'ended',
+            endedAt: new Date(),
+            reason: 'force_cleanup'
+          });
+          console.log(`🧹 Force marked session ${doc.id} as ended`);
+        }
+      }
+      
+      // Also clean up legacy combats collection
+      const combatsRef = collection(db, 'combats');
+      const oldCombatsQuery = query(
+        combatsRef,
+        where('partyId', '==', partyId),
+        where('status', '==', 'active')
+      );
+      
+      const oldCombatsSnapshot = await getDocs(oldCombatsQuery);
+      
+      if (!oldCombatsSnapshot.empty) {
+        console.log(`🧹 Found ${oldCombatsSnapshot.size} legacy combat sessions, marking all as ended`);
+        
+        for (const doc of oldCombatsSnapshot.docs) {
+          const combatRef = doc(db, 'combats', doc.id);
+          await updateDoc(combatRef, {
+            status: 'ended',
+            endedAt: new Date(),
+            reason: 'force_cleanup_legacy'
+          });
+          console.log(`🧹 Force marked legacy combat ${doc.id} as ended`);
+        }
+      }
+      
+      console.log(`🧹 Force cleanup completed for party ${partyId}`);
+      return true;
+    } catch (error) {
+      console.error('Error in force cleanup:', error);
+      return false;
     }
   }
 
@@ -968,6 +1138,14 @@ export class CombatService {
       const oldHp = target.hp;
       target.hp = Math.max(0, target.hp - results.damage);
       console.log(`🔧 Damage applied in applyActionEffects: ${combatant.name} deals ${results.damage} damage to ${target.name}. HP: ${oldHp} → ${target.hp}`);
+      console.log(`🔧 Target details:`, {
+        name: target.name,
+        id: target.id,
+        isEnemy: target.id.startsWith('enemy_'),
+        userId: target.userId,
+        oldHp,
+        newHp: target.hp
+      });
     }
     
     // Apply healing
@@ -1224,8 +1402,10 @@ export class CombatService {
       case 'special':
         // Can target enemies (opposite team)
         if (enemy.id.startsWith('enemy_')) {
-          // Enemy targeting players
-          targets.push(...aliveCombatants.filter(c => !c.id.startsWith('enemy_')));
+          // Enemy targeting players - ensure DM can be targeted
+          const playerTargets = aliveCombatants.filter(c => !c.id.startsWith('enemy_'));
+          console.log(`Enemy ${enemy.name} can target players:`, playerTargets.map(t => t.name));
+          targets.push(...playerTargets);
         } else {
           // Player targeting enemies
           targets.push(...aliveCombatants.filter(c => c.id.startsWith('enemy_')));
@@ -1234,13 +1414,13 @@ export class CombatService {
         
       case 'heal':
       case 'item':
-        // Can target allies (same team)
+        // Can target allies (same team) but not self for healing
         if (enemy.id.startsWith('enemy_')) {
-          // Enemy targeting other enemies
-          targets.push(...aliveCombatants.filter(c => c.id.startsWith('enemy_')));
+          // Enemy targeting other enemies (not self)
+          targets.push(...aliveCombatants.filter(c => c.id.startsWith('enemy_') && c.id !== enemy.id));
         } else {
-          // Player targeting other players
-          targets.push(...aliveCombatants.filter(c => !c.id.startsWith('enemy_')));
+          // Player targeting other players (not self)
+          targets.push(...aliveCombatants.filter(c => !c.id.startsWith('enemy_') && c.id !== enemy.id));
         }
         break;
         
@@ -1260,8 +1440,8 @@ export class CombatService {
         break;
         
       default:
-        // Default to all targets
-        targets.push(...aliveCombatants);
+        // Default to all targets except self
+        targets.push(...aliveCombatants.filter(c => c.id !== enemy.id));
     }
     
     console.log(`Valid targets for ${enemy.name} (${actionType}):`, targets.map(t => t.name));
@@ -1302,7 +1482,9 @@ export class CombatService {
       };
     }
     
+    // Ensure we have a valid target
     const target = validTargets[Math.floor(Math.random() * validTargets.length)];
+    console.log(`Enemy ${enemy.name} selected target: ${target.name} (ID: ${target.id})`);
     
     // Health-based decision making
     const healthPercentage = enemy.hp / enemy.maxHp;

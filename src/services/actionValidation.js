@@ -979,4 +979,7 @@ export class ActionValidationService {
   }
 }
 
-export default ActionValidationService; 
+export default ActionValidationService;
+
+// Export singleton instance
+export const actionValidationService = new ActionValidationService(); 
