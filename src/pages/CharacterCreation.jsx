@@ -108,9 +108,9 @@ export default function CharacterCreation() {
       setParty(partyData);
       setIsDM(partyData.dmId === userId);
       
-      // If user is DM and it's a manual campaign, redirect to lobby
+      // If user is DM and it's a manual campaign, redirect to DM interface
       if (partyData.dmId === userId && partyData.campaignType === 'manual') {
-        navigate(`/lobby/${partyId}`);
+        navigate(`/manual-campaign-dm/${partyId}`);
       }
     } catch (error) {
       console.error('Error loading party info:', error);
@@ -677,21 +677,14 @@ export default function CharacterCreation() {
       
       // Navigate based on campaign type
       setTimeout(() => {
-        if (isNewCharacterAfterDeath) {
-          // Show a message about rejoining the story
-          setMessage('Character created! You will rejoin the story where it left off...');
-          setTimeout(() => {
-            if (party?.campaignType === 'ai-assist') {
-              navigate(`/campaign/${partyId}`);
-            } else {
-              navigate(`/lobby/${partyId}`);
-            }
-          }, 2000);
+        if (party?.campaignType === 'ai-assist') {
+          navigate(`/campaign/${partyId}`);
         } else {
-          if (party?.campaignType === 'ai-assist') {
-            navigate(`/campaign/${partyId}`);
+          // For manual campaigns, route based on user role
+          if (party?.dmId === user?.uid) {
+            navigate(`/manual-campaign-dm/${partyId}`);
           } else {
-            navigate(`/lobby/${partyId}`);
+            navigate(`/manual-campaign/${partyId}`);
           }
         }
       }, 1000);
@@ -975,7 +968,12 @@ export default function CharacterCreation() {
                   if (party?.campaignType === 'ai-assist') {
                     navigate(`/campaign/${partyId}`);
                   } else {
-                    navigate(`/lobby/${partyId}`);
+                    // For manual campaigns, route based on user role
+                    if (party?.dmId === user?.uid) {
+                      navigate(`/manual-campaign-dm/${partyId}`);
+                    } else {
+                      navigate(`/manual-campaign/${partyId}`);
+                    }
                   }
                 }}
               >

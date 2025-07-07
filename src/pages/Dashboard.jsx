@@ -240,8 +240,14 @@ export default function Dashboard() {
           // For AI assist campaigns, go directly to campaign story (ready-up screen)
           navigate(`/campaign/${partyId}`);
         } else {
-          // For manual campaigns, go to lobby
-          navigate(`/lobby/${partyId}`);
+          // For manual campaigns, route based on user role
+          if (party.dmId === user.uid) {
+            // DM goes directly to DM interface
+            navigate(`/manual-campaign-dm/${partyId}`);
+          } else {
+            // Players go directly to player interface
+            navigate(`/manual-campaign/${partyId}`);
+          }
         }
       } else {
         // User needs to create a character first
