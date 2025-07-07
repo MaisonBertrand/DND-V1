@@ -54,7 +54,9 @@ export default function ManualCampaign() {
   useEffect(() => {
     if (!user || !partyId || isDM) return;
 
+    console.log('Setting up player view listener for party:', partyId);
     const unsubscribe = dmToolsService.listenToPlayerView(partyId, (viewMode) => {
+      console.log('Player view updated to:', viewMode);
       setPlayerViewMode(viewMode);
       // If DM has set a view mode, we're no longer in initial loading
       if (viewMode !== 'map') {

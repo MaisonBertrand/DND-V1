@@ -64,6 +64,21 @@ export default function ManualCampaignDM() {
     }
   }, [user, partyId]);
 
+  // Real-time listener for player view changes (for DM)
+  useEffect(() => {
+    if (!user || !partyId) return;
+
+    console.log('Setting up DM player view listener for party:', partyId);
+    const unsubscribe = dmToolsService.listenToPlayerView(partyId, (viewMode) => {
+      console.log('DM: Player view updated to:', viewMode);
+      setPlayerViewMode(viewMode);
+    });
+
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
+  }, [user, partyId]);
+
   const loadCampaignData = async () => {
     try {
       setLoading(true);
@@ -163,6 +178,7 @@ export default function ManualCampaignDM() {
 
   const handlePlayerViewChange = async (viewMode) => {
     try {
+      console.log('DM changing player view to:', viewMode);
       setPlayerViewMode(viewMode);
       // Update what players are seeing in the database
       await dmToolsService.updatePlayerView(partyId, viewMode);
@@ -342,67 +358,6 @@ export default function ManualCampaignDM() {
                 {/* Main Map Area */}
                 <div className="fantasy-card">
                   <DMMapEditor partyId={partyId} onMapUpdate={handleMapUpdate} />
-                </div>
-
-                {/* Quick Actions */}
-                <div className="fantasy-card">
-                  <h4 className="text-lg font-semibold text-slate-100 mb-3">⚡ Quick Actions</h4>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                    <button
-                      onClick={() => setActiveTab('scene')}
-                      className="bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 text-white p-3 rounded-lg transition-all duration-300 text-sm font-medium"
-                    >
-                      🎭 Manage Scene
-                    </button>
-                    <button
-                      onClick={() => setActiveTab('initiative')}
-                      className="bg-gradient-to-r from-red-600 to-red-700 hover:from-red-700 hover:to-red-800 text-white p-3 rounded-lg transition-all duration-300 text-sm font-medium"
-                    >
-                      ⚔️ Start Combat
-                    </button>
-                    <button
-                      onClick={() => setActiveTab('players')}
-                      className="bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white p-3 rounded-lg transition-all duration-300 text-sm font-medium"
-                    >
-                      👥 View Players
-                    </button>
-                    {playerViewMode === 'hidden' ? (
-                      <button
-                        onClick={() => handlePlayerViewChange('map')}
-                        className="bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 text-white p-3 rounded-lg transition-all duration-300 text-sm font-medium"
-                      >
-                        👁️ Show Players
-                      </button>
-                    ) : (
-                      <button
-                        onClick={() => handlePlayerViewChange('hidden')}
-                        className="bg-gradient-to-r from-slate-600 to-slate-700 hover:from-slate-700 hover:to-slate-800 text-white p-3 rounded-lg transition-all duration-300 text-sm font-medium"
-                      >
-                        👻 Hide from Players
-                      </button>
-                    )}
-                  </div>
-                  
-                  {/* Player View Status */}
-                  <div className="mt-4 p-3 bg-slate-700/30 rounded-lg border border-slate-600/50">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center space-x-2">
-                        <span className="text-sm text-slate-400">Players currently see:</span>
-                        <span className={`px-2 py-1 rounded text-xs font-medium ${
-                          playerViewMode === 'hidden' 
-                            ? 'bg-red-600/20 text-red-300 border border-red-500/30' 
-                            : 'bg-green-600/20 text-green-300 border border-green-500/30'
-                        }`}>
-                          {playerViewOptions.find(opt => opt.id === playerViewMode)?.name}
-                        </span>
-                      </div>
-                      {playerViewMode === 'hidden' && (
-                        <div className="text-xs text-amber-400 animate-pulse">
-                          ⚠️ Players are waiting
-                        </div>
-                      )}
-                    </div>
-                  </div>
                 </div>
               </div>
             )}
