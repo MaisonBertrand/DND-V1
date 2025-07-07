@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { manualCampaignService } from '../../services/manualCampaign';
+import { dmToolsService } from '../../services/dmTools';
 
 export default function DMMapEditor({ partyId, onMapUpdate }) {
   const [campaignMap, setCampaignMap] = useState([]);
@@ -18,12 +19,22 @@ export default function DMMapEditor({ partyId, onMapUpdate }) {
     loadMap();
   }, [partyId]);
 
-  const loadMap = () => {
-    const mapData = manualCampaignService.loadMap(partyId);
-    setMapTitle(mapData.title);
-    setCampaignMap(mapData.content);
-    setSubMaps(mapData.subMaps);
-    setMapSize(mapData.size);
+  const loadMap = async () => {
+    try {
+      const mapData = await manualCampaignService.loadMapFromDatabase(partyId);
+      setMapTitle(mapData.title);
+      setCampaignMap(mapData.content);
+      setSubMaps(mapData.subMaps);
+      setMapSize(mapData.size);
+    } catch (error) {
+      console.error('Error loading map:', error);
+      // Fallback to default map
+      const defaultMapData = manualCampaignService.loadMap(partyId);
+      setMapTitle(defaultMapData.title);
+      setCampaignMap(defaultMapData.content);
+      setSubMaps(defaultMapData.subMaps);
+      setMapSize(defaultMapData.size);
+    }
   };
 
   const tileTypes = manualCampaignService.getTileTypes();
@@ -51,17 +62,44 @@ export default function DMMapEditor({ partyId, onMapUpdate }) {
     }
   };
 
-  const handleTileClick = (x, y) => {
+  const handleTileClick = async (x, y) => {
+    let newMap;
     if (selectedTool === 'draw') {
-      setCampaignMap(manualCampaignService.updateMapTile(campaignMap, x, y, selectedTile));
+      newMap = manualCampaignService.updateMapTile(campaignMap, x, y, selectedTile);
     } else if (selectedTool === 'erase') {
-      setCampaignMap(manualCampaignService.updateMapTile(campaignMap, x, y, 'empty'));
+      newMap = manualCampaignService.updateMapTile(campaignMap, x, y, 'empty');
     } else if (selectedTool === 'player') {
       // Add player marker
       setPlayerPositions(prev => ({
         ...prev,
         [`player_${Date.now()}`]: { x, y, name: 'Player' }
       }));
+      return; // Don't save for player markers yet
+    }
+
+    // Update local state
+    setCampaignMap(newMap);
+
+    // Save to database and notify other players
+    try {
+      await manualCampaignService.saveMapToDatabase(partyId, {
+        title: mapTitle,
+        content: newMap,
+        size: mapSize,
+        subMaps: subMaps
+      });
+      
+      // Notify parent component of map update
+      if (onMapUpdate) {
+        onMapUpdate({
+          title: mapTitle,
+          content: newMap,
+          size: mapSize,
+          subMaps: subMaps
+        });
+      }
+    } catch (error) {
+      console.error('Error saving map:', error);
     }
   };
 
@@ -142,34 +180,12 @@ export default function DMMapEditor({ partyId, onMapUpdate }) {
 
   return (
     <div className="fantasy-card">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-xl font-bold text-slate-100">🗺️ DM Map Editor</h3>
-        <div className="flex gap-2">
-          <button
-            onClick={handleSaveMap}
-            className="bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white font-semibold py-2 px-4 rounded-lg transition-all duration-300 text-sm"
-          >
-            💾 Save Map
-          </button>
-          <button
-            onClick={handleClearMap}
-            className="bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white font-semibold py-2 px-4 rounded-lg transition-all duration-300 text-sm"
-          >
-            🗑️ Clear
-          </button>
-        </div>
+      <div className="mb-4">
+        <h3 className="text-xl font-bold text-slate-100">🗺️ Campaign Map</h3>
+        <p className="text-sm text-slate-400 mt-1">Click and drag to edit the map. Changes are saved automatically.</p>
       </div>
 
-      {/* Map Title */}
-      <div className="mb-4">
-        <input
-          type="text"
-          value={mapTitle}
-          onChange={(e) => setMapTitle(e.target.value)}
-          className="w-full bg-slate-800 border border-slate-600 text-slate-100 px-3 py-2 rounded-lg focus:border-slate-500 focus:outline-none"
-          placeholder="Map Title"
-        />
-      </div>
+
 
       {/* Tool Selection */}
       <div className="mb-4">

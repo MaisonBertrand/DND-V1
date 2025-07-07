@@ -4,7 +4,7 @@ import {
   createCampaignStory,
   db
 } from '../firebase/database';
-import { doc, onSnapshot } from 'firebase/firestore';
+import { doc, onSnapshot, query, collection, where } from 'firebase/firestore';
 
 export class DMToolsService {
   constructor() {
@@ -28,13 +28,17 @@ export class DMToolsService {
 
       // Save to campaign story
       const campaignStory = await getCampaignStory(partyId);
+      if (!campaignStory) {
+        throw new Error('Campaign story not found');
+      }
+
       const updatedStory = {
         ...campaignStory,
         scenes: [...(campaignStory?.scenes || []), scene],
         currentScene: scene.id
       };
 
-      await updateCampaignStory(partyId, updatedStory);
+      await updateCampaignStory(campaignStory.id, updatedStory);
       return scene;
     } catch (error) {
       console.error('Error creating scene:', error);
@@ -45,6 +49,10 @@ export class DMToolsService {
   async updateScene(partyId, sceneId, updates) {
     try {
       const campaignStory = await getCampaignStory(partyId);
+      if (!campaignStory) {
+        throw new Error('Campaign story not found');
+      }
+
       const scenes = campaignStory?.scenes || [];
       const sceneIndex = scenes.findIndex(s => s.id === sceneId);
       
@@ -59,7 +67,7 @@ export class DMToolsService {
         scenes
       };
 
-      await updateCampaignStory(partyId, updatedStory);
+      await updateCampaignStory(campaignStory.id, updatedStory);
       return scenes[sceneIndex];
     } catch (error) {
       console.error('Error updating scene:', error);
@@ -86,6 +94,10 @@ export class DMToolsService {
   async addObjective(partyId, sceneId, objective) {
     try {
       const campaignStory = await getCampaignStory(partyId);
+      if (!campaignStory) {
+        throw new Error('Campaign story not found');
+      }
+
       const scenes = campaignStory?.scenes || [];
       const sceneIndex = scenes.findIndex(s => s.id === sceneId);
       
@@ -107,7 +119,7 @@ export class DMToolsService {
         scenes
       };
 
-      await updateCampaignStory(partyId, updatedStory);
+      await updateCampaignStory(campaignStory.id, updatedStory);
       return newObjective;
     } catch (error) {
       console.error('Error adding objective:', error);
@@ -118,6 +130,10 @@ export class DMToolsService {
   async addProblem(partyId, sceneId, problem) {
     try {
       const campaignStory = await getCampaignStory(partyId);
+      if (!campaignStory) {
+        throw new Error('Campaign story not found');
+      }
+
       const scenes = campaignStory?.scenes || [];
       const sceneIndex = scenes.findIndex(s => s.id === sceneId);
       
@@ -139,7 +155,7 @@ export class DMToolsService {
         scenes
       };
 
-      await updateCampaignStory(partyId, updatedStory);
+      await updateCampaignStory(campaignStory.id, updatedStory);
       return newProblem;
     } catch (error) {
       console.error('Error adding problem:', error);
@@ -151,6 +167,10 @@ export class DMToolsService {
   async updatePlayerPosition(partyId, playerId, position) {
     try {
       const campaignStory = await getCampaignStory(partyId);
+      if (!campaignStory) {
+        throw new Error('Campaign story not found');
+      }
+
       const playerPositions = campaignStory?.playerPositions || {};
       
       playerPositions[playerId] = {
@@ -164,7 +184,7 @@ export class DMToolsService {
         playerPositions
       };
 
-      await updateCampaignStory(partyId, updatedStory);
+      await updateCampaignStory(campaignStory.id, updatedStory);
       return playerPositions[playerId];
     } catch (error) {
       console.error('Error updating player position:', error);
@@ -186,13 +206,17 @@ export class DMToolsService {
   async updatePlayerView(partyId, viewMode) {
     try {
       const campaignStory = await getCampaignStory(partyId);
+      if (!campaignStory) {
+        throw new Error('Campaign story not found');
+      }
+
       const updatedStory = {
         ...campaignStory,
         playerViewMode: viewMode,
         lastViewUpdate: new Date()
       };
 
-      await updateCampaignStory(partyId, updatedStory);
+      await updateCampaignStory(campaignStory.id, updatedStory);
       return viewMode;
     } catch (error) {
       console.error('Error updating player view:', error);
@@ -203,7 +227,7 @@ export class DMToolsService {
   async getPlayerView(partyId) {
     try {
       const campaignStory = await getCampaignStory(partyId);
-      return campaignStory?.playerViewMode || 'map';
+      return campaignStory?.playerViewMode || 'hidden';
     } catch (error) {
       console.error('Error getting player view:', error);
       throw error;
@@ -213,11 +237,15 @@ export class DMToolsService {
   // Real-time listener for player view changes
   listenToPlayerView(partyId, callback) {
     try {
-      const campaignStoryRef = doc(db, 'campaignStories', partyId);
-      return onSnapshot(campaignStoryRef, (doc) => {
-        if (doc.exists()) {
+      const q = query(
+        collection(db, 'campaignStories'),
+        where('partyId', '==', partyId)
+      );
+      return onSnapshot(q, (querySnapshot) => {
+        if (!querySnapshot.empty) {
+          const doc = querySnapshot.docs[0];
           const data = doc.data();
-          const viewMode = data?.playerViewMode || 'map';
+          const viewMode = data?.playerViewMode || 'hidden';
           callback(viewMode);
         }
       }, (error) => {
@@ -225,6 +253,30 @@ export class DMToolsService {
       });
     } catch (error) {
       console.error('Error setting up player view listener:', error);
+      return null;
+    }
+  }
+
+  // Real-time listener for campaign story changes (including map updates)
+  listenToCampaignStory(partyId, callback) {
+    try {
+      const q = query(
+        collection(db, 'campaignStories'),
+        where('partyId', '==', partyId)
+      );
+      return onSnapshot(q, (querySnapshot) => {
+        if (!querySnapshot.empty) {
+          const doc = querySnapshot.docs[0];
+          const data = { id: doc.id, ...doc.data() };
+          callback(data);
+        } else {
+          callback(null);
+        }
+      }, (error) => {
+        console.error('Error listening to campaign story:', error);
+      });
+    } catch (error) {
+      console.error('Error setting up campaign story listener:', error);
       return null;
     }
   }

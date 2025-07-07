@@ -2,8 +2,10 @@ import {
   getCampaignStory, 
   updateCampaignStory,
   createCampaignStory,
-  getPartyById
+  getPartyById,
+  db
 } from '../firebase/database';
+import { addDoc, collection } from 'firebase/firestore';
 import { combatService } from './combat';
 
 export class ManualCampaignService {
@@ -83,10 +85,13 @@ export class ManualCampaignService {
           currentScene: '',
           storyHistory: [],
           status: 'active',
+          playerViewMode: 'hidden', // Initialize with hidden view so players see loading screen
           createdAt: new Date()
         };
-        await updateCampaignStory(partyId, newStory);
-        return newStory;
+        
+        // Create the document in Firestore
+        const docRef = await addDoc(collection(db, 'campaignStories'), newStory);
+        return { id: docRef.id, ...newStory };
       }
     } catch (error) {
       console.error('Error loading campaign data:', error);
@@ -109,7 +114,7 @@ export class ManualCampaignService {
         ]
       };
       
-      await updateCampaignStory(partyId, updatedStory);
+      await updateCampaignStory(story.id, updatedStory);
       return updatedStory;
     } catch (error) {
       console.error('Error saving scene:', error);
@@ -125,7 +130,7 @@ export class ManualCampaignService {
         endedAt: new Date()
       };
       
-      await updateCampaignStory(partyId, updatedStory);
+      await updateCampaignStory(story.id, updatedStory);
       return updatedStory;
     } catch (error) {
       console.error('Error ending session:', error);
@@ -181,6 +186,135 @@ export class ManualCampaignService {
     } catch (error) {
       console.error('Error saving map:', error);
       throw error;
+    }
+  }
+
+  // Convert 2D array to Firestore-compatible format
+  convertMapToFirestore(mapData) {
+    // Convert 2D array to flat object with coordinates as keys
+    const flatContent = {};
+    if (mapData.content && Array.isArray(mapData.content)) {
+      mapData.content.forEach((row, y) => {
+        if (Array.isArray(row)) {
+          row.forEach((tile, x) => {
+            flatContent[`${x}-${y}`] = tile;
+          });
+        }
+      });
+    }
+
+    // Convert subMaps to Firestore-compatible format
+    const flatSubMaps = {};
+    if (mapData.subMaps && typeof mapData.subMaps === 'object') {
+      Object.keys(mapData.subMaps).forEach(key => {
+        const subMap = mapData.subMaps[key];
+        if (Array.isArray(subMap)) {
+          const flatSubMap = {};
+          subMap.forEach((row, y) => {
+            if (Array.isArray(row)) {
+              row.forEach((tile, x) => {
+                flatSubMap[`${x}-${y}`] = tile;
+              });
+            }
+          });
+          flatSubMaps[key] = flatSubMap;
+        }
+      });
+    }
+
+    return {
+      title: mapData.title,
+      content: flatContent,
+      size: mapData.size,
+      subMaps: flatSubMaps,
+      updatedAt: new Date().toISOString()
+    };
+  }
+
+  // Convert Firestore format back to 2D array
+  convertMapFromFirestore(firestoreMap) {
+    if (!firestoreMap) return null;
+
+    // Convert flat content back to 2D array
+    const content = [];
+    if (firestoreMap.content && typeof firestoreMap.content === 'object') {
+      const size = firestoreMap.size || { width: 15, height: 10 };
+      for (let y = 0; y < size.height; y++) {
+        const row = [];
+        for (let x = 0; x < size.width; x++) {
+          const key = `${x}-${y}`;
+          row.push(firestoreMap.content[key] || 'empty');
+        }
+        content.push(row);
+      }
+    }
+
+    // Convert flat subMaps back to 2D arrays
+    const subMaps = {};
+    if (firestoreMap.subMaps && typeof firestoreMap.subMaps === 'object') {
+      Object.keys(firestoreMap.subMaps).forEach(key => {
+        const flatSubMap = firestoreMap.subMaps[key];
+        if (typeof flatSubMap === 'object') {
+          const subMap = [];
+          for (let y = 0; y < 8; y++) {
+            const row = [];
+            for (let x = 0; x < 8; x++) {
+              const subKey = `${x}-${y}`;
+              row.push(flatSubMap[subKey] || 'empty');
+            }
+            subMap.push(row);
+          }
+          subMaps[key] = subMap;
+        }
+      });
+    }
+
+    return {
+      title: firestoreMap.title,
+      content: content,
+      size: firestoreMap.size,
+      subMaps: subMaps,
+      updatedAt: firestoreMap.updatedAt
+    };
+  }
+
+  async saveMapToDatabase(partyId, mapData) {
+    try {
+      // Convert map data to Firestore-compatible format
+      const firestoreMap = this.convertMapToFirestore(mapData);
+
+      // Get the campaign story to update
+      const campaignStory = await getCampaignStory(partyId);
+      if (!campaignStory) {
+        throw new Error('Campaign story not found');
+      }
+
+      // Update the campaign story with the new map data
+      await updateCampaignStory(campaignStory.id, {
+        campaignMap: firestoreMap
+      });
+
+      return true;
+    } catch (error) {
+      console.error('Error saving map to database:', error);
+      throw error;
+    }
+  }
+
+  async loadMapFromDatabase(partyId) {
+    try {
+      const campaignStory = await getCampaignStory(partyId);
+      if (!campaignStory || !campaignStory.campaignMap) {
+        // Return default map if no map exists in database
+        return this.loadMap(partyId);
+      }
+
+      // Convert Firestore format back to 2D array format
+      return this.convertMapFromFirestore(campaignStory.campaignMap);
+    } catch (error) {
+      console.error('Error loading map from database:', error);
+      // Fallback to localStorage
+      return this.loadMap(partyId);
     }
   }
 

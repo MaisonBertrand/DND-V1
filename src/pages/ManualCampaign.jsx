@@ -12,10 +12,7 @@ export default function ManualCampaign() {
   const [loading, setLoading] = useState(true);
   const [partyCharacters, setPartyCharacters] = useState([]);
   const [story, setStory] = useState(null);
-  const [currentScene, setCurrentScene] = useState('');
-  const [enemyDetails, setEnemyDetails] = useState('');
-  const [showCombatSetup, setShowCombatSetup] = useState(false);
-  const [combatSession, setCombatSession] = useState(null);
+
   const [showMapEditor, setShowMapEditor] = useState(false);
   const [campaignMap, setCampaignMap] = useState([]);
   const [mapTitle, setMapTitle] = useState('Campaign Map');
@@ -58,16 +55,38 @@ export default function ManualCampaign() {
     const unsubscribe = dmToolsService.listenToPlayerView(partyId, (viewMode) => {
       console.log('Player view updated to:', viewMode);
       setPlayerViewMode(viewMode);
-      // If DM has set a view mode, we're no longer in initial loading
-      if (viewMode !== 'map') {
-        setIsInitialLoading(false);
-      }
+      // Exit initial loading when any view mode is set (including 'map')
+      setIsInitialLoading(false);
     });
 
     return () => {
       if (unsubscribe) unsubscribe();
     };
   }, [user, partyId, isDM]);
+
+  // Real-time listener for map updates (for all users)
+  useEffect(() => {
+    if (!user || !partyId) return;
+
+    console.log('Setting up map listener for party:', partyId);
+    const unsubscribe = dmToolsService.listenToCampaignStory(partyId, (story) => {
+      if (story && story.campaignMap) {
+        console.log('Map updated:', story.campaignMap);
+        // Convert Firestore format back to 2D array format
+        const convertedMap = manualCampaignService.convertMapFromFirestore(story.campaignMap);
+        if (convertedMap) {
+          setMapTitle(convertedMap.title);
+          setCampaignMap(convertedMap.content);
+          setSubMaps(convertedMap.subMaps);
+          setMapSize(convertedMap.size);
+        }
+      }
+    });
+
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
+  }, [user, partyId]);
 
   // Global mouse up handler to stop dragging
   useEffect(() => {
@@ -81,12 +100,22 @@ export default function ManualCampaign() {
     };
   }, []);
 
-  const loadMap = () => {
-    const mapData = manualCampaignService.loadMap(partyId);
-    setMapTitle(mapData.title);
-    setCampaignMap(mapData.content);
-    setSubMaps(mapData.subMaps);
-    setMapSize(mapData.size);
+  const loadMap = async () => {
+    try {
+      const mapData = await manualCampaignService.loadMapFromDatabase(partyId);
+      setMapTitle(mapData.title);
+      setCampaignMap(mapData.content);
+      setSubMaps(mapData.subMaps);
+      setMapSize(mapData.size);
+    } catch (error) {
+      console.error('Error loading map:', error);
+      // Fallback to localStorage
+      const mapData = manualCampaignService.loadMap(partyId);
+      setMapTitle(mapData.title);
+      setCampaignMap(mapData.content);
+      setSubMaps(mapData.subMaps);
+      setMapSize(mapData.size);
+    }
   };
 
   const tileTypes = manualCampaignService.getTileTypes();
@@ -95,21 +124,40 @@ export default function ManualCampaign() {
     return manualCampaignService.initializeMap(mapSize);
   };
 
-  const handleSaveMap = () => {
-    manualCampaignService.saveMap(partyId, {
-      title: mapTitle,
-      content: campaignMap,
-      size: mapSize,
-      subMaps: subMaps
-    });
-    setShowMapEditor(false);
+  const handleSaveMap = async () => {
+    try {
+      await manualCampaignService.saveMapToDatabase(partyId, {
+        title: mapTitle,
+        content: campaignMap,
+        size: mapSize,
+        subMaps: subMaps
+      });
+      setShowMapEditor(false);
+    } catch (error) {
+      console.error('Error saving map:', error);
+    }
   };
 
-  const handleTileClick = (x, y) => {
+  const handleTileClick = async (x, y) => {
+    let newMap;
     if (selectedTool === 'draw') {
-      setCampaignMap(manualCampaignService.updateMapTile(campaignMap, x, y, selectedTile));
+      newMap = manualCampaignService.updateMapTile(campaignMap, x, y, selectedTile);
     } else if (selectedTool === 'erase') {
-      setCampaignMap(manualCampaignService.updateMapTile(campaignMap, x, y, 'empty'));
+      newMap = manualCampaignService.updateMapTile(campaignMap, x, y, 'empty');
+    }
+    
+    setCampaignMap(newMap);
+    
+    // Save to database for real-time updates
+    try {
+      await manualCampaignService.saveMapToDatabase(partyId, {
+        title: mapTitle,
+        content: newMap,
+        size: mapSize,
+        subMaps: subMaps
+      });
+    } catch (error) {
+      console.error('Error saving map to database:', error);
     }
   };
 
@@ -129,13 +177,38 @@ export default function ManualCampaign() {
     setIsDragging(false);
   };
 
-  const handleClearMap = () => {
-    setCampaignMap(initializeMap());
-  };
-
-  const handleResizeMap = () => {
+  const handleClearMap = async () => {
     const newMap = initializeMap();
     setCampaignMap(newMap);
+    
+    // Save to database for real-time updates
+    try {
+      await manualCampaignService.saveMapToDatabase(partyId, {
+        title: mapTitle,
+        content: newMap,
+        size: mapSize,
+        subMaps: subMaps
+      });
+    } catch (error) {
+      console.error('Error saving cleared map to database:', error);
+    }
+  };
+
+  const handleResizeMap = async () => {
+    const newMap = initializeMap();
+    setCampaignMap(newMap);
+    
+    // Save to database for real-time updates
+    try {
+      await manualCampaignService.saveMapToDatabase(partyId, {
+        title: mapTitle,
+        content: newMap,
+        size: mapSize,
+        subMaps: subMaps
+      });
+    } catch (error) {
+      console.error('Error saving resized map to database:', error);
+    }
   };
 
   const handleTileRightClick = (x, y, e) => {
@@ -149,12 +222,15 @@ export default function ManualCampaign() {
     return manualCampaignService.initializeSubMap();
   };
 
-  const handleSubMapTileClick = (x, y) => {
+  const handleSubMapTileClick = async (x, y) => {
+    let newSubMap;
     if (selectedTool === 'draw') {
-      setCurrentSubMap(manualCampaignService.updateSubMapTile(currentSubMap, x, y, selectedTile));
+      newSubMap = manualCampaignService.updateSubMapTile(currentSubMap, x, y, selectedTile);
     } else if (selectedTool === 'erase') {
-      setCurrentSubMap(manualCampaignService.updateSubMapTile(currentSubMap, x, y, 'empty'));
+      newSubMap = manualCampaignService.updateSubMapTile(currentSubMap, x, y, 'empty');
     }
+    
+    setCurrentSubMap(newSubMap);
   };
 
   const handleSubMapTileMouseDown = (x, y) => {
@@ -169,9 +245,22 @@ export default function ManualCampaign() {
     }
   };
 
-  const handleSaveSubMap = () => {
-    setSubMaps(manualCampaignService.saveSubMap(subMaps, selectedSubMapTile.x, selectedSubMapTile.y, currentSubMap));
+  const handleSaveSubMap = async () => {
+    const newSubMaps = manualCampaignService.saveSubMap(subMaps, selectedSubMapTile.x, selectedSubMapTile.y, currentSubMap);
+    setSubMaps(newSubMaps);
     setShowSubMapEditor(false);
+    
+    // Save to database for real-time updates
+    try {
+      await manualCampaignService.saveMapToDatabase(partyId, {
+        title: mapTitle,
+        content: campaignMap,
+        size: mapSize,
+        subMaps: newSubMaps
+      });
+    } catch (error) {
+      console.error('Error saving sub-map to database:', error);
+    }
   };
 
   const handleClearSubMap = () => {
@@ -193,7 +282,6 @@ export default function ManualCampaign() {
       // Load or create campaign story using service
       const campaignStory = await manualCampaignService.loadCampaignData(partyId);
       setStory(campaignStory);
-      setCurrentScene(campaignStory.currentScene || '');
       
       // Check if user is DM and load player view mode
       const party = await manualCampaignService.getPartyData(partyId);
@@ -204,12 +292,8 @@ export default function ManualCampaign() {
         const viewMode = await dmToolsService.getPlayerView(partyId);
         setPlayerViewMode(viewMode);
         
-        // If DM hasn't set a specific view mode yet, show initial loading
-        if (viewMode === 'map') {
-          setIsInitialLoading(true);
-        } else {
-          setIsInitialLoading(false);
-        }
+        // Exit initial loading when we have a view mode (including 'map')
+        setIsInitialLoading(false);
       } else {
         // DM view - not in initial loading
         setIsInitialLoading(false);
@@ -221,45 +305,7 @@ export default function ManualCampaign() {
     }
   };
 
-  const handleSaveScene = async () => {
-    try {
-      const updatedStory = await manualCampaignService.saveScene(partyId, story, currentScene);
-      setStory(updatedStory);
-      setCurrentScene('');
-    } catch (error) {
-      console.error('Error saving scene:', error);
-    }
-  };
 
-  const handleStartCombat = async () => {
-    try {
-      setLoading(true);
-      
-      const session = await manualCampaignService.startCombat(
-        partyId,
-        partyCharacters,
-        enemyDetails,
-        currentScene
-      );
-
-      // Navigate to combat
-      navigate(`/combat/${session.id}`);
-    } catch (error) {
-      console.error('Error starting combat:', error);
-      alert(error.message || 'Error starting combat. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleEndSession = async () => {
-    try {
-      await manualCampaignService.endSession(partyId, story);
-      navigate('/dashboard');
-    } catch (error) {
-      console.error('Error ending session:', error);
-    }
-  };
 
   if (loading) {
     return (
@@ -301,19 +347,13 @@ export default function ManualCampaign() {
           <>
             {/* Header */}
             <div className="mb-8">
-              <div className="flex items-center justify-between mb-6">
+              <div className="mb-6">
                 <div>
                   <h1 className="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-amber-400 to-orange-400 mb-2">
                     Manual Campaign
                   </h1>
                   <p className="text-slate-400">Traditional D&D experience - full control over your story</p>
                 </div>
-                <button
-                  onClick={handleEndSession}
-                  className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors"
-                >
-                  End Session
-                </button>
               </div>
             </div>
 
@@ -438,104 +478,28 @@ export default function ManualCampaign() {
           </div>
         )}
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Party Characters */}
-          <div className="lg:col-span-1">
-            <div className="fantasy-card">
-              <h2 className="text-xl font-bold text-slate-100 mb-4">Party Members</h2>
-              <div className="space-y-3">
-                {partyCharacters.map((character) => (
-                  <div key={character.id} className="bg-slate-700/50 rounded-lg p-3">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <h3 className="font-semibold text-slate-100">{character.name}</h3>
-                        <p className="text-sm text-slate-400">{character.class} • Level {character.level}</p>
-                      </div>
-                      <div className="text-right">
-                        <div className="text-sm text-slate-300">
-                          HP: {character.hp}/{character.maxHp}
-                        </div>
-                        <div className="text-xs text-slate-400">
-                          AC: {character.ac}
-                        </div>
-                      </div>
+        {/* Party Characters */}
+        <div className="fantasy-card">
+          <h2 className="text-xl font-bold text-slate-100 mb-4">Party Members</h2>
+          <div className="space-y-3">
+            {partyCharacters.map((character) => (
+              <div key={character.id} className="bg-slate-700/50 rounded-lg p-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="font-semibold text-slate-100">{character.name}</h3>
+                    <p className="text-sm text-slate-400">{character.class} • Level {character.level}</p>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-sm text-slate-300">
+                      HP: {character.hp}/{character.maxHp}
+                    </div>
+                    <div className="text-xs text-slate-400">
+                      AC: {character.ac}
                     </div>
                   </div>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* Story Management */}
-          <div className="lg:col-span-2 space-y-6">
-            {/* Current Scene */}
-            <div className="fantasy-card">
-              <h2 className="text-xl font-bold text-slate-100 mb-4">Current Scene</h2>
-              <textarea
-                value={currentScene}
-                onChange={(e) => setCurrentScene(e.target.value)}
-                placeholder="Describe the current scene, what the players see, hear, and feel..."
-                className="w-full bg-slate-700/50 border border-slate-600/50 text-slate-200 px-4 py-3 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-amber-500/50"
-                rows="4"
-              />
-              <div className="flex space-x-3 mt-4">
-                <button
-                  onClick={handleSaveScene}
-                  className="bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-semibold py-2 px-4 rounded-lg transition-all duration-300"
-                >
-                  Save Scene
-                </button>
-                <button
-                  onClick={() => setShowCombatSetup(!showCombatSetup)}
-                  className="bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white font-semibold py-2 px-4 rounded-lg transition-all duration-300"
-                >
-                  {showCombatSetup ? 'Hide Combat Setup' : 'Setup Combat'}
-                </button>
-              </div>
-            </div>
-
-            {/* Combat Setup */}
-            {showCombatSetup && (
-              <div className="fantasy-card">
-                <h2 className="text-xl font-bold text-slate-100 mb-4">Combat Setup</h2>
-                <div className="mb-4">
-                  <label className="block text-sm font-semibold text-slate-200 mb-2">
-                    Enemy Details (one per line: Name, HP, AC, Level)
-                  </label>
-                  <textarea
-                    value={enemyDetails}
-                    onChange={(e) => setEnemyDetails(e.target.value)}
-                    placeholder="Goblin, 15, 12, 1&#10;Orc Warrior, 25, 14, 2&#10;Dragon, 100, 18, 5"
-                    className="w-full bg-slate-700/50 border border-slate-600/50 text-slate-200 px-4 py-3 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-amber-500/50"
-                    rows="4"
-                  />
-                </div>
-                <button
-                  onClick={handleStartCombat}
-                  disabled={loading}
-                  className="bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white font-semibold py-3 px-6 rounded-lg transition-all duration-300 disabled:opacity-50"
-                >
-                  {loading ? 'Starting Combat...' : 'Start Combat'}
-                </button>
-              </div>
-            )}
-
-            {/* Story History */}
-            {story?.storyHistory && story.storyHistory.length > 0 && (
-              <div className="fantasy-card">
-                <h2 className="text-xl font-bold text-slate-100 mb-4">Story History</h2>
-                <div className="space-y-3 max-h-64 overflow-y-auto">
-                  {story.storyHistory.map((entry, index) => (
-                    <div key={index} className="bg-slate-700/30 rounded-lg p-3">
-                      <div className="text-xs text-slate-400 mb-1">
-                        {entry.timestamp?.toDate?.()?.toLocaleString() || 'Unknown time'}
-                      </div>
-                      <p className="text-slate-200 text-sm">{entry.content}</p>
-                    </div>
-                  ))}
                 </div>
               </div>
-            )}
+            ))}
           </div>
         </div>
 
@@ -675,7 +639,7 @@ export default function ManualCampaign() {
 
                 {/* Map Canvas */}
                 <div className="lg:col-span-3">
-                  <div className="bg-slate-800/50 border border-slate-600/50 rounded-lg p-4 overflow-auto">
+                  <div className="bg-slate-800/50 border border-slate-600/50 rounded-lg p-4 overflow-auto map-editor">
                     <div className="inline-block">
                       {campaignMap.map((row, y) => (
                         <div key={y} className="flex">
@@ -686,7 +650,7 @@ export default function ManualCampaign() {
                               onMouseEnter={() => handleTileMouseEnter(x, y)}
                               onMouseUp={handleTileMouseUp}
                               onContextMenu={(e) => handleTileRightClick(x, y, e)}
-                              className={`w-10 h-10 border border-slate-600 flex items-center justify-center text-sm transition-colors hover:border-amber-400 relative select-none ${tileTypes[tile]?.color || 'bg-slate-700'}`}
+                              className={`w-10 h-10 border border-slate-600 flex items-center justify-center text-sm transition-colors hover:border-amber-400 relative ${tileTypes[tile]?.color || 'bg-slate-700'}`}
                               title={`${x}, ${y}: ${tileTypes[tile]?.name || 'Unknown'}${getTileHasSubMap(x, y) ? ' (Right-click for sub-map)' : ' (Right-click to create sub-map)'}`}
                             >
                               {tileTypes[tile]?.symbol || '⬜'}
@@ -729,7 +693,7 @@ export default function ManualCampaign() {
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 {/* Sub-Map Canvas */}
                 <div className="lg:col-span-2">
-                  <div className="bg-slate-800/50 border border-slate-600/50 rounded-lg p-4">
+                  <div className="bg-slate-800/50 border border-slate-600/50 rounded-lg p-4 map-editor">
                     <div className="flex justify-between items-center mb-4">
                       <h3 className="text-lg font-semibold text-slate-100">Sub-Map (8x8)</h3>
                       <button
@@ -748,7 +712,7 @@ export default function ManualCampaign() {
                             onMouseDown={() => handleSubMapTileMouseDown(x, y)}
                             onMouseEnter={() => handleSubMapTileMouseEnter(x, y)}
                             onMouseUp={handleTileMouseUp}
-                            className={`w-12 h-12 border border-slate-600 flex items-center justify-center text-lg transition-colors hover:border-amber-400 select-none ${tileTypes[tile]?.color || 'bg-slate-700'}`}
+                            className={`w-12 h-12 border border-slate-600 flex items-center justify-center text-lg transition-colors hover:border-amber-400 ${tileTypes[tile]?.color || 'bg-slate-700'}`}
                             title={`${x}, ${y}: ${tileTypes[tile]?.name || 'Empty'}`}
                           >
                             {tileTypes[tile]?.symbol || '⬜'}
