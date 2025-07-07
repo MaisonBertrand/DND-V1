@@ -203,12 +203,43 @@ export default function ManualCampaignDM() {
             <div className="w-24 h-1 bg-gradient-to-r from-amber-400 to-orange-400 mx-auto rounded-full mb-4"></div>
             <h2 className="text-2xl font-semibold text-slate-100 mb-2">{party?.name}</h2>
             <p className="text-slate-400 mb-4">Manual Campaign - Dungeon Master Interface</p>
-            <div className="flex items-center justify-center space-x-4">
+            <div className="flex items-center justify-center space-x-4 mb-4">
               <div className="px-3 py-1 rounded-full text-sm font-medium bg-slate-600/20 text-slate-300 border border-slate-500/30">
                 👑 Dungeon Master
               </div>
               <div className="text-slate-400">
                 {partyCharacters.length} Players
+              </div>
+            </div>
+            
+            {/* Player View Control - Prominent */}
+            <div className="flex items-center justify-center">
+              <div className="bg-slate-700/50 border border-slate-600/50 rounded-lg p-3">
+                <div className="flex items-center space-x-3">
+                  <span className="text-sm text-slate-300">Player View:</span>
+                  {playerViewMode === 'hidden' ? (
+                    <button
+                      onClick={() => handlePlayerViewChange('map')}
+                      className="bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 text-white px-4 py-2 rounded-lg transition-all duration-300 text-sm font-medium"
+                    >
+                      👁️ Show Players
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => handlePlayerViewChange('hidden')}
+                      className="bg-gradient-to-r from-slate-600 to-slate-700 hover:from-slate-700 hover:to-slate-800 text-white px-4 py-2 rounded-lg transition-all duration-300 text-sm font-medium"
+                    >
+                      👻 Hide from Players
+                    </button>
+                  )}
+                  <span className={`px-2 py-1 rounded text-xs font-medium ${
+                    playerViewMode === 'hidden' 
+                      ? 'bg-red-600/20 text-red-300 border border-red-500/30' 
+                      : 'bg-green-600/20 text-green-300 border border-green-500/30'
+                  }`}>
+                    {playerViewOptions.find(opt => opt.id === playerViewMode)?.name}
+                  </span>
+                </div>
               </div>
             </div>
           </div>
@@ -335,12 +366,42 @@ export default function ManualCampaignDM() {
                     >
                       👥 View Players
                     </button>
-                    <button
-                      onClick={() => handlePlayerViewChange('hidden')}
-                      className="bg-gradient-to-r from-slate-600 to-slate-700 hover:from-slate-700 hover:to-slate-800 text-white p-3 rounded-lg transition-all duration-300 text-sm font-medium"
-                    >
-                      👻 Hide from Players
-                    </button>
+                    {playerViewMode === 'hidden' ? (
+                      <button
+                        onClick={() => handlePlayerViewChange('map')}
+                        className="bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 text-white p-3 rounded-lg transition-all duration-300 text-sm font-medium"
+                      >
+                        👁️ Show Players
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => handlePlayerViewChange('hidden')}
+                        className="bg-gradient-to-r from-slate-600 to-slate-700 hover:from-slate-700 hover:to-slate-800 text-white p-3 rounded-lg transition-all duration-300 text-sm font-medium"
+                      >
+                        👻 Hide from Players
+                      </button>
+                    )}
+                  </div>
+                  
+                  {/* Player View Status */}
+                  <div className="mt-4 p-3 bg-slate-700/30 rounded-lg border border-slate-600/50">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-2">
+                        <span className="text-sm text-slate-400">Players currently see:</span>
+                        <span className={`px-2 py-1 rounded text-xs font-medium ${
+                          playerViewMode === 'hidden' 
+                            ? 'bg-red-600/20 text-red-300 border border-red-500/30' 
+                            : 'bg-green-600/20 text-green-300 border border-green-500/30'
+                        }`}>
+                          {playerViewOptions.find(opt => opt.id === playerViewMode)?.name}
+                        </span>
+                      </div>
+                      {playerViewMode === 'hidden' && (
+                        <div className="text-xs text-amber-400 animate-pulse">
+                          ⚠️ Players are waiting
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>

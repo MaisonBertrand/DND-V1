@@ -30,6 +30,7 @@ export default function ManualCampaign() {
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [playerViewMode, setPlayerViewMode] = useState('map');
   const [isDM, setIsDM] = useState(false);
+  const [isInitialLoading, setIsInitialLoading] = useState(true);
 
   useEffect(() => {
     const unsubscribe = onAuthChange((user) => {
@@ -55,6 +56,10 @@ export default function ManualCampaign() {
 
     const unsubscribe = dmToolsService.listenToPlayerView(partyId, (viewMode) => {
       setPlayerViewMode(viewMode);
+      // If DM has set a view mode, we're no longer in initial loading
+      if (viewMode !== 'map') {
+        setIsInitialLoading(false);
+      }
     });
 
     return () => {
@@ -196,6 +201,16 @@ export default function ManualCampaign() {
         // Player view - check what DM wants them to see
         const viewMode = await dmToolsService.getPlayerView(partyId);
         setPlayerViewMode(viewMode);
+        
+        // If DM hasn't set a specific view mode yet, show initial loading
+        if (viewMode === 'map') {
+          setIsInitialLoading(true);
+        } else {
+          setIsInitialLoading(false);
+        }
+      } else {
+        // DM view - not in initial loading
+        setIsInitialLoading(false);
       }
     } catch (error) {
       console.error('Error loading campaign data:', error);
@@ -258,23 +273,47 @@ export default function ManualCampaign() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
       <div className="fantasy-container">
-        {/* Header */}
-        <div className="mb-8">
-          <div className="flex items-center justify-between mb-6">
-            <div>
-              <h1 className="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-amber-400 to-orange-400 mb-2">
-                Manual Campaign
-              </h1>
-              <p className="text-slate-400">Traditional D&D experience - full control over your story</p>
+        {/* Initial Loading Screen for Players */}
+        {!isDM && isInitialLoading && (
+          <div className="min-h-screen flex items-center justify-center">
+            <div className="fantasy-card max-w-md mx-auto text-center">
+              <div className="animate-pulse mb-6">
+                <div className="text-6xl mb-4">🎲</div>
+                <div className="text-4xl mb-2">⚔️</div>
+                <div className="text-2xl">🗺️</div>
+              </div>
+              <h2 className="text-2xl font-bold text-slate-100 mb-4">Campaign Starting...</h2>
+              <p className="text-slate-300 mb-6">
+                Please wait while the Dungeon Master sets up your game.
+              </p>
+              <div className="flex items-center justify-center space-x-2">
+                <div className="animate-spin rounded-full h-6 w-6 border-2 border-amber-400 border-t-transparent"></div>
+                <span className="text-slate-400 text-sm">Waiting for DM...</span>
+              </div>
             </div>
-            <button
-              onClick={handleEndSession}
-              className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors"
-            >
-              End Session
-            </button>
           </div>
-        </div>
+        )}
+
+        {/* Main Content - Only show if not in initial loading or if DM */}
+        {(!isInitialLoading || isDM) && (
+          <>
+            {/* Header */}
+            <div className="mb-8">
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h1 className="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-amber-400 to-orange-400 mb-2">
+                    Manual Campaign
+                  </h1>
+                  <p className="text-slate-400">Traditional D&D experience - full control over your story</p>
+                </div>
+                <button
+                  onClick={handleEndSession}
+                  className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors"
+                >
+                  End Session
+                </button>
+              </div>
+            </div>
 
         {/* Player View Content - Based on DM's choice */}
         {!isDM && (
@@ -333,11 +372,20 @@ export default function ManualCampaign() {
 
             {playerViewMode === 'hidden' && (
               <>
-                <h2 className="text-xl font-bold text-slate-100 mb-4">👻 DM is Preparing</h2>
-                <div className="bg-slate-800/50 border border-slate-600/50 rounded-lg p-8 text-center">
-                  <div className="text-4xl mb-4">👻</div>
-                  <p className="text-slate-300 mb-2">The Dungeon Master is preparing something special...</p>
-                  <p className="text-slate-400 text-sm">Please wait while they set up the scene.</p>
+                <h2 className="text-xl font-bold text-slate-100 mb-4">🎭 DM is Setting Up</h2>
+                <div className="bg-slate-800/50 border border-slate-600/50 rounded-lg p-12 text-center">
+                  <div className="text-6xl mb-6 animate-pulse">🎭</div>
+                  <h3 className="text-2xl font-bold text-slate-200 mb-4">Please Wait</h3>
+                  <p className="text-slate-300 mb-4 text-lg">
+                    The Dungeon Master is preparing something special for you...
+                  </p>
+                  <div className="flex items-center justify-center space-x-2 mb-4">
+                    <div className="animate-spin rounded-full h-6 w-6 border-2 border-amber-400 border-t-transparent"></div>
+                    <span className="text-slate-400">Setting up the scene</span>
+                  </div>
+                  <p className="text-slate-400 text-sm">
+                    This screen will automatically update when the DM reveals the content.
+                  </p>
                 </div>
               </>
             )}
@@ -775,6 +823,8 @@ export default function ManualCampaign() {
               </div>
             </div>
           </div>
+        )}
+          </>
         )}
       </div>
     </div>
