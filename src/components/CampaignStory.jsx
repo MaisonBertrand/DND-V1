@@ -848,6 +848,10 @@ What would you like to do?`;
       // Generate a unique ID for the enemy
       const enemyId = `enemy_${index}`;
       
+      // Parse stats from the enemy description
+      const statsText = enemy.stats || '';
+      const stats = parseEnemyStats(statsText, enemy.type);
+      
       // Convert the parsed enemy details to combat-ready format
       const combatEnemy = {
         id: enemyId,
@@ -859,13 +863,13 @@ What would you like to do?`;
         class: enemy.type?.toLowerCase() || 'enemy',
         race: enemy.type?.toLowerCase() || 'unknown',
         initiative: Math.floor(Math.random() * 20) + 1,
-        // Basic stats with fallbacks
-        strength: 12,
-        dexterity: 10,
-        constitution: 12,
-        intelligence: 8,
-        wisdom: 8,
-        charisma: 6,
+        // Use parsed stats or fallbacks
+        strength: stats.strength,
+        dexterity: stats.dexterity,
+        constitution: stats.constitution,
+        intelligence: stats.intelligence,
+        wisdom: stats.wisdom,
+        charisma: stats.charisma,
         // Combat properties
         statusEffects: [],
         cooldowns: {},
@@ -881,6 +885,58 @@ What would you like to do?`;
       
       return combatEnemy;
     });
+  };
+
+  // Helper function to parse enemy stats from description
+  const parseEnemyStats = (statsText, enemyType) => {
+    const statsTextLower = statsText.toLowerCase();
+    
+    // Default stats based on enemy type
+    let defaultStats = {
+      strength: 12,
+      dexterity: 10,
+      constitution: 12,
+      intelligence: 8,
+      wisdom: 8,
+      charisma: 6
+    };
+    
+    // Adjust defaults based on enemy type
+    if (enemyType) {
+      const typeLower = enemyType.toLowerCase();
+      if (typeLower.includes('goblin')) {
+        defaultStats = { strength: 8, dexterity: 14, constitution: 10, intelligence: 8, wisdom: 8, charisma: 8 };
+      } else if (typeLower.includes('orc') || typeLower.includes('troll')) {
+        defaultStats = { strength: 16, dexterity: 8, constitution: 14, intelligence: 7, wisdom: 9, charisma: 6 };
+      } else if (typeLower.includes('wizard') || typeLower.includes('mage') || typeLower.includes('sorcerer')) {
+        defaultStats = { strength: 8, dexterity: 12, constitution: 10, intelligence: 16, wisdom: 12, charisma: 14 };
+      } else if (typeLower.includes('priest') || typeLower.includes('cleric')) {
+        defaultStats = { strength: 12, dexterity: 10, constitution: 12, intelligence: 10, wisdom: 16, charisma: 12 };
+      } else if (typeLower.includes('rogue') || typeLower.includes('assassin')) {
+        defaultStats = { strength: 10, dexterity: 16, constitution: 10, intelligence: 12, wisdom: 10, charisma: 12 };
+      } else if (typeLower.includes('warrior') || typeLower.includes('fighter')) {
+        defaultStats = { strength: 16, dexterity: 12, constitution: 14, intelligence: 10, wisdom: 10, charisma: 8 };
+      } else if (typeLower.includes('boss') || typeLower.includes('leader')) {
+        defaultStats = { strength: 18, dexterity: 14, constitution: 16, intelligence: 12, wisdom: 14, charisma: 16 };
+      }
+    }
+    
+    // Try to extract specific stats from the description
+    const strengthMatch = statsTextLower.match(/(?:strong|strength|powerful).*?(\d+)/);
+    const dexterityMatch = statsTextLower.match(/(?:quick|fast|agile|dexterity).*?(\d+)/);
+    const constitutionMatch = statsTextLower.match(/(?:tough|hardy|constitution).*?(\d+)/);
+    const intelligenceMatch = statsTextLower.match(/(?:smart|intelligent|clever).*?(\d+)/);
+    const wisdomMatch = statsTextLower.match(/(?:wise|wisdom|perceptive).*?(\d+)/);
+    const charismaMatch = statsTextLower.match(/(?:charismatic|charming|leadership).*?(\d+)/);
+    
+    return {
+      strength: strengthMatch ? parseInt(strengthMatch[1]) : defaultStats.strength,
+      dexterity: dexterityMatch ? parseInt(dexterityMatch[1]) : defaultStats.dexterity,
+      constitution: constitutionMatch ? parseInt(constitutionMatch[1]) : defaultStats.constitution,
+      intelligence: intelligenceMatch ? parseInt(intelligenceMatch[1]) : defaultStats.intelligence,
+      wisdom: wisdomMatch ? parseInt(wisdomMatch[1]) : defaultStats.wisdom,
+      charisma: charismaMatch ? parseInt(charismaMatch[1]) : defaultStats.charisma
+    };
   };
 
 

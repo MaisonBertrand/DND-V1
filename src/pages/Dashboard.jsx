@@ -12,6 +12,7 @@ export default function Dashboard() {
   const [partyMemberProfiles, setPartyMemberProfiles] = useState({});
   const [publicPartyMemberProfiles, setPublicPartyMemberProfiles] = useState({});
   const [loading, setLoading] = useState(true);
+  const [deletingParty, setDeletingParty] = useState(false);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [joinCode, setJoinCode] = useState('');
   const [newParty, setNewParty] = useState({
@@ -22,6 +23,9 @@ export default function Dashboard() {
     inviteCode: '',
     campaignType: 'ai-assist' // 'ai-assist' or 'manual'
   });
+
+  // Ensure parties is always an array to prevent errors
+  const safeParties = Array.isArray(parties) ? parties.filter(party => party && party.id) : [];
 
   useEffect(() => {
     if (!authLoading) {
@@ -35,22 +39,38 @@ export default function Dashboard() {
 
   // Real-time party updates
   useEffect(() => {
-    if (!user?.uid) return;
+    if (!user?.uid || !safeParties.length || deletingParty) return;
 
-    const unsubscribeParties = parties.map(party => 
-      subscribeToParty(party.id, (updatedParty) => {
-        setParties(prevParties => 
-          prevParties.map(p => p.id === updatedParty.id ? updatedParty : p)
-        );
+    // Filter out any null or undefined parties before creating subscriptions
+    const validParties = safeParties.filter(party => party && party.id);
+    
+    if (validParties.length === 0) return;
+    
+    const unsubscribeParties = validParties.map(party => {
+      if (!party || !party.id) return null;
+      
+      return subscribeToParty(party.id, (updatedParty) => {
+        if (!updatedParty || !updatedParty.id || deletingParty) return;
+        
+        setParties(prevParties => {
+          // Filter out any null parties first
+          const validPrevParties = prevParties.filter(p => p && p.id);
+          return validPrevParties.map(p => p.id === updatedParty.id ? updatedParty : p);
+        });
+        
         // Reload member profiles when party updates
         loadPartyMemberProfiles([updatedParty]);
-      })
-    );
+      });
+    }).filter(Boolean); // Remove any null subscriptions
 
     return () => {
-      unsubscribeParties.forEach(unsubscribe => unsubscribe());
+      unsubscribeParties.forEach(unsubscribe => {
+        if (typeof unsubscribe === 'function') {
+          unsubscribe();
+        }
+      });
     };
-  }, [user?.uid, parties.map(p => p?.id).filter(Boolean).join(',')]);
+  }, [user?.uid, parties.length, deletingParty]);
 
   const loadUserData = async (userId) => {
     try {
@@ -59,13 +79,20 @@ export default function Dashboard() {
       setUserProfile(profile);
       
       const userParties = await getUserParties(userId);
-      await loadPartyMemberProfiles(userParties);
-      setParties(userParties);
+      
+      // Filter out any null or invalid parties
+      const validParties = userParties.filter(party => party && party.id);
+      
+      await loadPartyMemberProfiles(validParties);
+      setParties(validParties);
       
       // Load public parties
       await loadPublicParties();
     } catch (error) {
       console.error('Error loading user data:', error);
+      // Set empty arrays to prevent null reference errors
+      setParties([]);
+      setPartyMemberProfiles({});
     } finally {
       setLoading(false);
     }
@@ -164,17 +191,24 @@ export default function Dashboard() {
         return;
       }
       
-      await disbandParty(partyId, user.uid);
+      setDeletingParty(true);
+      setLoading(true);
+      
+      // Immediately remove the party from local state to prevent subscription issues
       setParties(prevParties => prevParties.filter(party => party && party.id !== partyId));
       
-      // Clear any cached profiles for this party
-      setPartyMemberProfiles(prev => {
-        const newProfiles = { ...prev };
-        // Remove profiles that are no longer needed
-        return newProfiles;
-      });
+      // Delete the party from the database
+      await disbandParty(partyId, user.uid);
+      
+      // Reload all user data to ensure consistency
+      await loadUserData(user.uid);
     } catch (error) {
       console.error('Error deleting party:', error);
+      // Even if there's an error, try to reload data to ensure UI consistency
+      await loadUserData(user.uid);
+    } finally {
+      setLoading(false);
+      setDeletingParty(false);
     }
   };
 
@@ -191,7 +225,7 @@ export default function Dashboard() {
       }
       
       // Find the party to get its campaign type
-      const party = parties.find(p => p.id === partyId);
+      const party = safeParties.find(p => p.id === partyId);
       if (!party) {
         alert('Party not found.');
         return;
@@ -322,7 +356,9 @@ export default function Dashboard() {
       <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-16 w-16 border-4 border-amber-400 border-t-transparent mx-auto mb-4"></div>
-          <p className="text-slate-300 text-lg font-medium">Loading your adventures...</p>
+          <p className="text-slate-300 text-lg font-medium">
+            {deletingParty ? 'Deleting campaign...' : 'Loading your adventures...'}
+          </p>
         </div>
       </div>
     );
@@ -576,7 +612,7 @@ export default function Dashboard() {
               <h2 className="text-2xl font-bold text-slate-100">My Campaigns</h2>
             </div>
             
-            {parties.length === 0 ? (
+            {safeParties.length === 0 ? (
               <div className="text-center py-12">
                 <div className="w-20 h-20 bg-gradient-to-br from-slate-600 to-slate-700 rounded-full flex items-center justify-center mx-auto mb-6">
                   <svg className="w-10 h-10 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -594,7 +630,7 @@ export default function Dashboard() {
               </div>
             ) : (
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {parties.map((party) => (
+                {safeParties.map((party) => (
                   <div key={party.id} className="group relative overflow-hidden rounded-xl bg-gradient-to-br from-slate-700/50 to-slate-600/50 border border-slate-500/50 p-6 hover:from-slate-700/70 hover:to-slate-600/70 transition-all duration-300 hover:scale-[1.02] hover:shadow-xl">
                     <div className="absolute inset-0 bg-gradient-to-r from-amber-500/5 to-orange-500/5 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
                     <div className="relative z-10">

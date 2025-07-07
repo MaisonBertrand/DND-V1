@@ -1,4 +1,6 @@
 import { db } from './config';
+
+export { db };
 import { 
   collection, 
   doc, 

@@ -1,7 +1,7 @@
 {
   "name": "DND-V1",
   "private": true,
-  "version": "3.1.5",
+  "version": "3.2.1",
   "homepage": "https://maisonbertrand.github.io/DND-V1",
   "type": "module",
   "scripts": {

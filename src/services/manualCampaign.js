@@ -1,7 +1,8 @@
 import { 
   getCampaignStory, 
   updateCampaignStory,
-  createCampaignStory
+  createCampaignStory,
+  getPartyById
 } from '../firebase/database';
 import { combatService } from './combat';
 
@@ -308,6 +309,16 @@ export class ManualCampaignService {
     } catch (error) {
       console.error('Error checking player readiness:', error);
       return false;
+    }
+  }
+
+  // Party Management
+  async getPartyData(partyId) {
+    try {
+      return await getPartyById(partyId);
+    } catch (error) {
+      console.error('Error getting party by ID:', error);
+      throw error;
     }
   }
 }

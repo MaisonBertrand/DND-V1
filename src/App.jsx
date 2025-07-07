@@ -11,6 +11,7 @@ import CharacterCreation from './pages/CharacterCreation';
 import CampaignLobby from './pages/CampaignLobby';
 import CampaignStory from './components/CampaignStory';
 import ManualCampaign from './pages/ManualCampaign';
+import ManualCampaignDM from './pages/ManualCampaignDM';
 import Combat from './pages/Combat';
 
 import './index.css';
@@ -49,6 +50,7 @@ function App() {
             <Route path="/lobby/:partyId" element={<CampaignLobby />} />
             <Route path="/campaign/:partyId" element={<CampaignStory />} />
             <Route path="/manual-campaign/:partyId" element={<ManualCampaign />} />
+            <Route path="/manual-campaign-dm/:partyId" element={<ManualCampaignDM />} />
             <Route path="/combat/:sessionId" element={<Combat />} />
 
             

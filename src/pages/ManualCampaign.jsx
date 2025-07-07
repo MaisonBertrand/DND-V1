@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { onAuthChange } from '../firebase/auth';
 import { getPartyCharacters } from '../firebase/database';
 import { manualCampaignService } from '../services/manualCampaign';
+import { dmToolsService } from '../services/dmTools';
 
 export default function ManualCampaign() {
   const { partyId } = useParams();
@@ -27,6 +28,8 @@ export default function ManualCampaign() {
   const [currentSubMap, setCurrentSubMap] = useState(null);
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const [playerViewMode, setPlayerViewMode] = useState('map');
+  const [isDM, setIsDM] = useState(false);
 
   useEffect(() => {
     const unsubscribe = onAuthChange((user) => {
@@ -45,6 +48,19 @@ export default function ManualCampaign() {
       loadMap();
     }
   }, [user, partyId]);
+
+  // Real-time listener for player view changes (for non-DM users)
+  useEffect(() => {
+    if (!user || !partyId || isDM) return;
+
+    const unsubscribe = dmToolsService.listenToPlayerView(partyId, (viewMode) => {
+      setPlayerViewMode(viewMode);
+    });
+
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
+  }, [user, partyId, isDM]);
 
   // Global mouse up handler to stop dragging
   useEffect(() => {
@@ -171,6 +187,16 @@ export default function ManualCampaign() {
       const campaignStory = await manualCampaignService.loadCampaignData(partyId);
       setStory(campaignStory);
       setCurrentScene(campaignStory.currentScene || '');
+      
+      // Check if user is DM and load player view mode
+      const party = await manualCampaignService.getPartyData(partyId);
+      setIsDM(party?.dmId === user?.uid);
+      
+      if (party?.dmId !== user?.uid) {
+        // Player view - check what DM wants them to see
+        const viewMode = await dmToolsService.getPlayerView(partyId);
+        setPlayerViewMode(viewMode);
+      }
     } catch (error) {
       console.error('Error loading campaign data:', error);
     } finally {
@@ -250,47 +276,117 @@ export default function ManualCampaign() {
           </div>
         </div>
 
-        {/* Campaign Map */}
-        <div className="fantasy-card mb-8">
-          <h2 className="text-xl font-bold text-slate-100 mb-4">Campaign Map</h2>
-          {campaignMap && campaignMap.length > 0 ? (
-            <>
-              <div className="bg-slate-800/50 border border-slate-600/50 rounded-lg p-4 overflow-x-auto">
-                <div className="inline-block">
-                  {campaignMap.map((row, y) => (
-                    <div key={y} className="flex">
-                      {row.map((tile, x) => (
-                        <div
-                          key={`${x}-${y}`}
-                          className={`w-8 h-8 border border-slate-600 flex items-center justify-center text-xs ${tileTypes[tile]?.color || 'bg-slate-700'}`}
-                          title={`${x}, ${y}: ${tileTypes[tile]?.name || 'Unknown'}`}
-                        >
-                          {tileTypes[tile]?.symbol || '⬜'}
+        {/* Player View Content - Based on DM's choice */}
+        {!isDM && (
+          <div className="fantasy-card mb-8">
+            {playerViewMode === 'map' && (
+              <>
+                <h2 className="text-xl font-bold text-slate-100 mb-4">🗺️ Campaign Map</h2>
+                {campaignMap && campaignMap.length > 0 ? (
+                  <div className="bg-slate-800/50 border border-slate-600/50 rounded-lg p-4 overflow-x-auto">
+                    <div className="inline-block">
+                      {campaignMap.map((row, y) => (
+                        <div key={y} className="flex">
+                          {row.map((tile, x) => (
+                            <div
+                              key={`${x}-${y}`}
+                              className={`w-8 h-8 border border-slate-600 flex items-center justify-center text-xs ${tileTypes[tile]?.color || 'bg-slate-700'}`}
+                              title={`${x}, ${y}: ${tileTypes[tile]?.name || 'Unknown'}`}
+                            >
+                              {tileTypes[tile]?.symbol || '⬜'}
+                            </div>
+                          ))}
                         </div>
                       ))}
                     </div>
-                  ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-8">
+                    <p className="text-slate-400 mb-4">No map available yet.</p>
+                  </div>
+                )}
+              </>
+            )}
+
+            {playerViewMode === 'scene' && (
+              <>
+                <h2 className="text-xl font-bold text-slate-100 mb-4">🎭 Current Scene</h2>
+                <div className="bg-slate-800/50 border border-slate-600/50 rounded-lg p-6">
+                  <h3 className="text-lg font-semibold text-slate-200 mb-3">{story?.currentSceneTitle || 'Scene Title'}</h3>
+                  <p className="text-slate-300 leading-relaxed">
+                    {story?.currentSceneDescription || 'The DM is setting up the scene...'}
+                  </p>
                 </div>
+              </>
+            )}
+
+            {playerViewMode === 'combat' && (
+              <>
+                <h2 className="text-xl font-bold text-slate-100 mb-4">⚔️ Combat View</h2>
+                <div className="bg-slate-800/50 border border-slate-600/50 rounded-lg p-6">
+                  <p className="text-slate-300 text-center">
+                    Combat is being prepared by the Dungeon Master...
+                  </p>
+                </div>
+              </>
+            )}
+
+            {playerViewMode === 'hidden' && (
+              <>
+                <h2 className="text-xl font-bold text-slate-100 mb-4">👻 DM is Preparing</h2>
+                <div className="bg-slate-800/50 border border-slate-600/50 rounded-lg p-8 text-center">
+                  <div className="text-4xl mb-4">👻</div>
+                  <p className="text-slate-300 mb-2">The Dungeon Master is preparing something special...</p>
+                  <p className="text-slate-400 text-sm">Please wait while they set up the scene.</p>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* DM View - Full Campaign Map */}
+        {isDM && (
+          <div className="fantasy-card mb-8">
+            <h2 className="text-xl font-bold text-slate-100 mb-4">Campaign Map</h2>
+            {campaignMap && campaignMap.length > 0 ? (
+              <>
+                <div className="bg-slate-800/50 border border-slate-600/50 rounded-lg p-4 overflow-x-auto">
+                  <div className="inline-block">
+                    {campaignMap.map((row, y) => (
+                      <div key={y} className="flex">
+                        {row.map((tile, x) => (
+                          <div
+                            key={`${x}-${y}`}
+                            className={`w-8 h-8 border border-slate-600 flex items-center justify-center text-xs ${tileTypes[tile]?.color || 'bg-slate-700'}`}
+                            title={`${x}, ${y}: ${tileTypes[tile]?.name || 'Unknown'}`}
+                          >
+                            {tileTypes[tile]?.symbol || '⬜'}
+                          </div>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowMapEditor(true)}
+                  className="mt-4 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white font-semibold py-2 px-4 rounded-lg transition-all duration-300"
+                >
+                  Edit Map
+                </button>
+              </>
+            ) : (
+              <div className="text-center py-8">
+                <p className="text-slate-400 mb-4">No map created yet.</p>
+                <button
+                  onClick={() => setShowMapEditor(true)}
+                  className="bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white font-semibold py-3 px-6 rounded-lg transition-all duration-300"
+                >
+                  Create Map
+                </button>
               </div>
-              <button
-                onClick={() => setShowMapEditor(true)}
-                className="mt-4 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white font-semibold py-2 px-4 rounded-lg transition-all duration-300"
-              >
-                Edit Map
-              </button>
-            </>
-          ) : (
-            <div className="text-center py-8">
-              <p className="text-slate-400 mb-4">No map created yet.</p>
-              <button
-                onClick={() => setShowMapEditor(true)}
-                className="bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white font-semibold py-3 px-6 rounded-lg transition-all duration-300"
-              >
-                Create Map
-              </button>
-            </div>
-          )}
-        </div>
+            )}
+          </div>
+        )}
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* Party Characters */}

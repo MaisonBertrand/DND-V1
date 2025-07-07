@@ -84,10 +84,9 @@ export default function CampaignLobby() {
       const userChar = characters.find(char => char.userId === user.uid);
       setUserCharacter(userChar);
       
-      // Load party member profiles
-      if (characters.length > 0) {
-        const userIds = characters.map(char => char.userId);
-        const profiles = await getUserProfiles(userIds);
+      // Load party member profiles for ALL party members, not just those with characters
+      if (partyData.members && partyData.members.length > 0) {
+        const profiles = await getUserProfiles(partyData.members);
         const profileMap = {};
         profiles.forEach(profile => {
           if (profile && profile.userId) {
@@ -105,7 +104,11 @@ export default function CampaignLobby() {
 
   const handleStartCampaign = () => {
     if (party.campaignType === 'manual') {
-      navigate(`/manual-campaign/${partyId}`);
+      if (party.dmId === user.uid) {
+        navigate(`/manual-campaign-dm/${partyId}`);
+      } else {
+        navigate(`/manual-campaign/${partyId}`);
+      }
     } else {
       navigate(`/campaign/${partyId}`);
     }
@@ -331,7 +334,7 @@ export default function CampaignLobby() {
                 {party.campaignType === 'ai-assist' ? '🤖 AI Assist' : '✍️ Manual Campaign'}
               </div>
               <div className="text-slate-400">
-                {partyCharacters.length} / {party.maxPlayers} Players
+                {partyCharacters.filter(char => char.userId !== party.dmId).length} / {party.maxPlayers} Players
               </div>
             </div>
           </div>
@@ -339,58 +342,54 @@ export default function CampaignLobby() {
 
         {/* Party Members Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
-          {party.members?.map((memberId) => {
-            const character = partyCharacters.find(char => char.userId === memberId);
-            const status = getCharacterStatus(character);
-            const isCurrentUser = memberId === user.uid;
+          {(() => {
+            console.log('🔍 DEBUG - Party Data:', {
+              partyMembers: party.members,
+              dmId: party.dmId,
+              currentUserId: user.uid,
+              filteredMembers: party.members?.filter(memberId => memberId !== party.dmId)
+            });
             
-            return (
-              <div key={memberId} className={`fantasy-card ${isCurrentUser ? 'ring-2 ring-amber-500/50' : ''}`}>
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center">
-                    <div className="w-10 h-10 bg-gradient-to-br from-slate-600 to-slate-700 rounded-full flex items-center justify-center mr-3">
-                      <span className="text-slate-300 font-semibold">
-                        {getUsername(memberId).charAt(0).toUpperCase()}
-                      </span>
+            return party.members?.filter(memberId => memberId !== party.dmId).map((memberId) => {
+              const character = partyCharacters.find(char => char.userId === memberId);
+              const status = getCharacterStatus(character);
+              const isCurrentUser = memberId === user.uid;
+            
+              return (
+                <div key={memberId} className={`fantasy-card ${isCurrentUser ? 'ring-2 ring-amber-500/50' : ''}`}>
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center">
+                      <div className="w-10 h-10 bg-gradient-to-br from-slate-600 to-slate-700 rounded-full flex items-center justify-center mr-3">
+                        <span className="text-slate-300 font-semibold">
+                          {getUsername(memberId).charAt(0).toUpperCase()}
+                        </span>
+                      </div>
+                      <div>
+                        <h3 className="font-semibold text-slate-100">{getUsername(memberId)}</h3>
+                      </div>
                     </div>
-                    <div>
-                      <h3 className="font-semibold text-slate-100">{getUsername(memberId)}</h3>
-                      {memberId === party.dmId && (
-                        <span className="text-xs text-amber-400 font-medium">Dungeon Master</span>
-                      )}
+                    <div className={`text-sm font-medium ${getStatusColor(status)}`}>
+                      {getStatusIcon(status)} {status}
                     </div>
                   </div>
-                  <div className={`text-sm font-medium ${getStatusColor(status)}`}>
-                    {getStatusIcon(status)} {status}
-                  </div>
+                  
+                  {character && (
+                    <div className="space-y-2">
+                      <div className="bg-slate-700/30 rounded-lg p-3">
+                        <h4 className="font-semibold text-slate-100 mb-1">{character.name}</h4>
+                        <p className="text-sm text-slate-400">
+                          {character.race} {character.class} • Level {character.level}
+                        </p>
+                        {character.background && (
+                          <p className="text-xs text-slate-500 mt-1">{character.background}</p>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
-                
-                {character && (
-                  <div className="space-y-2">
-                    <div className="bg-slate-700/30 rounded-lg p-3">
-                      <h4 className="font-semibold text-slate-100 mb-1">{character.name}</h4>
-                      <p className="text-sm text-slate-400">
-                        {character.race} {character.class} • Level {character.level}
-                      </p>
-                      {character.background && (
-                        <p className="text-xs text-slate-500 mt-1">{character.background}</p>
-                      )}
-                    </div>
-                    {isDM && (
-                      <button
-                        onClick={() => handleViewCharacterSheet(character)}
-                        className="w-full bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 text-white font-semibold py-2 px-4 rounded-lg transition-all duration-300 text-sm"
-                      >
-                        📋 View Character Sheet
-                      </button>
-                    )}
-                  </div>
-                )}
-                
-
-              </div>
-            );
-          })}
+              );
+            });
+          })()}
         </div>
 
 
@@ -476,34 +475,39 @@ export default function CampaignLobby() {
             <div>
               <span className="text-slate-400">Status:</span>
               <span className="text-slate-200 ml-2">
-                {partyCharacters.length === party.members?.length ? 'Ready to Start' : 'Waiting for Characters'}
+                {partyCharacters.filter(char => char.userId !== party.dmId).length === (party.members?.length - 1) ? 'Ready to Start' : 'Waiting for Characters'}
               </span>
+            </div>
+          </div>
+          
+          {/* Start Campaign Button */}
+          <div className="mt-6 pt-6 border-t border-slate-600">
+            <div className="flex flex-col sm:flex-row gap-4 items-center justify-between">
+              <div className="text-sm text-slate-400">
+                {partyCharacters.filter(char => char.userId !== party.dmId).length === (party.members?.length - 1) 
+                  ? 'All players have characters and are ready to begin!'
+                  : 'Waiting for all players to create their characters...'
+                }
+              </div>
+              <button
+                onClick={handleStartCampaign}
+                disabled={partyCharacters.filter(char => char.userId !== party.dmId).length !== (party.members?.length - 1)}
+                className={`px-6 py-3 rounded-lg font-semibold transition-all duration-300 ${
+                  partyCharacters.filter(char => char.userId !== party.dmId).length === (party.members?.length - 1)
+                    ? 'bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white shadow-lg'
+                    : 'bg-slate-600 text-slate-400 cursor-not-allowed'
+                }`}
+              >
+                {isDM 
+                  ? (party.campaignType === 'manual' ? '🎯 Start Manual Campaign' : '🎯 Start AI Campaign')
+                  : (party.campaignType === 'manual' ? '🎮 Join Manual Campaign' : '🎮 Join AI Campaign')
+                }
+              </button>
             </div>
           </div>
         </div>
 
-        {/* Start Campaign Button */}
-        {partyCharacters.length === party.members?.length && (
-          <div className="mt-8 text-center">
-            <div className="fantasy-card">
-              <h3 className="text-xl font-bold text-slate-100 mb-4">
-                {party.campaignType === 'ai-assist' ? '🚀 Ready to Begin AI-Assisted Adventure!' : '🎲 Ready to Begin Manual Campaign!'}
-              </h3>
-              <p className="text-slate-400 mb-6">
-                {party.campaignType === 'ai-assist' 
-                  ? 'All players have created their characters. The AI will now generate story plots for you to choose from.'
-                  : 'All players have created their characters. You can now begin your manual D&D campaign.'
-                }
-              </p>
-              <button
-                onClick={handleStartCampaign}
-                className="bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-bold py-4 px-8 rounded-lg transition-all duration-300 text-lg shadow-lg hover:shadow-xl transform hover:scale-105"
-              >
-                {party.campaignType === 'ai-assist' ? '🤖 Start AI Campaign' : '🎲 Start Manual Campaign'}
-              </button>
-            </div>
-          </div>
-        )}
+
 
         {/* Character Sheet Modal */}
         {showCharacterSheet && selectedCharacter && (

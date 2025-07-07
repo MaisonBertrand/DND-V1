@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { combatService } from '../services/combat';
 
-const version = import.meta.env.VITE_APP_VERSION || '3.1.5';
+const version = import.meta.env.VITE_APP_VERSION || '3.2.1';
 
 export default function VersionDisplay() {
   const [showCacheHelp, setShowCacheHelp] = useState(false);
