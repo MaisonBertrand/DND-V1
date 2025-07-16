@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../firebase/auth';
+import { useAuth } from '../contexts/AuthContext';
 import { getUserParties, disbandParty, getCharacterByUserAndParty, getUserProfile, getUserProfiles, createParty, joinParty, getPartyByInviteCode, getPublicParties, subscribeToParty } from '../firebase/database';
+import EmailVerificationReminder from '../components/EmailVerificationReminder';
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const { user, loading: authLoading } = useAuth();
+  const { user, loading: authLoading, needsEmailVerification } = useAuth();
   const [userProfile, setUserProfile] = useState(null);
   const [parties, setParties] = useState([]);
   const [publicParties, setPublicParties] = useState([]);
@@ -118,7 +119,6 @@ export default function Dashboard() {
     try {
       // Validate parties array
       if (!parties || !Array.isArray(parties)) {
-        console.log('No parties to load profiles for');
         return;
       }
 
@@ -153,7 +153,6 @@ export default function Dashboard() {
     try {
       // Validate parties array
       if (!parties || !Array.isArray(parties)) {
-        console.log('No public parties to load profiles for');
         return;
       }
 
@@ -283,7 +282,6 @@ export default function Dashboard() {
       // Reload parties after creation
       await loadUserData(user.uid);
       
-      console.log('Party created successfully!');
     } catch (error) {
       console.error('Error creating party:', error.message);
     } finally {
@@ -306,16 +304,16 @@ export default function Dashboard() {
     try {
       const party = await getPartyByInviteCode(joinCode.toUpperCase());
       if (!party) {
-        console.error('Invalid invite code');
+        alert('Invalid invite code. Please check the code and try again.');
         return;
       }
 
       await joinParty(party.id, user.uid);
       setJoinCode('');
       await loadUserData(user.uid);
-      console.log('Successfully joined party!');
     } catch (error) {
-      console.error(error.message || 'Error joining party. Please try again.');
+      console.error('Error joining party:', error);
+      alert(error.message || 'Error joining party. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -331,7 +329,6 @@ export default function Dashboard() {
     try {
       await joinParty(partyId, user.uid);
       await loadUserData(user.uid);
-      console.log('Successfully joined public party!');
     } catch (error) {
       console.error(error.message || 'Error joining party. Please try again.');
     } finally {
@@ -373,6 +370,9 @@ export default function Dashboard() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
       <div className="fantasy-container">
+        {/* Email Verification Reminder */}
+        {needsEmailVerification && <EmailVerificationReminder />}
+        
         {/* Header */}
         <div className="mb-8 sm:mb-12">
           <div className="text-center mb-6">
@@ -827,6 +827,7 @@ export default function Dashboard() {
           </div>
         )}
       </div>
+      {needsEmailVerification && <EmailVerificationReminder />}
     </div>
   );
 } 

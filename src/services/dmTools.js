@@ -1,7 +1,7 @@
 import { 
   getCampaignStory, 
   updateCampaignStory,
-  createCampaignStory,
+  createManualCampaignStory,
   db
 } from '../firebase/database';
 import { doc, onSnapshot, query, collection, where } from 'firebase/firestore';
@@ -10,6 +10,7 @@ export class DMToolsService {
   constructor() {
     this.scenes = new Map();
     this.currentScene = null;
+    this.listeners = new Map(); // Cache for listeners
   }
 
   // Scene Management
@@ -207,7 +208,8 @@ export class DMToolsService {
     try {
       const campaignStory = await getCampaignStory(partyId);
       if (!campaignStory) {
-        throw new Error('Campaign story not found');
+        console.error('Campaign story not found for party:', partyId);
+        throw new Error('Campaign story not found. Please try refreshing the page.');
       }
 
       const updatedStory = {
@@ -236,21 +238,51 @@ export class DMToolsService {
 
   // Real-time listener for player view changes
   listenToPlayerView(partyId, callback) {
+    const listenerKey = `playerView_${partyId}`;
+    
+    // Return existing listener if already set up
+    if (this.listeners.has(listenerKey)) {
+      const existingListener = this.listeners.get(listenerKey);
+      // Add callback to existing listener
+      existingListener.callbacks.add(callback);
+      return () => {
+        existingListener.callbacks.delete(callback);
+        if (existingListener.callbacks.size === 0) {
+          existingListener.unsubscribe();
+          this.listeners.delete(listenerKey);
+        }
+      };
+    }
+
     try {
       const q = query(
         collection(db, 'campaignStories'),
         where('partyId', '==', partyId)
       );
-      return onSnapshot(q, (querySnapshot) => {
+      
+      const callbacks = new Set([callback]);
+      const unsubscribe = onSnapshot(q, (querySnapshot) => {
         if (!querySnapshot.empty) {
           const doc = querySnapshot.docs[0];
           const data = doc.data();
           const viewMode = data?.playerViewMode || 'hidden';
-          callback(viewMode);
+          // Call all registered callbacks
+          callbacks.forEach(cb => cb(viewMode));
         }
       }, (error) => {
         console.error('Error listening to player view:', error);
       });
+
+      // Store the listener
+      this.listeners.set(listenerKey, { unsubscribe, callbacks });
+
+      return () => {
+        callbacks.delete(callback);
+        if (callbacks.size === 0) {
+          unsubscribe();
+          this.listeners.delete(listenerKey);
+        }
+      };
     } catch (error) {
       console.error('Error setting up player view listener:', error);
       return null;
@@ -259,24 +291,100 @@ export class DMToolsService {
 
   // Real-time listener for campaign story changes (including map updates)
   listenToCampaignStory(partyId, callback) {
+    const listenerKey = `campaignStory_${partyId}`;
+    
+    // Return existing listener if already set up
+    if (this.listeners.has(listenerKey)) {
+      const existingListener = this.listeners.get(listenerKey);
+      existingListener.callbacks.add(callback);
+      return () => {
+        existingListener.callbacks.delete(callback);
+        if (existingListener.callbacks.size === 0) {
+          existingListener.unsubscribe();
+          this.listeners.delete(listenerKey);
+        }
+      };
+    }
+
     try {
       const q = query(
         collection(db, 'campaignStories'),
         where('partyId', '==', partyId)
       );
-      return onSnapshot(q, (querySnapshot) => {
+      
+      const callbacks = new Set([callback]);
+      const unsubscribe = onSnapshot(q, (querySnapshot) => {
         if (!querySnapshot.empty) {
           const doc = querySnapshot.docs[0];
           const data = { id: doc.id, ...doc.data() };
-          callback(data);
+          callbacks.forEach(cb => cb(data));
         } else {
-          callback(null);
+          callbacks.forEach(cb => cb(null));
         }
       }, (error) => {
         console.error('Error listening to campaign story:', error);
       });
+
+      this.listeners.set(listenerKey, { unsubscribe, callbacks });
+
+      return () => {
+        callbacks.delete(callback);
+        if (callbacks.size === 0) {
+          unsubscribe();
+          this.listeners.delete(listenerKey);
+        }
+      };
     } catch (error) {
       console.error('Error setting up campaign story listener:', error);
+      return null;
+    }
+  }
+
+  // Real-time listener for party character changes
+  listenToPartyCharacters(partyId, callback) {
+    const listenerKey = `partyCharacters_${partyId}`;
+    
+    // Return existing listener if already set up
+    if (this.listeners.has(listenerKey)) {
+      const existingListener = this.listeners.get(listenerKey);
+      existingListener.callbacks.add(callback);
+      return () => {
+        existingListener.callbacks.delete(callback);
+        if (existingListener.callbacks.size === 0) {
+          existingListener.unsubscribe();
+          this.listeners.delete(listenerKey);
+        }
+      };
+    }
+
+    try {
+      const q = query(
+        collection(db, 'characters'),
+        where('partyId', '==', partyId)
+      );
+      
+      const callbacks = new Set([callback]);
+      const unsubscribe = onSnapshot(q, (querySnapshot) => {
+        const characters = [];
+        querySnapshot.forEach((doc) => {
+          characters.push({ id: doc.id, ...doc.data() });
+        });
+        callbacks.forEach(cb => cb(characters));
+      }, (error) => {
+        console.error('Error listening to party characters:', error);
+      });
+
+      this.listeners.set(listenerKey, { unsubscribe, callbacks });
+
+      return () => {
+        callbacks.delete(callback);
+        if (callbacks.size === 0) {
+          unsubscribe();
+          this.listeners.delete(listenerKey);
+        }
+      };
+    } catch (error) {
+      console.error('Error setting up party characters listener:', error);
       return null;
     }
   }

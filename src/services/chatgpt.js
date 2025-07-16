@@ -2,9 +2,9 @@
 const BACKEND_URL = 'https://dnd-v1-backend.onrender.com';
 
 // Import dice rolling and action validation services
-import DiceRollingService from './diceRolling.js';
+import { manualDiceRoller } from './manualCombat.js';
 import ActionValidationService from './actionValidation.js';
-import { CombatService } from './combat.js';
+import { combatService } from './combat.js';
 
 // Helper function to call the backend proxy
 const callBackendAPI = async (messages, model = 'gpt-4', max_tokens = 1000, temperature = 0.8) => {
@@ -87,9 +87,9 @@ IMPORTANT: Only generate multiple options when explicitly requested. When asked 
 Always respond in character as a Dungeon Master, providing rich, descriptive content that enhances the gaming experience. Maintain consistency with previous story elements, character relationships, and established plot threads.`;
 
     // Initialize dice rolling and action validation services
-    this.diceService = new DiceRollingService();
+    this.diceService = manualDiceRoller;
     this.actionValidationService = new ActionValidationService();
-    this.combatService = new CombatService();
+    this.combatService = combatService;
   }
 
   async generateStoryPlots(partyCharacters, campaignSetting = '', partyInfo = null) {

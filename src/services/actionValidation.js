@@ -1,11 +1,11 @@
 // Action Validation Service
 // Handles validation of player actions and maintains story coherence
 
-import DiceRollingService from './diceRolling.js';
+import { manualDiceRoller } from './manualCombat.js';
 
 export class ActionValidationService {
   constructor() {
-    this.diceService = new DiceRollingService();
+    this.diceService = manualDiceRoller;
     
     // Story coherence rules
     this.storyRules = {

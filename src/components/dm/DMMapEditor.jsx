@@ -19,6 +19,18 @@ export default function DMMapEditor({ partyId, onMapUpdate }) {
     loadMap();
   }, [partyId]);
 
+  // Global mouse up handler to stop dragging
+  useEffect(() => {
+    const handleGlobalMouseUp = () => {
+      setIsDragging(false);
+    };
+
+    document.addEventListener('mouseup', handleGlobalMouseUp);
+    return () => {
+      document.removeEventListener('mouseup', handleGlobalMouseUp);
+    };
+  }, []);
+
   const loadMap = async () => {
     try {
       const mapData = await manualCampaignService.loadMapFromDatabase(partyId);
@@ -103,7 +115,8 @@ export default function DMMapEditor({ partyId, onMapUpdate }) {
     }
   };
 
-  const handleTileMouseDown = (x, y) => {
+  const handleTileMouseDown = (x, y, e) => {
+    e.preventDefault();
     setIsDragging(true);
     handleTileClick(x, y);
   };
@@ -146,7 +159,8 @@ export default function DMMapEditor({ partyId, onMapUpdate }) {
     }
   };
 
-  const handleSubMapTileMouseDown = (x, y) => {
+  const handleSubMapTileMouseDown = (x, y, e) => {
+    e.preventDefault();
     setIsDragging(true);
     handleSubMapTileClick(x, y);
   };
@@ -179,7 +193,7 @@ export default function DMMapEditor({ partyId, onMapUpdate }) {
   };
 
   return (
-    <div className="fantasy-card">
+    <div className="fantasy-card" style={{ userSelect: 'none' }}>
       <div className="mb-4">
         <h3 className="text-xl font-bold text-slate-100">🗺️ Campaign Map</h3>
         <p className="text-sm text-slate-400 mt-1">Click and drag to edit the map. Changes are saved automatically.</p>
@@ -247,7 +261,7 @@ export default function DMMapEditor({ partyId, onMapUpdate }) {
 
       {/* Map Display */}
       <div className="mb-4">
-        <div className="bg-slate-900 p-4 rounded-lg overflow-auto">
+        <div className="bg-slate-900 p-4 rounded-lg overflow-auto select-none">
           <div 
             className="grid gap-0"
             style={{
@@ -266,11 +280,11 @@ export default function DMMapEditor({ partyId, onMapUpdate }) {
                 return (
                   <div
                     key={`${x}-${y}`}
-                    className={`w-8 h-8 border border-slate-600 cursor-pointer transition-colors relative ${
+                    className={`w-8 h-8 border border-slate-600 cursor-pointer transition-colors relative select-none ${
                       tileData.color
                     }`}
                     onClick={() => handleTileClick(x, y)}
-                    onMouseDown={() => handleTileMouseDown(x, y)}
+                    onMouseDown={(e) => handleTileMouseDown(x, y, e)}
                     onMouseEnter={() => handleTileMouseEnter(x, y)}
                     onMouseUp={handleTileMouseUp}
                     onContextMenu={(e) => handleTileRightClick(x, y, e)}
@@ -332,7 +346,7 @@ export default function DMMapEditor({ partyId, onMapUpdate }) {
               </button>
             </div>
             
-            <div className="bg-slate-900 p-4 rounded-lg overflow-auto mb-4">
+            <div className="bg-slate-900 p-4 rounded-lg overflow-auto mb-4 select-none">
               <div className="grid grid-cols-8 gap-0 w-fit">
                 {currentSubMap.map((row, y) =>
                   row.map((tile, x) => {
@@ -340,11 +354,11 @@ export default function DMMapEditor({ partyId, onMapUpdate }) {
                     return (
                       <div
                         key={`sub-${x}-${y}`}
-                        className={`w-6 h-6 border border-slate-600 cursor-pointer transition-colors ${
+                        className={`w-6 h-6 border border-slate-600 cursor-pointer transition-colors select-none ${
                           tileData.color
                         }`}
                         onClick={() => handleSubMapTileClick(x, y)}
-                        onMouseDown={() => handleSubMapTileMouseDown(x, y)}
+                        onMouseDown={(e) => handleSubMapTileMouseDown(x, y, e)}
                         onMouseEnter={() => handleSubMapTileMouseEnter(x, y)}
                         onMouseUp={handleTileMouseUp}
                         title={`${tileData.name} at (${x}, ${y})`}

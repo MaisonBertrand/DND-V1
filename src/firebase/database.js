@@ -24,13 +24,24 @@ const generateId = () => {
 
 // Helper function to handle Firestore errors
 const handleDatabaseError = (error, operation) => {
-  console.error(`Error in ${operation}:`, error);
-  
   // Handle specific error types
   if (error.code === 'unavailable' || error.code === 'deadline-exceeded') {
     throw new Error('Network connection issue. Please check your internet connection and try again.');
   } else if (error.code === 'permission-denied') {
-    throw new Error('Access denied. Please check your permissions.');
+    // Provide more specific error messages for common operations
+    if (operation === 'joinParty') {
+      throw new Error('Unable to join party. The invite code may be invalid or you may not have permission to join this campaign.');
+    } else if (operation === 'getPartyByInviteCode') {
+      throw new Error('Unable to find party with this invite code. Please check the code and try again.');
+    } else if (operation === 'disbandParty') {
+      throw new Error('Unable to delete party. You may not have permission to delete this campaign.');
+    } else if (operation === 'getPartyCharacters') {
+      throw new Error('Unable to load party characters. You may not have permission to view this campaign.');
+    } else if (operation === 'createCampaignStory' || operation === 'getCampaignStory' || operation === 'updateCampaignStory') {
+      throw new Error('Unable to access campaign story. You may not have permission to view this campaign.');
+    } else {
+      throw new Error('Access denied. Please check your permissions.');
+    }
   } else if (error.code === 'not-found') {
     throw new Error('The requested data was not found.');
   } else {
@@ -48,9 +59,11 @@ export const createUserProfile = async (userId, userData) => {
       updatedAt: serverTimestamp()
     };
     const docRef = await addDoc(collection(db, 'userProfiles'), profile);
-    return { id: docRef.id, ...profile };
+    const createdProfile = { id: docRef.id, ...profile };
+    return createdProfile;
   } catch (error) {
     handleDatabaseError(error, 'createUserProfile');
+    return null; // This line will never be reached due to handleDatabaseError throwing
   }
 };
 
@@ -67,9 +80,11 @@ export const getUserProfile = async (userId) => {
     }
     
     const doc = querySnapshot.docs[0];
-    return { id: doc.id, ...doc.data() };
+    const profile = { id: doc.id, ...doc.data() };
+    return profile;
   } catch (error) {
     handleDatabaseError(error, 'getUserProfile');
+    return null; // This line will never be reached due to handleDatabaseError throwing
   }
 };
 
@@ -103,6 +118,7 @@ export const getUserProfiles = async (userIds) => {
     return profiles;
   } catch (error) {
     handleDatabaseError(error, 'getUserProfiles');
+    return []; // This line will never be reached due to handleDatabaseError throwing
   }
 };
 
@@ -120,6 +136,7 @@ export const updateUserProfile = async (userId, updates) => {
     });
   } catch (error) {
     handleDatabaseError(error, 'updateUserProfile');
+    return null; // This line will never be reached due to handleDatabaseError throwing
   }
 };
 
@@ -133,11 +150,16 @@ export const checkUsernameAvailability = async (username) => {
     return querySnapshot.empty; // true if username is available
   } catch (error) {
     handleDatabaseError(error, 'checkUsernameAvailability');
+    return false; // This line will never be reached due to handleDatabaseError throwing
   }
 };
 
 // Calculate character HP and AC based on class, level, and ability scores
 const calculateCharacterStats = (characterData) => {
+  if (!characterData) {
+    throw new Error('Character data is required for calculating stats');
+  }
+  
   const { class: characterClass, level, constitution, dexterity, strength } = characterData;
   
   // Calculate HP based on class and constitution
@@ -195,6 +217,16 @@ const calculateCharacterStats = (characterData) => {
 // Character Management
 export const saveCharacter = async (userId, partyId, characterData) => {
   try {
+    if (!userId) {
+      throw new Error('User ID is required');
+    }
+    if (!partyId) {
+      throw new Error('Party ID is required');
+    }
+    if (!characterData) {
+      throw new Error('Character data is required');
+    }
+    
     const characterRef = collection(db, 'characters');
     
     // Calculate HP and AC
@@ -208,6 +240,8 @@ export const saveCharacter = async (userId, partyId, characterData) => {
       createdAt: new Date(),
       updatedAt: new Date()
     };
+    
+
     
     const docRef = await addDoc(characterRef, newCharacter);
     const savedCharacter = {
@@ -268,16 +302,25 @@ export const getCharacterByUserAndParty = async (userId, partyId) => {
 
 export const getPartyCharacters = async (partyId) => {
   try {
+    console.log('Attempting to get party characters for partyId:', partyId);
+    
     const q = query(
       collection(db, 'characters'),
       where('partyId', '==', partyId)
     );
     const querySnapshot = await getDocs(q);
-    return querySnapshot.docs.map(doc => ({
+    
+    const characters = querySnapshot.docs.map(doc => ({
       id: doc.id,
       ...doc.data()
     }));
+    
+    console.log(`Successfully retrieved ${characters.length} characters for party ${partyId}:`, characters);
+    return characters;
   } catch (error) {
+    console.error('Error in getPartyCharacters:', error);
+    console.error('Error code:', error.code);
+    console.error('Error message:', error.message);
     handleDatabaseError(error, 'getPartyCharacters');
   }
 };
@@ -333,8 +376,6 @@ export const deleteCharacter = async (characterId) => {
 // Utility function to debug character issues
 export const debugUserCharacters = async (userId) => {
   try {
-    console.log('Debugging characters for user:', userId);
-    
     // Get all characters for this user
     const q = query(
       collection(db, 'characters'),
@@ -346,8 +387,6 @@ export const debugUserCharacters = async (userId) => {
       id: doc.id,
       ...doc.data()
     }));
-    
-    console.log('All characters for user:', characters);
     
     // Check for characters without partyId
     const orphanedCharacters = characters.filter(char => !char.partyId);
@@ -516,20 +555,45 @@ export const disbandParty = async (partyId, dmId) => {
       where('partyId', '==', partyId)
     );
     const characterDocs = await getDocs(charactersQuery);
-    
-    const deletePromises = characterDocs.docs.map(doc => deleteDoc(doc.ref));
-    await Promise.all(deletePromises);
-    
-    // Delete campaign story if it exists
+    const deleteCharacterPromises = characterDocs.docs.map(doc => deleteDoc(doc.ref));
+    await Promise.all(deleteCharacterPromises);
+
+    // Delete all campaign stories for this party
     const storyQuery = query(
       collection(db, 'campaignStories'),
       where('partyId', '==', partyId)
     );
     const storyDocs = await getDocs(storyQuery);
-    
     const storyDeletePromises = storyDocs.docs.map(doc => deleteDoc(doc.ref));
     await Promise.all(storyDeletePromises);
-    
+
+    // Delete all campaigns for this party
+    const campaignQuery = query(
+      collection(db, 'campaigns'),
+      where('partyId', '==', partyId)
+    );
+    const campaignDocs = await getDocs(campaignQuery);
+    const campaignDeletePromises = campaignDocs.docs.map(doc => deleteDoc(doc.ref));
+    await Promise.all(campaignDeletePromises);
+
+    // Delete all combats for this party
+    const combatQuery = query(
+      collection(db, 'combats'),
+      where('partyId', '==', partyId)
+    );
+    const combatDocs = await getDocs(combatQuery);
+    const combatDeletePromises = combatDocs.docs.map(doc => deleteDoc(doc.ref));
+    await Promise.all(combatDeletePromises);
+
+    // Delete all combat sessions for this party
+    const combatSessionQuery = query(
+      collection(db, 'combatSessions'),
+      where('partyId', '==', partyId)
+    );
+    const combatSessionDocs = await getDocs(combatSessionQuery);
+    const combatSessionDeletePromises = combatSessionDocs.docs.map(doc => deleteDoc(doc.ref));
+    await Promise.all(combatSessionDeletePromises);
+
   } catch (error) {
     handleDatabaseError(error, 'disbandParty');
   }
@@ -739,6 +803,47 @@ export const createCampaignStory = async (partyId) => {
   }
 };
 
+// Separate function for AI-assisted campaigns
+export const createAICampaignStory = async (partyId) => {
+  try {
+    const story = {
+      partyId,
+      type: 'ai-assist',
+      status: 'ready_up', // AI campaigns start with ready-up phase
+      currentPlot: null,
+      storyMessages: [],
+      votingSession: null,
+      readyPlayers: [],
+      lastUpdated: serverTimestamp(),
+      createdAt: serverTimestamp()
+    };
+    const docRef = await addDoc(collection(db, 'campaignStories'), story);
+    return { id: docRef.id, ...story };
+  } catch (error) {
+    handleDatabaseError(error, 'createAICampaignStory');
+  }
+};
+
+// Separate function for manual campaigns
+export const createManualCampaignStory = async (partyId) => {
+  try {
+    const story = {
+      partyId,
+      type: 'manual',
+      status: 'active', // Manual campaigns start active (no ready-up needed)
+      currentScene: '',
+      storyHistory: [],
+      playerViewMode: 'hidden', // Initialize with hidden view so players see loading screen by default
+      lastUpdated: serverTimestamp(),
+      createdAt: serverTimestamp()
+    };
+    const docRef = await addDoc(collection(db, 'campaignStories'), story);
+    return { id: docRef.id, ...story };
+  } catch (error) {
+    handleDatabaseError(error, 'createManualCampaignStory');
+  }
+};
+
 export const getCampaignStory = async (partyId) => {
   try {
     const q = query(
@@ -895,44 +1000,31 @@ export const getCombatSession = async (sessionId) => {
 
 export const updateCombatSession = async (combatId, updates) => {
   try {
-    console.log('💾 updateCombatSession called with:', {
-      combatId,
-      updates
-    });
-    
     const combatRef = doc(db, 'combatSessions', combatId);
     await updateDoc(combatRef, {
       ...updates,
       lastUpdated: serverTimestamp()
     });
-    
-    console.log('💾 updateCombatSession completed successfully');
   } catch (error) {
-    console.error('❌ Error in updateCombatSession:', error);
     handleDatabaseError(error, 'updateCombatSession');
   }
 };
 
 export const subscribeToCombatSession = (sessionId, callback) => {
   try {
-    console.log('📡 Setting up combat session subscription for:', sessionId);
     const combatRef = doc(db, 'combatSessions', sessionId);
     
     const unsubscribe = onSnapshot(combatRef, (docSnap) => {
-      console.log('📡 Combat session subscription update received:', docSnap.exists() ? 'Document exists' : 'Document does not exist');
       if (docSnap.exists()) {
         const data = { id: docSnap.id, ...docSnap.data() };
-        console.log('📡 Combat session data from subscription:', data);
         callback(data);
       } else {
-        console.log('📡 Combat session document does not exist');
         callback(null);
       }
     });
     
     return unsubscribe;
   } catch (error) {
-    console.error('❌ Error in subscribeToCombatSession:', error);
     handleDatabaseError(error, 'subscribeToCombatSession');
   }
 };
@@ -940,9 +1032,17 @@ export const subscribeToCombatSession = (sessionId, callback) => {
 // Character Preset Management
 export const saveCharacterPreset = async (userId, presetData) => {
   try {
-    const profile = await getUserProfile(userId);
+    let profile = await getUserProfile(userId);
+    
+    // If profile doesn't exist, create a basic one
     if (!profile) {
-      throw new Error('User profile not found');
+      console.log('User profile not found, creating basic profile for user:', userId);
+      profile = await createUserProfile(userId, {
+        userId,
+        createdAt: new Date().toISOString(),
+        lastLogin: new Date().toISOString(),
+        emailVerified: true // Assume verified since they're using the app
+      });
     }
     
     const preset = {
@@ -974,14 +1074,23 @@ export const getUserCharacterPresets = async (userId) => {
     return profile.characterPresets || [];
   } catch (error) {
     handleDatabaseError(error, 'getUserCharacterPresets');
+    return []; // This line will never be reached due to handleDatabaseError throwing
   }
 };
 
 export const deleteCharacterPreset = async (userId, presetId) => {
   try {
-    const profile = await getUserProfile(userId);
+    let profile = await getUserProfile(userId);
+    
+    // If profile doesn't exist, create a basic one
     if (!profile) {
-      throw new Error('User profile not found');
+      console.log('User profile not found, creating basic profile for user:', userId);
+      profile = await createUserProfile(userId, {
+        userId,
+        createdAt: new Date().toISOString(),
+        lastLogin: new Date().toISOString(),
+        emailVerified: true // Assume verified since they're using the app
+      });
     }
     
     const existingPresets = profile.characterPresets || [];
@@ -1202,11 +1311,6 @@ export const updateCombatSessionWithNarrative = async (combatId, updates) => {
 
 export const addToCombatBattleLog = async (combatId, logEntry) => {
   try {
-    console.log('📜 Adding to combat battle log:', {
-      combatId,
-      logEntry
-    });
-    
     const combatRef = doc(db, 'combatSessions', combatId);
     const docSnap = await getDoc(combatRef);
     
@@ -1220,10 +1324,8 @@ export const addToCombatBattleLog = async (combatId, logEntry) => {
         lastUpdated: serverTimestamp()
       });
       
-      console.log('📜 Battle log updated successfully');
     }
   } catch (error) {
-    console.error('❌ Error in addToCombatBattleLog:', error);
     handleDatabaseError(error, 'addToCombatBattleLog');
   }
 };
@@ -1324,5 +1426,58 @@ export const updatePartyCharacterStats = async (partyId) => {
     return results;
   } catch (error) {
     throw new Error(`Failed to update party character stats: ${error.message}`);
+  }
+};
+
+// Fix characters with missing ability score properties
+export const fixCharacterAbilityScores = async (characterId) => {
+  try {
+    const characterRef = doc(db, 'characters', characterId);
+    const characterDoc = await getDoc(characterRef);
+    
+    if (!characterDoc.exists()) {
+      throw new Error(`Character document with ID ${characterId} does not exist`);
+    }
+    
+    const character = characterDoc.data();
+    const updates = {};
+    
+    // Check if direct ability score properties are missing but assignedScores exists
+    const abilities = ['strength', 'dexterity', 'constitution', 'intelligence', 'wisdom', 'charisma'];
+    let needsUpdate = false;
+    
+    abilities.forEach(ability => {
+      if (!character[ability] && character.assignedScores?.[ability]) {
+        updates[ability] = character.assignedScores[ability];
+        needsUpdate = true;
+      }
+    });
+    
+    if (needsUpdate) {
+      await updateDoc(characterRef, {
+        ...updates,
+        updatedAt: new Date()
+      });
+      
+      return updates;
+    }
+    
+    return null;
+  } catch (error) {
+    throw new Error(`Failed to fix character ability scores: ${error.message}`);
+  }
+};
+
+// Fix all characters in a party
+export const fixPartyCharacterAbilityScores = async (partyId) => {
+  try {
+    const characters = await getPartyCharacters(partyId);
+    const fixPromises = characters.map(character => fixCharacterAbilityScores(character.id));
+    const results = await Promise.all(fixPromises);
+    
+    const fixedCount = results.filter(result => result !== null).length;
+    return { fixedCount, totalCharacters: characters.length };
+  } catch (error) {
+    throw new Error(`Failed to fix party character ability scores: ${error.message}`);
   }
 }; 

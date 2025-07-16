@@ -13,9 +13,7 @@ export default function Register() {
 
   useEffect(() => {
     // Test Firebase connection on component mount
-    testFirebaseConnection().then(result => {
-      console.log('Firebase test result:', result);
-    });
+    testFirebaseConnection();
   }, []);
 
   const handleSubmit = async (e) => {
@@ -43,25 +41,19 @@ export default function Register() {
       return;
     }
 
-    console.log('Submitting registration for:', email, username);
     const { user, error, success } = await registerUser(email, password, username);
-    console.log('Registration result:', { user, error, success });
     
     if (error) {
-      console.log('Setting error:', error);
       setError(error);
       return;
     }
 
     if (success) {
-      console.log('Registration successful, redirecting to login');
       navigate('/login', { 
         state: { 
-          message: 'Registration successful! Please check your email to verify your account before logging in.' 
+          message: 'Registration successful! Please check your email and click the verification link before logging in. If you don\'t see the email, check your spam folder.' 
         } 
       });
-    } else {
-      console.log('No success received from registration');
     }
   };
 

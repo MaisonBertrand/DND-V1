@@ -1,12 +1,12 @@
 import { 
   getCampaignStory, 
   updateCampaignStory,
-  createCampaignStory,
+  createManualCampaignStory,
   getPartyById,
   db
 } from '../firebase/database';
 import { addDoc, collection } from 'firebase/firestore';
-import { combatService } from './combat';
+import { manualCombatService } from './manualCombat';
 
 export class ManualCampaignService {
   constructor() {
@@ -76,22 +76,47 @@ export class ManualCampaignService {
       // Load or create campaign story
       const existingStory = await getCampaignStory(partyId);
       if (existingStory) {
+        // Check if this is a manual campaign story that needs to be fixed
+        if (existingStory.type === 'manual' && existingStory.status === 'ready_up') {
+          console.log('Fixing manual campaign story status from ready_up to active');
+          // Update the story to have the correct status for manual campaigns
+          const updatedStory = {
+            ...existingStory,
+            status: 'active'
+          };
+          await updateCampaignStory(existingStory.id, updatedStory);
+          return updatedStory;
+        }
+        
+        // Handle old stories without a type field (from before campaign separation)
+        if (!existingStory.type && existingStory.status === 'ready_up') {
+          console.log('Converting old campaign story to manual campaign with active status');
+          // Convert old story to manual campaign format
+          const updatedStory = {
+            ...existingStory,
+            type: 'manual',
+            status: 'active'
+          };
+          await updateCampaignStory(existingStory.id, updatedStory);
+          return updatedStory;
+        }
+        
+        // Handle any story with ready_up status (catch-all for manual campaigns)
+        if (existingStory.status === 'ready_up') {
+          console.log('Converting ready_up story to active manual campaign');
+          const updatedStory = {
+            ...existingStory,
+            type: 'manual',
+            status: 'active'
+          };
+          await updateCampaignStory(existingStory.id, updatedStory);
+          return updatedStory;
+        }
+        
         return existingStory;
       } else {
-        // Create new manual campaign story
-        const newStory = {
-          partyId,
-          type: 'manual',
-          currentScene: '',
-          storyHistory: [],
-          status: 'active',
-          playerViewMode: 'hidden', // Initialize with hidden view so players see loading screen
-          createdAt: new Date()
-        };
-        
-        // Create the document in Firestore
-        const docRef = await addDoc(collection(db, 'campaignStories'), newStory);
-        return { id: docRef.id, ...newStory };
+        // Create new manual campaign story using dedicated function
+        return await createManualCampaignStory(partyId);
       }
     } catch (error) {
       console.error('Error loading campaign data:', error);
@@ -286,7 +311,8 @@ export class ManualCampaignService {
       // Get the campaign story to update
       const campaignStory = await getCampaignStory(partyId);
       if (!campaignStory) {
-        throw new Error('Campaign story not found');
+        console.error('Campaign story not found for party:', partyId);
+        throw new Error('Campaign story not found. Please try refreshing the page.');
       }
 
       // Update the campaign story with the new map data
@@ -364,43 +390,7 @@ export class ManualCampaignService {
     return { ...subMaps, [tileKey]: subMap };
   }
 
-  // Combat Management
-  async startCombat(partyId, partyCharacters, enemyDetails, currentScene) {
-    if (!enemyDetails.trim()) {
-      throw new Error('Please enter enemy details before starting combat');
-    }
 
-    try {
-      // Parse enemy details (simple format: "Enemy Name, HP, AC, Level")
-      const enemyLines = enemyDetails.split('\n').filter(line => line.trim());
-      const enemies = enemyLines.map((line, index) => {
-        const [name, hp, ac, level] = line.split(',').map(s => s.trim());
-        return {
-          id: `enemy_${index}`,
-          name: name || `Enemy ${index + 1}`,
-          hp: parseInt(hp) || 20,
-          maxHp: parseInt(hp) || 20,
-          ac: parseInt(ac) || 12,
-          level: parseInt(level) || 1,
-          class: 'enemy',
-          race: 'unknown'
-        };
-      });
-
-      // Create combat session using the combat service
-      const session = await combatService.createCombatSession(
-        partyId,
-        partyCharacters,
-        enemies,
-        currentScene || 'Manual combat encounter'
-      );
-
-      return session;
-    } catch (error) {
-      console.error('Error starting combat:', error);
-      throw error;
-    }
-  }
 
   // Utility Methods
   getTileTypes() {
@@ -414,37 +404,7 @@ export class ManualCampaignService {
     };
   }
 
-  // Ready-up functionality (optional, as requested)
-  async setPlayerReady(partyId, userId) {
-    try {
-      const story = await getCampaignStory(partyId);
-      const readyPlayers = story?.readyPlayers || [];
-      
-      if (!readyPlayers.includes(userId)) {
-        const updatedStory = {
-          ...story,
-          readyPlayers: [...readyPlayers, userId]
-        };
-        await updateCampaignStory(partyId, updatedStory);
-      }
-      
-      return true;
-    } catch (error) {
-      console.error('Error setting player ready:', error);
-      throw error;
-    }
-  }
 
-  async checkAllPlayersReady(partyId, totalPlayers) {
-    try {
-      const story = await getCampaignStory(partyId);
-      const readyPlayers = story?.readyPlayers || [];
-      return readyPlayers.length === totalPlayers;
-    } catch (error) {
-      console.error('Error checking player readiness:', error);
-      return false;
-    }
-  }
 
   // Party Management
   async getPartyData(partyId) {

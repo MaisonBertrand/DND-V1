@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { combatService } from '../services/combat';
 
-const version = import.meta.env.VITE_APP_VERSION || '3.2.1';
+const version = import.meta.env.VITE_APP_VERSION || '3.2.3';
 
 export default function VersionDisplay() {
   const [showCacheHelp, setShowCacheHelp] = useState(false);
@@ -15,6 +15,33 @@ export default function VersionDisplay() {
     
     // Force page reload
     window.location.reload();
+  };
+
+  const handleRefreshUI = () => {
+    // Clear all possible caches
+    if ('caches' in window) {
+      caches.keys().then(names => {
+        names.forEach(name => {
+          caches.delete(name);
+        });
+      });
+    }
+    
+    // Clear localStorage and sessionStorage
+    localStorage.clear();
+    sessionStorage.clear();
+    
+    // Clear any service worker caches
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations().then(registrations => {
+        registrations.forEach(registration => {
+          registration.unregister();
+        });
+      });
+    }
+    
+    // Force reload with cache bypass
+    window.location.reload(true);
   };
 
   return (
@@ -34,13 +61,26 @@ export default function VersionDisplay() {
         <div className="mt-2 p-2 bg-gray-800 rounded text-left max-w-md mx-auto">
           <p className="mb-2 text-yellow-300 font-semibold">Need Help?</p>
           
+          {/* Refresh UI Button */}
+          <div className="mb-3">
+            <button
+              onClick={handleRefreshUI}
+              className="w-full px-3 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded transition-colors mb-2"
+              title="Clear cache and refresh the website"
+            >
+              🔄 Refresh UI
+            </button>
+            <p className="text-xs text-gray-300 mb-2">
+              Clears all cached data and refreshes the website
+            </p>
+          </div>
+          
           {/* Combat Session Help */}
           <div className="mb-3">
             <p className="mb-2 text-xs font-semibold text-amber-300">Combat Session Issues:</p>
             <div className="space-y-2 text-xs">
               <button
                 onClick={async () => {
-                  console.log('🔄 Force refreshing combat session...');
                   // This will be handled by the parent component
                   window.dispatchEvent(new CustomEvent('refreshCombatSession'));
                 }}
@@ -51,7 +91,6 @@ export default function VersionDisplay() {
               </button>
               <button
                 onClick={async () => {
-                  console.log('🧹 Force cleaning up all combat sessions...');
                   // This will be handled by the parent component
                   window.dispatchEvent(new CustomEvent('cleanupCombatSessions'));
                 }}

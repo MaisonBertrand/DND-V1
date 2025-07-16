@@ -1,9 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { onAuthChange } from '../firebase/auth';
-import { getPartyCharacters } from '../firebase/database';
+import { getPartyCharacters, updateCharacter } from '../firebase/database';
 import { manualCampaignService } from '../services/manualCampaign';
 import { dmToolsService } from '../services/dmTools';
+import { levelUpService } from '../services/levelUpService';
+import { manualCombatService } from '../services/manualCombat';
+import PlayerCharacterSheet from '../components/PlayerCharacterSheet';
+import SpellSelectionModal from '../components/SpellSelectionModal';
+import LevelUpNotification from '../components/LevelUpNotification';
+import DMCombatView from '../components/dm/DMCombatView';
+import PlayerCombatDisplay from '../components/combat/PlayerCombatDisplay';
 
 export default function ManualCampaign() {
   const { partyId } = useParams();
@@ -25,9 +32,17 @@ export default function ManualCampaign() {
   const [currentSubMap, setCurrentSubMap] = useState(null);
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
-  const [playerViewMode, setPlayerViewMode] = useState('map');
+  const [playerViewMode, setPlayerViewMode] = useState('hidden');
   const [isDM, setIsDM] = useState(false);
   const [isInitialLoading, setIsInitialLoading] = useState(true);
+  const [showCharacterSheet, setShowCharacterSheet] = useState(false);
+  const [selectedCharacter, setSelectedCharacter] = useState(null);
+  const [showSpellSelection, setShowSpellSelection] = useState(false);
+  const [spellSelectionCharacter, setSpellSelectionCharacter] = useState(null);
+  const [showLevelUpNotification, setShowLevelUpNotification] = useState(false);
+  const [levelUpCharacter, setLevelUpCharacter] = useState(null);
+  const [showCombatView, setShowCombatView] = useState(false);
+  const [combatData, setCombatData] = useState(null);
 
   useEffect(() => {
     const unsubscribe = onAuthChange((user) => {
@@ -51,9 +66,7 @@ export default function ManualCampaign() {
   useEffect(() => {
     if (!user || !partyId || isDM) return;
 
-    console.log('Setting up player view listener for party:', partyId);
     const unsubscribe = dmToolsService.listenToPlayerView(partyId, (viewMode) => {
-      console.log('Player view updated to:', viewMode);
       setPlayerViewMode(viewMode);
       // Exit initial loading when any view mode is set (including 'map')
       setIsInitialLoading(false);
@@ -64,24 +77,85 @@ export default function ManualCampaign() {
     };
   }, [user, partyId, isDM]);
 
-  // Real-time listener for map updates (for all users)
+  // Real-time listener for map updates and scene changes (for all users)
   useEffect(() => {
     if (!user || !partyId) return;
 
-    console.log('Setting up map listener for party:', partyId);
     const unsubscribe = dmToolsService.listenToCampaignStory(partyId, (story) => {
-      if (story && story.campaignMap) {
-        console.log('Map updated:', story.campaignMap);
-        // Convert Firestore format back to 2D array format
-        const convertedMap = manualCampaignService.convertMapFromFirestore(story.campaignMap);
-        if (convertedMap) {
-          setMapTitle(convertedMap.title);
-          setCampaignMap(convertedMap.content);
-          setSubMaps(convertedMap.subMaps);
-          setMapSize(convertedMap.size);
+      if (story) {
+        // Update story state
+        setStory(story);
+        
+        // Handle map updates
+        if (story.campaignMap) {
+          // Convert Firestore format back to 2D array format
+          const convertedMap = manualCampaignService.convertMapFromFirestore(story.campaignMap);
+          if (convertedMap) {
+            setMapTitle(convertedMap.title);
+            setCampaignMap(convertedMap.content);
+            setSubMaps(convertedMap.subMaps);
+            setMapSize(convertedMap.size);
+          }
         }
       }
     });
+
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
+  }, [user, partyId]);
+
+  // Real-time listener for character updates (for level-up detection)
+  useEffect(() => {
+    if (!user || !partyId || isDM) return;
+
+    const unsubscribe = dmToolsService.listenToPartyCharacters(partyId, (characters) => {
+      if (characters) {
+        setPartyCharacters(characters);
+        
+        // Check for level-ups for the current user's character
+        const myCharacter = characters.find(char => char.userId === user.uid);
+        if (myCharacter && levelUpService.shouldLevelUp(myCharacter)) {
+          setLevelUpCharacter(myCharacter);
+          setShowLevelUpNotification(true);
+        }
+      }
+    });
+
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
+  }, [user, partyId, isDM]);
+
+  // Real-time listener for combat updates
+  useEffect(() => {
+    if (!user || !partyId) return;
+
+    let unsubscribe = null;
+    
+    const setupCombatListener = async () => {
+      try {
+        unsubscribe = await manualCombatService.listenToCombatState(partyId, (combatState) => {
+          if (combatState) {
+            if (combatState.active) {
+              setCombatData(combatState);
+            } else if (combatState.setup) {
+              // Show combat setup data
+              setCombatData({
+                ...combatState,
+                active: false,
+                setup: true,
+                initiativeOrder: combatState.setup.combatants || []
+              });
+            }
+          }
+        });
+      } catch (error) {
+        console.error('Error setting up combat listener:', error);
+      }
+    };
+
+    setupCombatListener();
 
     return () => {
       if (unsubscribe) unsubscribe();
@@ -279,6 +353,15 @@ export default function ManualCampaign() {
       const characters = await getPartyCharacters(partyId);
       setPartyCharacters(characters);
       
+      // Check for level-ups for the current user's character
+      if (!isDM && user) {
+        const myCharacter = characters.find(char => char.userId === user.uid);
+        if (myCharacter && levelUpService.shouldLevelUp(myCharacter)) {
+          setLevelUpCharacter(myCharacter);
+          setShowLevelUpNotification(true);
+        }
+      }
+      
       // Load or create campaign story using service
       const campaignStory = await manualCampaignService.loadCampaignData(partyId);
       setStory(campaignStory);
@@ -305,7 +388,61 @@ export default function ManualCampaign() {
     }
   };
 
+  // Calculate available spell slots based on character level and class
+  const calculateSpellSlots = (character) => {
+    if (!character || !character.class) {
+      return {};
+    }
+    
+    const spellcastingClasses = ['Wizard', 'Sorcerer', 'Warlock', 'Cleric', 'Druid', 'Bard', 'Paladin', 'Ranger'];
+    const isSpellcaster = spellcastingClasses.includes(character.class);
+    
+    if (!isSpellcaster) return {};
+    
+    const level = character.level || 1;
+    const slots = {};
+    
+    // Basic spell slot calculation (simplified)
+    if (level >= 1) slots[1] = 2; // 2 level 1 spells
+    if (level >= 2) slots[2] = 1; // 1 level 2 spell
+    if (level >= 3) slots[3] = 1; // 1 level 3 spell
+    if (level >= 4) slots[4] = 1; // 1 level 4 spell
+    if (level >= 5) slots[5] = 1; // 1 level 5 spell
+    if (level >= 6) slots[6] = 1; // 1 level 6 spell
+    if (level >= 7) slots[7] = 1; // 1 level 7 spell
+    if (level >= 8) slots[8] = 1; // 1 level 8 spell
+    if (level >= 9) slots[9] = 1; // 1 level 9 spell
+    
+    // Cantrips (always available)
+    slots[0] = 3; // 3 cantrips
+    
+    return slots;
+  };
 
+  const handleLearnSpells = (character) => {
+    if (!character) {
+      console.warn('Attempted to open spell selection with null character');
+      return;
+    }
+    setSpellSelectionCharacter(character);
+    setShowSpellSelection(true);
+  };
+
+  const handleLevelUpComplete = async (updatedCharacter) => {
+    try {
+      // Update character in database
+      await updateCharacter(updatedCharacter.id, updatedCharacter);
+      
+      // Reload campaign data to reflect changes
+      await loadCampaignData();
+      
+      // Close notification
+      setShowLevelUpNotification(false);
+      setLevelUpCharacter(null);
+    } catch (error) {
+      console.error('Error completing level up:', error);
+    }
+  };
 
   if (loading) {
     return (
@@ -360,43 +497,132 @@ export default function ManualCampaign() {
         {/* Player View Content - Based on DM's choice */}
         {!isDM && (
           <div className="fantasy-card mb-8">
-            {playerViewMode === 'map' && (
-              <>
-                <h2 className="text-xl font-bold text-slate-100 mb-4">🗺️ Campaign Map</h2>
-                {campaignMap && campaignMap.length > 0 ? (
-                  <div className="bg-slate-800/50 border border-slate-600/50 rounded-lg p-4 overflow-x-auto">
-                    <div className="inline-block">
-                      {campaignMap.map((row, y) => (
-                        <div key={y} className="flex">
-                          {row.map((tile, x) => (
-                            <div
-                              key={`${x}-${y}`}
-                              className={`w-8 h-8 border border-slate-600 flex items-center justify-center text-xs ${tileTypes[tile]?.color || 'bg-slate-700'}`}
-                              title={`${x}, ${y}: ${tileTypes[tile]?.name || 'Unknown'}`}
-                            >
-                              {tileTypes[tile]?.symbol || '⬜'}
-                            </div>
-                          ))}
-                        </div>
-                      ))}
+            {/* My Character Button - Always visible for players */}
+            {(() => {
+              const myCharacter = partyCharacters.find(char => char.userId === user?.uid);
+              if (myCharacter) {
+                return (
+                  <div className="mb-6 p-4 bg-gradient-to-r from-blue-600/20 to-purple-600/20 border border-blue-500/30 rounded-lg">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h3 className="text-lg font-semibold text-slate-100 mb-1">My Character</h3>
+                        <p className="text-sm text-slate-300">
+                          {myCharacter.name} • Level {myCharacter.level} • {myCharacter.class}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => {
+                          setSelectedCharacter(myCharacter);
+                          setShowCharacterSheet(true);
+                        }}
+                        className="bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-white font-semibold py-2 px-4 rounded-lg transition-all duration-300 flex items-center gap-2"
+                      >
+                        <span>👤</span>
+                        View Character Sheet
+                      </button>
                     </div>
                   </div>
-                ) : (
-                  <div className="text-center py-8">
-                    <p className="text-slate-400 mb-4">No map available yet.</p>
-                  </div>
-                )}
-              </>
-            )}
+                );
+              }
+              return null;
+            })()}
 
             {playerViewMode === 'scene' && (
               <>
                 <h2 className="text-xl font-bold text-slate-100 mb-4">🎭 Current Scene</h2>
                 <div className="bg-slate-800/50 border border-slate-600/50 rounded-lg p-6">
-                  <h3 className="text-lg font-semibold text-slate-200 mb-3">{story?.currentSceneTitle || 'Scene Title'}</h3>
-                  <p className="text-slate-300 leading-relaxed">
-                    {story?.currentSceneDescription || 'The DM is setting up the scene...'}
-                  </p>
+                  {(() => {
+                    if (story && story.currentScene) {
+                      const currentScene = story.currentScene;
+                      return (
+                        <>
+                          <div className="mb-4">
+                            <h3 className="text-lg font-semibold text-slate-200 mb-2">{currentScene.title}</h3>
+                            <p className="text-slate-300 leading-relaxed">{currentScene.description}</p>
+                          </div>
+                          
+                          {/* Display objectives if any */}
+                          {currentScene.objectives && currentScene.objectives.length > 0 && (
+                            <div className="mb-4">
+                              <h4 className="text-md font-semibold text-slate-200 mb-2">🎯 Objectives</h4>
+                              <ul className="space-y-1">
+                                {currentScene.objectives.map((objective, index) => (
+                                  <li key={objective.id || index} className="flex items-center gap-2 text-sm">
+                                    <span className={`w-2 h-2 rounded-full ${objective.completed ? 'bg-green-500' : 'bg-amber-500'}`}></span>
+                                    <span className={`${objective.completed ? 'text-slate-400 line-through' : 'text-slate-300'}`}>
+                                      {objective.text}
+                                    </span>
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                          
+                          {/* Display problems if any */}
+                          {currentScene.problems && currentScene.problems.length > 0 && (
+                            <div className="mt-4">
+                              <h4 className="text-md font-semibold text-slate-200 mb-2">⚠️ Problems</h4>
+                              <ul className="space-y-1">
+                                {currentScene.problems.map((problem, index) => (
+                                  <li key={problem.id || index} className="flex items-center gap-2 text-sm">
+                                    <span className={`w-2 h-2 rounded-full ${problem.solved ? 'bg-green-500' : 'bg-red-500'}`}></span>
+                                    <span className={`${problem.solved ? 'text-slate-400 line-through' : 'text-slate-300'}`}>
+                                      {problem.text}
+                                    </span>
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                        </>
+                      );
+                    } else {
+                      return (
+                        <div className="text-center py-8">
+                          <div className="text-4xl mb-4">🎭</div>
+                          <h3 className="text-lg font-semibold text-slate-200 mb-2">No Active Scene</h3>
+                          <p className="text-slate-400">
+                            The Dungeon Master hasn't set up a scene yet.
+                          </p>
+                        </div>
+                      );
+                    }
+                  })()}
+                </div>
+              </>
+            )}
+
+            {playerViewMode === 'map' && (
+              <>
+                <h2 className="text-xl font-bold text-slate-100 mb-4">🗺️ Campaign Map</h2>
+                <div className="bg-slate-800/50 border border-slate-600/50 rounded-lg p-6">
+                  {campaignMap && campaignMap.length > 0 ? (
+                    <div className="overflow-x-auto">
+                      <div className="inline-block">
+                        {campaignMap.map((row, y) => (
+                          <div key={y} className="flex">
+                            {row.map((tile, x) => (
+                              <div
+                                key={`${x}-${y}`}
+                                className={`w-8 h-8 border border-slate-600 flex items-center justify-center text-xs ${tileTypes[tile]?.color || 'bg-slate-700'}`}
+                                title={`${x}, ${y}: ${tileTypes[tile]?.name || 'Unknown'}`}
+                              >
+                                {tileTypes[tile]?.symbol || '⬜'}
+                              </div>
+                            ))}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-center py-8">
+                      <div className="text-4xl mb-4">🗺️</div>
+                      <h3 className="text-lg font-semibold text-slate-200 mb-2">No Map Available</h3>
+                      <p className="text-slate-400">
+                        The Dungeon Master hasn't created a map yet.
+                      </p>
+                    </div>
+                  )}
                 </div>
               </>
             )}
@@ -405,9 +631,25 @@ export default function ManualCampaign() {
               <>
                 <h2 className="text-xl font-bold text-slate-100 mb-4">⚔️ Combat View</h2>
                 <div className="bg-slate-800/50 border border-slate-600/50 rounded-lg p-6">
-                  <p className="text-slate-300 text-center">
-                    Combat is being prepared by the Dungeon Master...
-                  </p>
+                  {combatData ? (
+                    <PlayerCombatDisplay 
+                      combatData={combatData} 
+                      currentUserId={user?.uid}
+                      partyId={partyId}
+                    />
+                  ) : (
+                    <div className="text-center">
+                      <div className="text-4xl mb-4">⚔️</div>
+                      <h3 className="text-lg font-semibold text-slate-200 mb-2">Combat in Progress</h3>
+                      <p className="text-slate-300 mb-4">
+                        The Dungeon Master is managing the combat. You'll see your turn when it comes up.
+                      </p>
+                      <div className="flex items-center justify-center space-x-2">
+                        <div className="animate-pulse w-2 h-2 bg-red-500 rounded-full"></div>
+                        <span className="text-slate-400 text-sm">Waiting for your turn...</span>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </>
             )}
@@ -457,22 +699,38 @@ export default function ManualCampaign() {
                     ))}
                   </div>
                 </div>
-                <button
-                  onClick={() => setShowMapEditor(true)}
-                  className="mt-4 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white font-semibold py-2 px-4 rounded-lg transition-all duration-300"
-                >
-                  Edit Map
-                </button>
+                <div className="flex gap-4 mt-4">
+                  <button
+                    onClick={() => setShowMapEditor(true)}
+                    className="bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white font-semibold py-2 px-4 rounded-lg transition-all duration-300"
+                  >
+                    Edit Map
+                  </button>
+                  <button
+                    onClick={() => setShowCombatView(true)}
+                    className="bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white font-semibold py-2 px-4 rounded-lg transition-all duration-300"
+                  >
+                    ⚔️ Combat Setup
+                  </button>
+                </div>
               </>
             ) : (
               <div className="text-center py-8">
                 <p className="text-slate-400 mb-4">No map created yet.</p>
-                <button
-                  onClick={() => setShowMapEditor(true)}
-                  className="bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white font-semibold py-3 px-6 rounded-lg transition-all duration-300"
-                >
-                  Create Map
-                </button>
+                <div className="flex gap-4 justify-center">
+                  <button
+                    onClick={() => setShowMapEditor(true)}
+                    className="bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white font-semibold py-3 px-6 rounded-lg transition-all duration-300"
+                  >
+                    Create Map
+                  </button>
+                  <button
+                    onClick={() => setShowCombatView(true)}
+                    className="bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white font-semibold py-3 px-6 rounded-lg transition-all duration-300"
+                  >
+                    ⚔️ Combat Setup
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -482,24 +740,47 @@ export default function ManualCampaign() {
         <div className="fantasy-card">
           <h2 className="text-xl font-bold text-slate-100 mb-4">Party Members</h2>
           <div className="space-y-3">
-            {partyCharacters.map((character) => (
-              <div key={character.id} className="bg-slate-700/50 rounded-lg p-3">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className="font-semibold text-slate-100">{character.name}</h3>
-                    <p className="text-sm text-slate-400">{character.class} • Level {character.level}</p>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-sm text-slate-300">
-                      HP: {character.hp}/{character.maxHp}
+            {partyCharacters
+              .filter(character => character.userId !== user?.uid) // Filter out current user's character
+              .map((character) => (
+                <div key={character.id} className="bg-slate-700/50 rounded-lg p-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div>
+                        <h3 className="font-semibold text-slate-100">{character.name}</h3>
+                        <p className="text-sm text-slate-400">{character.class} • Level {character.level}</p>
+                      </div>
                     </div>
-                    <div className="text-xs text-slate-400">
-                      AC: {character.ac}
+                    <div className="flex items-center gap-3">
+                      <div className="text-right">
+                        <div className="text-sm text-slate-300">
+                          HP: {character.hp}/{character.maxHp}
+                        </div>
+                        <div className="text-xs text-slate-400">
+                          AC: {character.ac}
+                        </div>
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => {
+                            setSelectedCharacter(character);
+                            setShowCharacterSheet(true);
+                          }}
+                          className="bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white text-xs font-medium px-3 py-1 rounded-lg transition-all duration-300"
+                        >
+                          View
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>
+              ))}
+            {partyCharacters.filter(character => character.userId !== user?.uid).length === 0 && (
+              <div className="text-center py-8">
+                <p className="text-slate-400 mb-2">No other party members yet.</p>
+                <p className="text-slate-500 text-sm">Other players will appear here when they join the campaign.</p>
               </div>
-            ))}
+            )}
           </div>
         </div>
 
@@ -674,6 +955,16 @@ export default function ManualCampaign() {
           </div>
         )}
 
+        {/* Character Sheet Modal */}
+        <PlayerCharacterSheet
+          character={selectedCharacter}
+          isOpen={showCharacterSheet}
+          onClose={() => {
+            setShowCharacterSheet(false);
+            setSelectedCharacter(null);
+          }}
+        />
+
         {/* Sub-Map Editor Modal */}
         {showSubMapEditor && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -787,6 +1078,61 @@ export default function ManualCampaign() {
                   </div>
                 </div>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* Spell Selection Modal */}
+        {spellSelectionCharacter && (
+          <SpellSelectionModal
+            character={spellSelectionCharacter}
+            isOpen={showSpellSelection}
+            onClose={() => {
+              setShowSpellSelection(false);
+              setSpellSelectionCharacter(null);
+            }}
+            onUpdate={() => {
+              loadCampaignData();
+            }}
+            availableSpellSlots={calculateSpellSlots(spellSelectionCharacter)}
+          />
+        )}
+
+        {/* Level Up Notification */}
+        <LevelUpNotification
+          character={levelUpCharacter}
+          isVisible={showLevelUpNotification}
+          onClose={() => {
+            setShowLevelUpNotification(false);
+            setLevelUpCharacter(null);
+          }}
+          onLevelUpComplete={handleLevelUpComplete}
+        />
+
+        {/* Combat View Modal */}
+        {showCombatView && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <div className="fantasy-card max-w-7xl w-full max-h-[95vh] overflow-y-auto">
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-2xl font-bold text-slate-100">⚔️ Combat Management</h2>
+                <button
+                  onClick={() => setShowCombatView(false)}
+                  className="text-slate-400 hover:text-slate-200 text-2xl"
+                >
+                  ×
+                </button>
+              </div>
+              
+              <DMCombatView
+                partyId={partyId}
+                partyCharacters={partyCharacters}
+                onCombatStart={(data) => {
+                  setCombatData(data);
+                  // Set player view to combat mode
+                  dmToolsService.setPlayerView(partyId, 'combat');
+                  setShowCombatView(false);
+                }}
+              />
             </div>
           </div>
         )}

@@ -7,159 +7,142 @@ import {
 } from 'firebase/auth';
 import { auth } from './config';
 import { createUserProfile, checkUsernameAvailability } from './database';
-import { useState, useEffect } from 'react';
 
-// Custom hook for authentication state
-export const useAuth = () => {
-  const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setUser(user);
-      setLoading(false);
-    });
-
-    return unsubscribe;
-  }, []);
-
-  return { user, loading };
+// Legacy auth functions (keeping for backward compatibility)
+export const onAuthChange = (callback) => {
+  return onAuthStateChanged(auth, callback);
 };
 
 export const registerUser = async (email, password, username) => {
   try {
-    console.log('Starting registration for:', email, username);
-    
     // Check if username is available
-    const isUsernameAvailable = await checkUsernameAvailability(username);
-    if (!isUsernameAvailable) {
-      console.log('Username not available:', username);
-      return { 
-        user: null, 
-        error: 'Username is already taken. Please choose a different username.' 
-      };
+    const isAvailable = await checkUsernameAvailability(username);
+    if (!isAvailable) {
+      return { error: 'Username is already taken' };
     }
-    console.log('Username available:', username);
 
+    // Create user account
     const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-    console.log('User created successfully:', userCredential.user.uid);
-    
-    // Create user profile with username
-    try {
-      await createUserProfile(userCredential.user.uid, {
-        username,
-        email,
-        displayName: username
-      });
-      console.log('User profile created successfully');
-    } catch (profileError) {
-      console.error('Error creating user profile:', profileError);
-      // Continue with registration even if profile creation fails
-    }
-    
+    const user = userCredential.user;
+
+    // Create user profile
+    await createUserProfile(user.uid, {
+      username,
+      email,
+      createdAt: new Date().toISOString(),
+      lastLogin: new Date().toISOString(),
+      emailVerified: false
+    });
+
     // Send email verification
-    let emailSent = false;
-    try {
-      await sendEmailVerification(userCredential.user);
-      console.log('Email verification sent successfully');
-      emailSent = true;
-    } catch (emailError) {
-      console.error('Error sending email verification:', emailError);
-      // Continue with registration even if email verification fails
+    await sendEmailVerification(user);
+
+    return { user, success: true };
+  } catch (error) {
+    let errorMessage = 'Registration failed';
+    
+    if (error.code === 'auth/email-already-in-use') {
+      errorMessage = 'An account with this email already exists';
+    } else if (error.code === 'auth/weak-password') {
+      errorMessage = 'Password should be at least 6 characters long';
+    } else if (error.code === 'auth/invalid-email') {
+      errorMessage = 'Please enter a valid email address';
+    } else if (error.code === 'auth/operation-not-allowed') {
+      errorMessage = 'Email/password accounts are not enabled. Please contact support.';
     }
     
-    await signOut(auth);
-    console.log('User signed out after registration');
-    
-    return { 
-      user: null, 
-      error: null,
-      success: true
-    };
-  } catch (error) {
-    console.error('Registration error:', error);
-    return { user: null, error: error.message };
+    return { error: errorMessage };
   }
 };
 
 export const loginUser = async (email, password) => {
   try {
     const userCredential = await signInWithEmailAndPassword(auth, email, password);
+    const user = userCredential.user;
     
-    // For testing: allow login without email verification
-    // TODO: Re-enable email verification check in production
-    /*
-    if (!userCredential.user.emailVerified) {
+    // Check if email is verified
+    if (!user.emailVerified) {
+      // Sign out the user since they're not verified
       await signOut(auth);
       return { 
-        user: null, 
-        error: 'Please verify your email before logging in. Check your inbox for the verification link.' 
+        error: 'Please verify your email address before logging in. Check your inbox for a verification email.',
+        needsVerification: true 
       };
     }
-    */
     
-    return { user: userCredential.user, error: null };
+    return { user };
   } catch (error) {
-    return { user: null, error: error.message };
+    let errorMessage = 'Login failed';
+    
+    if (error.code === 'auth/invalid-credential') {
+      errorMessage = 'Invalid email or password';
+    } else if (error.code === 'auth/user-not-found') {
+      errorMessage = 'No account found with this email';
+    } else if (error.code === 'auth/wrong-password') {
+      errorMessage = 'Incorrect password';
+    } else if (error.code === 'auth/user-disabled') {
+      errorMessage = 'This account has been disabled';
+    } else if (error.code === 'auth/too-many-requests') {
+      errorMessage = 'Too many failed login attempts. Please try again later';
+    } else if (error.code === 'auth/email-not-verified') {
+      errorMessage = 'Please verify your email address before logging in';
+    }
+    
+    return { error: errorMessage };
   }
 };
 
 export const logoutUser = async () => {
   try {
     await signOut(auth);
-    return { error: null };
+    return { success: true };
   } catch (error) {
     return { error: error.message };
   }
 };
 
-export const onAuthChange = (callback) => {
-  return onAuthStateChanged(auth, async (user) => {
-    // For testing: allow unverified users to stay logged in
-    // TODO: Re-enable email verification check in production
-    /*
-    if (user && !user.emailVerified) {
-      await signOut(auth);
-      callback(null);
-    } else {
-      callback(user);
+export const resendVerificationEmail = async () => {
+  try {
+    const user = auth.currentUser;
+    if (!user) {
+      return { error: 'No user is currently signed in' };
     }
-    */
-    callback(user);
-  });
+    
+    if (user.emailVerified) {
+      return { error: 'Email is already verified' };
+    }
+    
+    await sendEmailVerification(user);
+    return { success: true, message: 'Verification email sent successfully' };
+  } catch (error) {
+    return { error: error.message };
+  }
 };
 
 export const testFirebaseConnection = async () => {
   try {
-    console.log('Testing Firebase connection...');
-    console.log('Auth domain:', auth.config.authDomain);
-    console.log('Project ID:', auth.config.projectId);
-    return { success: true, message: 'Firebase connection successful' };
+    // Simple test to check if Firebase is properly configured
+    await auth.app.options;
+    return { success: true };
   } catch (error) {
     console.error('Firebase connection test failed:', error);
-    return { success: false, error: error.message };
+    return { error: error.message };
   }
 };
 
 export const testEmailVerification = async (email, password) => {
   try {
-    console.log('Testing email verification for:', email);
-    
     // Create a test user
     const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-    console.log('Test user created:', userCredential.user.uid);
     
     // Try to send verification email
     await sendEmailVerification(userCredential.user);
-    console.log('Email verification sent for test user');
     
     // Delete the test user
     await userCredential.user.delete();
-    console.log('Test user deleted');
     
     return { success: true, message: 'Email verification test successful' };
   } catch (error) {
-    console.error('Email verification test failed:', error);
     return { success: false, error: error.message };
   }
 }; 

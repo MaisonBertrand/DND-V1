@@ -1,7 +1,7 @@
 {
   "name": "DND-V1",
   "private": true,
-  "version": "3.2.1",
+  "version": "3.2.3",
   "homepage": "https://maisonbertrand.github.io/DND-V1",
   "type": "module",
   "scripts": {
@@ -15,6 +15,7 @@
   "dependencies": {
     "@heroicons/react": "^2.0.18",
     "firebase": "^10.1.0",
+    "firebase-tools": "^14.10.1",
     "openai": "^4.20.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
@@ -34,4 +35,4 @@
     "tailwindcss": "^3.3.3",
     "vite": "^4.4.5"
   }
-} 
+}

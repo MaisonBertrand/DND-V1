@@ -13,6 +13,14 @@
     padding-bottom: env(safe-area-inset-bottom);
     padding-left: env(safe-area-inset-left);
     padding-right: env(safe-area-inset-right);
+    /* Ensure proper stacking context */
+    position: relative;
+    z-index: 0;
+  }
+  
+  /* Ensure all elements are visible by default */
+  * {
+    visibility: visible !important;
   }
   
   /* Improve touch targets on mobile */
@@ -24,16 +32,42 @@
   input, select, textarea {
     font-size: 16px;
   }
+  
+  /* Ensure modals and overlays are always visible */
+  .modal-overlay, [class*="fixed inset-0"] {
+    visibility: visible !important;
+    opacity: 1 !important;
+    z-index: 9999 !important;
+  }
+  
+  /* Ensure all interactive elements are visible */
+  button, a, input, select, textarea, [role="button"] {
+    visibility: visible !important;
+    opacity: 1 !important;
+  }
+  
+  /* Fix for any hidden elements that should be visible */
+  .visible, [class*="visible"] {
+    visibility: visible !important;
+    opacity: 1 !important;
+    display: block !important;
+  }
 }
 
 @layer components {
   .fantasy-container {
     @apply max-w-7xl mx-auto px-3 sm:px-4 md:px-6 lg:px-8 py-4 sm:py-6 lg:py-8;
+    /* Ensure container is visible */
+    visibility: visible !important;
+    opacity: 1 !important;
   }
   
   .fantasy-card {
     @apply bg-gray-800 border border-gray-700 rounded-lg shadow-lg p-4 sm:p-6;
     background-image: url("data:image/svg+xml,%3Csvg width='100' height='100' viewBox='0 0 100 100' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%234a5568' fill-opacity='0.05'%3E%3Cpath d='M11 18c3.866 0 7-3.134 7-7s-3.134-7-7-7-7 3.134-7 7 3.134 7 7 7zm48 25c3.866 0 7-3.134 7-7s-3.134-7-7-7-7 3.134-7 7 3.134 7 7 7zm-43-7c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zm63 31c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zM34 90c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zm56-76c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zM12 86c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm28-65c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm23-11c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm-6 60c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm29 22c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zM32 63c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm57-13c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm-9-21c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2zM60 91c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2zM35 41c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2zM12 60c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+    /* Ensure card is visible */
+    visibility: visible !important;
+    opacity: 1 !important;
   }
   
   .fantasy-button {
@@ -43,21 +77,34 @@
     min-width: 44px;
     /* Improve touch feedback */
     -webkit-tap-highlight-color: transparent;
+    /* Ensure button is visible */
+    visibility: visible !important;
+    opacity: 1 !important;
+    display: inline-block !important;
   }
   
   .fantasy-input {
     @apply w-full border border-gray-600 rounded-lg px-4 py-2 bg-gray-700 text-gray-100 focus:ring-2 focus:ring-amber-500 focus:border-transparent;
     /* Ensure minimum touch target size */
     min-height: 44px;
+    /* Ensure input is visible */
+    visibility: visible !important;
+    opacity: 1 !important;
   }
   
   .fantasy-title {
     @apply text-2xl sm:text-3xl md:text-4xl font-bold text-gray-100 mb-4;
     font-family: 'Cinzel', serif;
+    /* Ensure title is visible */
+    visibility: visible !important;
+    opacity: 1 !important;
   }
   
   .fantasy-subtitle {
     @apply text-lg sm:text-xl text-gray-300 mb-6 sm:mb-8;
+    /* Ensure subtitle is visible */
+    visibility: visible !important;
+    opacity: 1 !important;
   }
   
   .line-clamp-2 {
@@ -65,6 +112,38 @@
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
+  }
+  
+  /* Enhanced modal visibility */
+  .modal-fixed {
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    z-index: 9999 !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+  }
+  
+  /* Ensure all z-index layers are properly stacked */
+  .z-modal {
+    z-index: 9999 !important;
+  }
+  
+  .z-overlay {
+    z-index: 9998 !important;
+  }
+  
+  .z-dropdown {
+    z-index: 9997 !important;
+  }
+  
+  .z-tooltip {
+    z-index: 9996 !important;
   }
   
   /* Mobile-specific styles */
@@ -83,6 +162,13 @@
     
     .fantasy-input {
       @apply py-3 px-3 text-sm;
+    }
+    
+    /* Ensure mobile elements are visible */
+    .mobile-visible {
+      visibility: visible !important;
+      opacity: 1 !important;
+      display: block !important;
     }
   }
   
@@ -134,5 +220,48 @@
     user-select: none;
     -webkit-touch-callout: none;
     -webkit-tap-highlight-color: transparent;
+  }
+  
+  /* Step navigation improvements */
+  .step-navigation {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  
+  .step-navigation::-webkit-scrollbar {
+    display: none;
+  }
+  
+  /* Ensure responsive visibility */
+  @media (min-width: 640px) {
+    .sm\:visible {
+      visibility: visible !important;
+      opacity: 1 !important;
+      display: block !important;
+    }
+  }
+  
+  @media (min-width: 768px) {
+    .md\:visible {
+      visibility: visible !important;
+      opacity: 1 !important;
+      display: block !important;
+    }
+  }
+  
+  @media (min-width: 1024px) {
+    .lg\:visible {
+      visibility: visible !important;
+      opacity: 1 !important;
+      display: block !important;
+    }
+  }
+  
+  @media (min-width: 1280px) {
+    .xl\:visible {
+      visibility: visible !important;
+      opacity: 1 !important;
+      display: block !important;
+    }
   }
 } 
